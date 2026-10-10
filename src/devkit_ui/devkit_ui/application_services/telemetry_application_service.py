@@ -71,5 +71,9 @@ class TelemetryApplicationService:
         return odom.twist.twist.linear.x, odom.twist.twist.angular.z
 
     def robot_pose(self) -> tuple[float, float, float] | None:
-        """Return (x, y, yaw) in the map frame, or None while the pose is unavailable."""
+        """Return (x, y, yaw) in the map frame, in meters, meters, and radians.
+
+        Return None for an unavailable TF lookup or a transform over two node-clock seconds old.
+        Other lookup errors propagate from the telemetry service.
+        """
         return self._telemetry.robot_pose()

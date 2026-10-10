@@ -74,16 +74,14 @@ class TelemetryDomainService:
 
     def __init__(self, ros: RosGateway, is_sim: bool,
                  fake_gps_datum: tuple[float, float], fake_gps_alt: float = 40.0) -> None:
-        """Subscribe to the telemetry topics and, when is_sim is set, start the fake-GPS shim.
+        """Subscribe to telemetry, start TF buffering and, in simulation, start the GPS shim.
 
         Parameters:
             ros: ROS gateway for subscriptions, timers, TF and time.
-            is_sim: Whether the robot is simulated. The authoritative signal is plumbed from
-                manage.py's is_sim through devkit.launch.py -> ui.launch.py, so the shim is
-                never started on hardware.
-            fake_gps_datum: (latitude, longitude) the shim publishes. It matches the leaflet
-                centre / F2C fallback used elsewhere in the UI.
-            fake_gps_alt: Altitude in metres the shim publishes.
+            is_sim: Whether to enable the fallback GPS publisher and its one-second wall-clock
+                timer. Passed from manage.py through devkit.launch.py -> ui.launch.py.
+            fake_gps_datum: (latitude, longitude) in degrees that the shim publishes.
+            fake_gps_alt: Altitude in meters that the shim publishes.
         """
         self._ros = ros
         self._is_sim = is_sim
@@ -223,7 +221,7 @@ class TelemetryDomainService:
         self.latest_odom = msg
 
     def _on_odom_fallback(self, msg: Odometry) -> None:
-        """Use wheel odometry whenever fusion odometry has not yet been trusted.
+        """Cache /odom or /odometry/global until fusion odometry has been accepted.
 
         The original guard (only when nothing had arrived yet) froze the value after the first
         message, giving a stale pose for every subsequent drop/save. We instead update
@@ -262,6 +260,10 @@ class TelemetryDomainService:
 
     def robot_pose(self) -> tuple[float, float, float] | None:
         """Return (x, y, yaw) of the robot in the map frame, or None if unavailable.
+
+        Positions are in meters and yaw is in radians. Return None for TransformUnavailable
+        or a transform over two seconds old on the node clock (simulated time when enabled).
+        Other lookup errors propagate.
 
         This is a real map->base_link TF lookup, not raw /odom: odom's origin is the robot's
         dead-reckoning start point (spawn in sim), not map (0,0), so using it raw plots the

@@ -2456,6 +2456,7 @@ class NiceGuiNode(Node):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk(d=dot, a=attr):
+                        """Return a callback updating HTML element d from telemetry attribute a."""
                         def _u():
                             """Refresh the bumper indicator from its current telemetry flag."""
                             d.set_content(
@@ -2468,6 +2469,7 @@ class NiceGuiNode(Node):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk2(d=dot, a=attr):
+                        """Return a callback updating HTML element d from telemetry attribute a."""
                         def _u():
                             """Refresh the hardware e-stop indicator from its current telemetry flag."""
                             d.set_content(
