@@ -28,6 +28,12 @@ std_msgs = ModuleType('std_msgs.msg')
 std_msgs.Bool = FakeBool
 rclpy_node = ModuleType('rclpy.node')
 rclpy_node.Node = type('Node', (), {})
+rclpy_qos = ModuleType('rclpy.qos')
+rclpy_qos.QoSProfile = SimpleNamespace
+rclpy_qos.ReliabilityPolicy = SimpleNamespace(RELIABLE='reliable')
+rclpy_qos.DurabilityPolicy = SimpleNamespace(TRANSIENT_LOCAL='transient_local')
+rclpy_qos.LivelinessPolicy = SimpleNamespace(AUTOMATIC='automatic')
+rclpy_qos.Duration = lambda seconds: seconds
 
 with patch.dict(sys.modules, {
     'geometry_msgs': ModuleType('geometry_msgs'),
@@ -36,7 +42,9 @@ with patch.dict(sys.modules, {
     'std_msgs.msg': std_msgs,
     'rclpy': ModuleType('rclpy'),
     'rclpy.node': rclpy_node,
+    'rclpy.qos': rclpy_qos,
 }):
+    from devkit_ui import qos
     from devkit_ui.domain_services.drive_domain_service import DriveDomainService
     from devkit_ui.ros_gateway import RosGateway
 
@@ -56,8 +64,17 @@ class TestDriveServices(unittest.TestCase):
     def test_commands_use_separate_topics(self):
         """Verify velocity and soft estop use their own message types and topics."""
         self.assertEqual(self.ros.create_publisher.call_args_list, [
-            call(FakeTwist, 'cmd_vel', 1), call(FakeBool, 'estop/soft', 1),
+            call(FakeTwist, 'cmd_vel', 1), call(FakeBool, 'estop/soft', qos.SAFETY_QOS),
         ])
+
+    def test_soft_estop_is_latched_reliable_and_matches_the_driver_profile(self):
+        """Verify the soft estop keeps the latched safety profile the driver and bumper topics use."""
+        profile = qos.SAFETY_QOS
+        self.assertEqual(
+            (profile.depth, profile.reliability, profile.durability, profile.liveliness),
+            (1, 'reliable', 'transient_local', 'automatic'))
+        self.assertEqual(profile.liveliness_lease_duration, 1)
+        self.assertIs(self.ros.create_publisher.call_args_list[1].args[2], qos.SAFETY_QOS)
 
     def test_joystick_preserves_linear_speed_and_reverses_turn_direction(self):
         """Verify joystick commands preserve forward speed and negate turn input."""
@@ -105,6 +122,18 @@ class TestDriveServices(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'publisher down'):
                     self.global_vm.toggle_estop()
                 self.assertIs(self.global_vm.soft_estop_active, current)
+
+    def test_release_after_disconnect_stops_only_a_held_joystick(self):
+        """Verify a dropped browser zeroes a held joystick but never overrides other cmd_vel sources."""
+        self.run.release_joystick()
+        self.velocity_publisher.publish.assert_not_called()
+
+        self.run.move_joystick(0.5, 0.2)
+        self.run.release_joystick()
+        self.run.release_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages], [(0.5, -0.2), (0.0, 0.0)])
 
     def test_velocity_publish_failure_reaches_caller(self):
         """Verify velocity publishing errors propagate through the view model."""

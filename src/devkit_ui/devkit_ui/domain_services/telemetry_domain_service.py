@@ -3,16 +3,11 @@ from __future__ import annotations
 import math
 
 from nav_msgs.msg import Odometry
-from rclpy.qos import (
-    DurabilityPolicy,
-    Duration,
-    LivelinessPolicy,
-    QoSProfile,
-    ReliabilityPolicy,
-)
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
 from std_msgs.msg import Bool
 
+from devkit_ui.qos import SAFETY_QOS
 from devkit_ui.ros_gateway import RosGateway, TransformUnavailable
 
 _SENSOR_QOS = QoSProfile(
@@ -23,14 +18,6 @@ _SENSOR_QOS = QoSProfile(
 _ODOM_QOS = QoSProfile(
     depth=10,
     reliability=ReliabilityPolicy.RELIABLE,
-)
-
-SAFETY_QOS = QoSProfile(
-    depth=1,
-    reliability=ReliabilityPolicy.RELIABLE,
-    durability=DurabilityPolicy.TRANSIENT_LOCAL,
-    liveliness=LivelinessPolicy.AUTOMATIC,
-    liveliness_lease_duration=Duration(seconds=1),
 )
 
 # s — map->base_link older than this: don't draw it

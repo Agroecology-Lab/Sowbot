@@ -3,6 +3,7 @@ from __future__ import annotations
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool
 
+from devkit_ui.qos import SAFETY_QOS
 from devkit_ui.ros_gateway import RosGateway
 
 
@@ -14,7 +15,7 @@ class DriveDomainService:
         self._ros = ros
 
         self._cmd_vel_pub = ros.create_publisher(Twist, 'cmd_vel', 1)
-        self._estop_pub = ros.create_publisher(Bool, 'estop/soft', 1)
+        self._estop_pub = ros.create_publisher(Bool, 'estop/soft', SAFETY_QOS)
 
     def send_speed(self, x: float, y: float) -> None:
         """Publish a velocity command and update the stored velocity values.

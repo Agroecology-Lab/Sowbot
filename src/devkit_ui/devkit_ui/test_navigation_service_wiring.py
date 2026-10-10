@@ -86,6 +86,10 @@ class TestNavigationServiceWiring(unittest.TestCase):
         self.assertIs(self.namespace['DropNodeCard'].call_args.kwargs['topo_vm'],
                       self.node._topo_vm)
 
+    def test_browser_disconnect_releases_the_joystick(self):
+        """Verify the run page registers the joystick release for a dropped browser connection."""
+        self.assertEqual(fake_ui.context.disconnect_handlers, [self.node._run_vm.release_joystick])
+
     def test_commands_delegate_without_overwriting_measured_velocity(self):
         """Verify drive commands delegate while measured odometry velocities stay unchanged."""
         self.node._telemetry_vm.linear_velocity = 0.2
