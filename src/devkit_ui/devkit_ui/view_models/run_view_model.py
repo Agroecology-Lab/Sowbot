@@ -71,17 +71,29 @@ class RunViewModel:
         self._drive_app_service = drive_app_service
         self._discovery_app_service = discovery_app_service
         self._navigation_app_service = navigation_app_service
+        self._joystick_held = False
 
         if discovery_app_service is not None:
             discovery_app_service.register_status_callback(self._on_discovery_status)
 
     def move_joystick(self, x: float, y: float) -> None:
         """Forward linear x and turn y commands to the drive application service."""
+        self._joystick_held = True
         self._drive_app_service.move_joystick(x, y)
 
     def stop_joystick(self) -> None:
         """Request zero linear and angular speed through the drive service."""
         self.move_joystick(0.0, 0.0)
+        self._joystick_held = False
+
+    def release_joystick(self) -> None:
+        """Stop only if the joystick still holds a command, e.g. the browser dropped before on_end fired.
+
+        Publishing zero unconditionally would override autonomous navigation on cmd_vel whenever any
+        browser tab closes.
+        """
+        if self._joystick_held:
+            self.stop_joystick()
 
     def update_pose_label(self, odom, gps) -> None:
         """Refresh the joystick pose label from latest odometry/GPS."""

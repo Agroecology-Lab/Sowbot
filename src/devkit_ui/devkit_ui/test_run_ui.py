@@ -128,15 +128,25 @@ class FakeTimer:
         self.once = once
 
 
+class FakeContext(list):
+    """Element stack that also exposes the page client, like nicegui's ui.context."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.disconnect_handlers = []
+        self.client = SimpleNamespace(on_disconnect=self.disconnect_handlers.append)
+
+
 class FakeUi:
     def __init__(self) -> None:
-        self.context = []
+        self.context = FakeContext()
         self.elements = []
         self.timers = []
         self.dialog_results = []
 
     def reset(self) -> None:
         self.context.clear()
+        self.context.disconnect_handlers.clear()
         self.elements.clear()
         self.timers.clear()
         self.dialog_results.clear()

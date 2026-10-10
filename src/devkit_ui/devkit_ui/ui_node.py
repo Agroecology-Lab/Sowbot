@@ -1413,6 +1413,10 @@ class NiceGuiNode(Node):
         """Builds the navigation interface and keeps its displayed state synchronized with the robot
         and topology.
         """
+        # A dropped connection never delivers the joystick's on_end, which would leave the last
+        # cmd_vel in force. release_joystick only stops a joystick that still holds a command.
+        ui.context.client.on_disconnect(self._run_vm.release_joystick)
+
         with ui.row().classes('w-full gap-3 items-stretch'):
 
             with ui.column().classes('flex-1 gap-3').style('min-width:0'):
