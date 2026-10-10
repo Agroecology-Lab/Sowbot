@@ -200,19 +200,20 @@ class TestRosGateway(unittest.TestCase):
 
     def test_publisher_forwards_arguments_and_returns_handle(self):
         """Verify publisher creation preserves message type, topic, QoS, and returned handle."""
-        for qos in (1, object()):
-            with self.subTest(qos=qos):
+        for qos_profile in (1, object()):
+            with self.subTest(qos=qos_profile):
                 self.node.reset_mock()
-                result = self.gateway.create_publisher(FakeTwist, 'cmd_vel', qos)
-                self.node.create_publisher.assert_called_once_with(FakeTwist, 'cmd_vel', qos)
+                result = self.gateway.create_publisher(FakeTwist, 'cmd_vel', qos_profile)
+                self.node.create_publisher.assert_called_once_with(FakeTwist, 'cmd_vel', qos_profile)
                 self.assertIs(result, self.node.create_publisher.return_value)
 
     def test_subscription_preserves_callback_and_returns_handle(self):
         """Verify subscription creation forwards its callback and returns the node handle."""
-        callback, qos = Mock(), object()
-        result = self.gateway.create_subscription(FakeBool, 'estop/soft', callback, qos)
+        callback, qos_profile = Mock(), object()
+        result = self.gateway.create_subscription(FakeBool, 'estop/soft', callback, qos_profile)
 
-        self.node.create_subscription.assert_called_once_with(FakeBool, 'estop/soft', callback, qos)
+        self.node.create_subscription.assert_called_once_with(
+            FakeBool, 'estop/soft', callback, qos_profile)
         self.assertIs(result, self.node.create_subscription.return_value)
 
     def test_logger_and_clock_are_returned_unchanged(self):
