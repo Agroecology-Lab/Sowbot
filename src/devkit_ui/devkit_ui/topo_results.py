@@ -1,5 +1,8 @@
 """Plain result types shared by the topology services (no ROS imports)."""
+from collections.abc import Callable
 from dataclasses import dataclass
+
+from devkit_ui.models import TopoDoc, TopoNode
 
 
 @dataclass(frozen=True)
@@ -54,3 +57,47 @@ class NavUpdate:
     status: str
     navigating: bool
     outcome: str | None = None
+
+
+class TopologyEditError(Exception):
+    """A topology edit was rejected or had nothing to do.
+
+    str(error) is the status text to show. warnings are log lines produced before the
+    edit was rejected.
+    """
+
+    def __init__(self, status: str, warnings: tuple[str, ...] = ()) -> None:
+        """Store the status text and any warnings to log."""
+        super().__init__(status)
+        self.warnings = warnings
+
+
+@dataclass(frozen=True)
+class StagedEdit:
+    """A map edit already checked and ready to be persisted in the background.
+
+    pending is the status to show while writing and success the status once saved.
+    modify applies the same edit to the saved copy of the map. warnings and infos are
+    log lines produced while staging. affected names the nodes the edit removes.
+    """
+    pending: str
+    success: str
+    modify: Callable[[TopoDoc], None]
+    warnings: tuple[str, ...] = ()
+    infos: tuple[str, ...] = ()
+    affected: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class StagedDrop:
+    """A node already added to the live map, ready to be saved.
+
+    pending is the status to show while writing. base prefixes the later statuses,
+    short is the shorter prefix used when the map switch fails, and log is the line to
+    log once the drop succeeds.
+    """
+    node: TopoNode
+    pending: str
+    base: str
+    short: str
+    log: str

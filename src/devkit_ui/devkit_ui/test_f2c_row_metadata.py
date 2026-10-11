@@ -2,26 +2,16 @@
 # make_node supplies the attributes normally initialized by the ROS node.
 # pylint: disable=attribute-defined-outside-init,exec-used,no-member,protected-access
 import ast
-import math
-import re
 import unittest
-from datetime import UTC, datetime
-from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from devkit_ui import row_planning, topo_row_builder
+from devkit_ui.application_services.topology_edit_service import TopologyEditService
 from devkit_ui.constants import NAV_ACTION
-from devkit_ui.models import NodeID, TopoDoc, TopoEdge, TopoNode, TopoPose, TopoProperties, Vector2
-from devkit_ui.topo_row_builder import (
-    RowAnchor,
-    RowBuildSettings,
-    add_missing_edges,
-    apply_row_nodes,
-    build_row_nodes,
-    plan_row_repair,
-)
+from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
+from devkit_ui.topo_results import TopologyEditError
 
 ROW_ACTION = 'row_follow'
 
@@ -61,30 +51,9 @@ def load_f2c_save_harness():
     methods = [
         node for node in node_class.body
         if isinstance(node, ast.FunctionDef)
-        and node.name in ('save_f2c_rows_to_topo', 'repair_row_connectivity')
+        and node.name in ('save_f2c_rows_to_topo', 'repair_row_connectivity', '_log_edit_lines')
     ]
-    namespace = {
-        'NodeID': NodeID,
-        'TopoDoc': TopoDoc,
-        'TopoEdge': TopoEdge,
-        'TopoNode': TopoNode,
-        'TopoPose': TopoPose,
-        'TopoProperties': TopoProperties,
-        'Vector2': Vector2,
-        'NAV_ACTION': NAV_ACTION,
-        'ROW_ACTION': ROW_ACTION,
-        'RowAnchor': RowAnchor,
-        'RowBuildSettings': RowBuildSettings,
-        'add_missing_edges': add_missing_edges,
-        'apply_row_nodes': apply_row_nodes,
-        'build_row_nodes': build_row_nodes,
-        'plan_row_repair': plan_row_repair,
-        'UTC': UTC,
-        'datetime': datetime,
-        'math': math,
-        'pairwise': pairwise,
-        're': re,
-    }
+    namespace = {'TopologyEditError': TopologyEditError}
     module = ast.Module(body=methods, type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), source_path, 'exec'), namespace)
     return type('F2CSaveHarness', (), {method.name: namespace[method.name] for method in methods})
@@ -109,6 +78,8 @@ def make_node(swaths, *, contour_used=False):
         status=SimpleNamespace(status=0),
     )
     node._topo_doc = TopoDoc(name='field')
+    node._topo_edit_service = TopologyEditService(
+        SimpleNamespace(get_doc=lambda: node._topo_doc))
     node._topo_vm = SimpleNamespace(current_node=None, selected_node=None)
     node.f2c_save_status = ''
     node.get_logger = Mock(return_value=Mock())

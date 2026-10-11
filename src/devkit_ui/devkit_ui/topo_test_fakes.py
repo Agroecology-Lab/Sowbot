@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
+from devkit_ui.application_services.topology_edit_service import TopologyEditService
 from devkit_ui.domain_services import topo_map_store
 from devkit_ui.domain_services.topo_map_store import TopoMapStore
 from devkit_ui.topo_results import SwitchResult
@@ -60,6 +61,7 @@ def attach_topology(node, maps_dir):
         _topo_domain=domain,
         topo_store=store,
         _topo_app_service=app,
+        _topo_edit_service=TopologyEditService(app),
         _topo_vm=TopologyViewModel(app),
     )
     return node

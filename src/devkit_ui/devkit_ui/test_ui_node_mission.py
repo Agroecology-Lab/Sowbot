@@ -34,7 +34,8 @@ def load_mission_harness():
     namespace = {name: Mock(name=name) for name in (
         'RosGateway', 'DriveDomainService', 'TopologyDomainService', 'RobotBrainDomainService',
         'RowDiscoveryDomainService', 'NavigationDomainService', 'TelemetryDomainService',
-        'DriveApplicationService', 'TopologyApplicationService', 'RobotBrainApplicationService',
+        'DriveApplicationService', 'TopologyApplicationService', 'TopologyEditService',
+        'RobotBrainApplicationService',
         'RowDiscoveryApplicationService', 'NavigationApplicationService',
         'TelemetryApplicationService',
         'GlobalViewModel', 'RunViewModel', 'TopologyViewModel', 'TelemetryViewModel',

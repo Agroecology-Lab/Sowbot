@@ -15,7 +15,6 @@ import time
 import traceback
 import zipfile
 from collections.abc import Callable
-from datetime import UTC, datetime
 from html import escape
 from importlib import resources
 from pathlib import Path
@@ -58,7 +57,8 @@ from devkit_ui.application_services.telemetry_application_service import (
 from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
-from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
+from devkit_ui.application_services.topology_edit_service import TopologyEditService
+from devkit_ui.constants import NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 from devkit_ui.domain_services.mission_domain_service import (
     ERROR,
@@ -79,10 +79,7 @@ from devkit_ui.domain_services.topology_domain_service import TopologyDomainServ
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
     TopoDoc,
-    TopoEdge,
     TopoNode,
-    TopoProperties,
-    Vector2,
 )
 
 # pylint: enable=import-error
@@ -101,14 +98,7 @@ from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.row_planning import plan_contour_rows
-from devkit_ui.topo_row_builder import (
-    RowAnchor,
-    RowBuildSettings,
-    add_missing_edges,
-    apply_row_nodes,
-    build_row_nodes,
-    plan_row_repair,
-)
+from devkit_ui.topo_results import TopologyEditError
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.mission_view_model import MissionViewModel
 from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
@@ -299,6 +289,7 @@ class NiceGuiNode(Node):
         self._topo_app_service = TopologyApplicationService(
             self._topo_domain_service
         )
+        self._topo_edit_service = TopologyEditService(self._topo_app_service)
         self._robot_brain_app_service = RobotBrainApplicationService(self._robot_brain_domain_service)
         self._row_discovery_app_service = RowDiscoveryApplicationService(
             self._row_discovery_domain_service)
@@ -417,110 +408,35 @@ class NiceGuiNode(Node):
 
     def drop_topo_node(self, name: str, row_id: int | None,
                        row_role: str = 'entry') -> None:
+        """Add a topology node at the current robot position and persist it to the active map.
+
+        Add the node in memory immediately, then save and reload in a background thread.
+        Use (0, 0) in simulation if odometry is unavailable. Connect to the current node,
+        or the selected node as a fallback; save the outgoing edge only if its target is
+        already on disk. Row nodes use the selected row action. Validation failures and
+        worker exceptions set drop_node.status; a failed save does not roll back the
+        initial in-memory addition. The rules live in TopologyEditService.
+
+        Parameters:
+            name (str): Name, stripped and uppercased, with spaces replaced by underscores
+                and characters outside A-Z, 0-9, and underscore removed.
+            row_id (int | None): Row identifier to associate with the node, or None for a
+                navigation node.
+            row_role (str): Role of the node within its row, such as "entry" or "exit".
         """
-                       Add a topology node at the current robot position and persist it to the
-                       active map.
-
-                       Add the node in memory immediately, then save and reload in a background
-                       thread. Use (0, 0) in simulation if odometry is unavailable. Connect to the
-                       current node, or the selected node as a fallback; save the outgoing edge
-                       only if its target is already on disk. Row nodes use the selected row action.
-                       Validation failures and worker exceptions set drop_node.status; a failed
-                       save does not roll back the initial in-memory addition.
-
-                       Parameters:
-                        name (str): Name, stripped and uppercased, with spaces replaced by
-                        underscores and characters outside A-Z, 0-9, and underscore removed.
-                        row_id (int | None): Row identifier to associate with the node, or None for
-                        a navigation node.
-                        row_role (str): Role of the node within its row, such as "entry" or "exit".
-                       """
-        name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
-        if not name:
-            self._run_vm.drop_node.status = 'ERROR: node name required'
+        odom = self.latest_odom
+        try:
+            drop = self._topo_edit_service.stage_drop(
+                name, row_id, row_role,
+                pose=(odom.pose.pose.position.x, odom.pose.pose.position.y) if odom else None,
+                is_sim=self._is_sim, gps=self.latest_gps, row_action=self._row_action,
+                current_node=self._topo_vm.current_node,
+                selected_node=self._topo_vm.selected_node)
+        except TopologyEditError as e:
+            self._run_vm.drop_node.status = str(e)
             return
-        if not _NAME_RE.match(name):
-            self._run_vm.drop_node.status = f'ERROR: invalid name "{name}"'
-            return
-        if not self._topo_doc:
-            self._run_vm.drop_node.status = 'ERROR: map not loaded'
-            return
-        if self._topo_doc.has_node(name):
-            self._run_vm.drop_node.status = f'ERROR: {name} already exists'
-            return
-        if self.latest_odom is None and not self._is_sim:
-            self._run_vm.drop_node.status = 'ERROR: no odometry'
-            return
-
-        x = round(self.latest_odom.pose.pose.position.x, 3) if self.latest_odom else 0.0
-        y = round(self.latest_odom.pose.pose.position.y, 3) if self.latest_odom else 0.0
-        current_node = self._topo_vm.current_node
-        connect_to = (current_node
-                      if current_node not in ('—', 'none', 'None', '', None) else None)
-        if connect_to and not self._topo_doc.has_node(connect_to):
-            connect_to = None
-        selected_node = self._topo_vm.selected_node
-        if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
-            connect_to = selected_node
-        map_name  = self._topo_doc.name
-        nav_frame = self._topo_doc.transformation.get('topo_frame_id') or 'map'
-        is_row    = row_id is not None
-
-        if is_row:
-            edge_action, xy_tol, yaw_tol, vert_r = self._row_action, 0.1, 0.05, 0.5
-        else:
-            edge_action, xy_tol, yaw_tol, vert_r = NAV_ACTION, 0.3, 0.1,  1.0
-
-        gps = self.latest_gps
-        gps_meta: dict = {}
-        if gps is not None and gps.status.status >= 0:
-            gps_meta = {
-                'gps_lat': round(gps.latitude, 7),
-                'gps_lon': round(gps.longitude, 7),
-                'gps_fix_type': int(gps.status.status),
-                'gps_hdop': None,
-            }
-
-        row_meta: dict = {}
-        if is_row:
-            row_meta = {
-                'row_id': row_id,
-                'row_role': row_role,
-            }
-
-        new_node = TopoNode(
-            name=name,
-            nav_frame=nav_frame,
-            x=x,
-            y=y,
-            meta={
-                'map': map_name,
-                'node': name,
-                'pointset': map_name,
-                'dropped_by': 'webui',
-                'timestamp': datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S'),
-                **gps_meta,
-                **row_meta
-            },
-            properties=TopoProperties(xy_goal_tolerance=xy_tol, yaw_goal_tolerance=yaw_tol),
-            verts=[
-                Vector2(x=-vert_r, y=-vert_r),
-                Vector2(x=vert_r, y=-vert_r),
-                Vector2(x=vert_r, y=vert_r),
-                Vector2(x=-vert_r, y=vert_r),
-            ],
-            edges=[
-                TopoEdge(action=edge_action, edge_id=f'{name}_{connect_to}', node=connect_to),
-            ] if connect_to else [],
-        )
-        self._topo_doc.add_node(new_node)
-
-        conn_str = f' → {connect_to}' if connect_to else ''
-        gps_str  = (f' [{gps_meta["gps_lat"]:.5f},{gps_meta["gps_lon"]:.5f}]'
-                    if gps_meta else '')
-        row_str  = f' row={row_id}/{row_role}' if is_row else ''
-        self._run_vm.drop_node.status = (
-            f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…')
+        self._run_vm.drop_node.status = drop.pending
+        node_name = drop.node.name
 
         def _publish_and_persist():
             """Save the dropped node and make the updated map available to navigation.
@@ -530,32 +446,28 @@ class NiceGuiNode(Node):
             writing. Worker exceptions become drop_node.status errors.
             """
             try:
-                base = f'{name}{conn_str} at ({x},{y}){row_str}{gps_str}'
-
                 def _saved() -> None:
                     """Show reloading status after saving the node and before switching maps."""
-                    self._run_vm.drop_node.status = f'{base} — reloading…'
+                    self._run_vm.drop_node.status = f'{drop.base} — reloading…'
 
-                result = self._topo_app_service.drop_node(new_node, on_saved=_saved)
+                result = self._topo_app_service.drop_node(drop.node, on_saved=_saved)
                 if result.kind == 'skipped':
-                    self.get_logger().warn(f'Node {name} already in file — skipping write')
+                    self.get_logger().warn(f'Node {node_name} already in file — skipping write')
                     return
                 if result.kind == 'switch_failed':
                     self._run_vm.drop_node.status = (
-                        f'{name}{conn_str} saved (switch failed: {result.detail})')
+                        f'{drop.short} saved (switch failed: {result.detail})')
                     self.get_logger().warn(
                         f'switch_topological_map failed ({result.detail})')
                 else:
-                    self._run_vm.drop_node.status = result.describe(base)
-                self.get_logger().info(
-                    f'Node dropped: {name} at ({x:.3f},{y:.3f}){conn_str}{row_str}{gps_str}')
+                    self._run_vm.drop_node.status = result.describe(drop.base)
+                self.get_logger().info(drop.log)
             except Exception as e:
                 self._run_vm.drop_node.status = f'ERROR: {e}'
                 self.get_logger().error(
                     f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
-        return
 
     # ── track mode ────────────────────────────────────────────────────────────
 
@@ -711,13 +623,12 @@ class NiceGuiNode(Node):
         """Save the most recently planned F2C swaths as rows in the loaded topology map.
 
         In-row edges use the selected row action and headland edges use point-to-point
-        navigation. A missing prefix, planned swaths, GPS fix or map reports an error
-        in ``f2c_save_status`` and writes nothing, as do nonfinite GPS coordinates
-        or coordinates both within 1e-9 degrees of zero. Hardware requires odometry;
-        simulation requires the planned field origin instead. A negative GPS fix
-        status alone does not prevent saving. Persistence runs in the background,
-        and worker errors are also reported in ``f2c_save_status``. Errors from
-        ``build_row_nodes`` propagate synchronously before persistence is scheduled.
+        navigation. Validation failures (no prefix, planned swaths, GPS fix, map or
+        odometry, or unusable GPS coordinates) are reported in ``f2c_save_status`` and
+        write nothing. Persistence runs in the background, and worker errors are also
+        reported in ``f2c_save_status``. Errors from ``build_row_nodes`` propagate
+        synchronously before persistence is scheduled. The rules live in
+        TopologyEditService.stage_f2c_save.
 
         Args:
             prefix: Prefix for the generated node names. Surrounding whitespace is
@@ -727,107 +638,25 @@ class NiceGuiNode(Node):
             overwrite: Replace existing ``<prefix>_R*`` nodes instead of skipping
                 names that are already taken.
         """
-        prefix = re.sub(r'[^A-Z0-9_]', '',
-                        (prefix or '').strip().upper().replace(' ', '_'))
-        if not prefix:
-            self.f2c_save_status = 'ERROR: prefix required'
+        odom = self.latest_odom
+        try:
+            edit = self._topo_edit_service.stage_f2c_save(
+                prefix, row_id_start, overwrite,
+                swaths=self._f2c_swaths, origin_ll=self._f2c_origin_ll,
+                contour_used=self._f2c_contour_used, break_after=self._f2c_break_after,
+                is_sim=self._is_sim,
+                odom_xy=(odom.pose.pose.position.x, odom.pose.pose.position.y)
+                if odom else None,
+                gps=self.latest_gps, row_action=self._row_action,
+                current_node=self._topo_vm.current_node,
+                selected_node=self._topo_vm.selected_node)
+        except TopologyEditError as e:
+            self._log_edit_lines(e.warnings, ())
+            self.f2c_save_status = str(e)
             return
-        if not self._f2c_swaths:
-            self.f2c_save_status = 'ERROR: no rows planned — click Plan Rows first'
-            return
-        # In sim mode anchor_x/y are always 0.0 (see below), so latest_odom is
-        # not actually used — skip the guard to avoid a false "no odometry" error
-        # before Gazebo is launched.
-        if self.latest_odom is None and not self._is_sim:
-            self.f2c_save_status = 'ERROR: no odometry'
-            return
-        if self.latest_gps is None:
-            self.f2c_save_status = 'ERROR: no GPS fix yet (/gnss/fix or sim shim)'
-            return
-
-        _lat = self.latest_gps.latitude
-        _lon = self.latest_gps.longitude
-        _status = self.latest_gps.status.status
-        if not (math.isfinite(_lat) and math.isfinite(_lon)):
-            self.f2c_save_status = (
-                f'ERROR: GPS lat/lon not finite ({_lat}, {_lon}) status={_status}')
-            return
-        if abs(_lat) < 1e-9 and abs(_lon) < 1e-9:
-            self.f2c_save_status = (
-                f'ERROR: GPS lat/lon are 0,0 — no fix yet (status={_status})')
-            return
-        if _status < 0:
-            self.get_logger().warn(
-                f'save_f2c_rows: proceeding with status={_status} '
-                f'(lat={_lat:.7f}, lon={_lon:.7f})')
-
-        if not self._topo_doc:
-            self.f2c_save_status = 'ERROR: map not loaded'
-            return
-
-        # Anchor for the lat/lon -> local xy conversion. On real hardware
-        # latest_gps IS the survey origin and is correct. In sim, latest_gps is
-        # the static datum fix, which is generally NOT where the F2C field was
-        # drawn — anchoring to it offsets every row by the field-to-datum
-        # distance (the "robot drove to India / off the map" bug). Anchoring to
-        # the field's own reference corner instead makes the round-trip cancel,
-        # so rows land at the local odom origin like get_maize_topo.py output.
-        if self._is_sim and self._f2c_origin_ll is not None:
-            anchor_lat, anchor_lon = self._f2c_origin_ll
-        elif self._is_sim:
-            self.f2c_save_status = (
-                'ERROR: no F2C field origin in memory (re-run "Plan Rows" '
-                'first) — saving now would anchor rows to the sim GPS '
-                'datum instead of the field, offsetting every node.')
-            return
-        else:
-            anchor_lat = self.latest_gps.latitude
-            anchor_lon = self.latest_gps.longitude
-        anchor = RowAnchor(
-            lat=anchor_lat, lon=anchor_lon,
-            x=0.0 if self._is_sim else self.latest_odom.pose.pose.position.x,
-            y=0.0 if self._is_sim else self.latest_odom.pose.pose.position.y)
-
-        current_node = self._topo_vm.current_node
-        connect_to = (current_node
-                      if current_node not in ('—', 'none', 'None', '', None)
-                      else None)
-        if connect_to and not self._topo_doc.has_node(connect_to):
-            connect_to = None
-        selected_node = self._topo_vm.selected_node
-        if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
-            connect_to = selected_node
-
-        nav_frame = self._topo_doc.transformation.get('topo_frame_id') or 'map'
-        self.get_logger().info(
-            f'F2C save: nav_frame={nav_frame!r}, '
-            f'topo_doc type={type(self._topo_doc).__name__}')
-        build = build_row_nodes(self._f2c_swaths, anchor, RowBuildSettings(
-            prefix=prefix,
-            row_id_start=row_id_start,
-            row_action=self._row_action,
-            nav_frame=nav_frame,
-            map_name=self._topo_doc.name or 'mixed_test_map',
-            timestamp=datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S'),
-            fix_type=int(self.latest_gps.status.status),
-            overwrite=overwrite,
-            contour_used=self._f2c_contour_used,
-            break_after=frozenset(self._f2c_break_after),
-            connect_to=connect_to,
-        ))
-        if not build.added:
-            self.f2c_save_status = 'ERROR: nothing added (all names already taken)'
-            return
-
-        skip_str = f' (skipped {len(build.skipped)} dup ids)' if build.skipped else ''
-        splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
-        self.f2c_save_status = (
-            f'writing {len(build.added)} rows · {prefix}{splice_str}{skip_str}…')
-        self._persist_and_reload(
-            lambda doc: apply_row_nodes(doc, build, prefix, overwrite),
-            self, 'f2c_save_status',
-            f'saved {len(build.added)} rows · {prefix}{splice_str}{skip_str}',
-        )
+        self._log_edit_lines(edit.warnings, edit.infos)
+        self.f2c_save_status = edit.pending
+        self._persist_and_reload(edit.modify, self, 'f2c_save_status', edit.success)
 
     # ── Repair row connectivity ──────────────────────────────────────────────
 
@@ -847,36 +676,15 @@ class NiceGuiNode(Node):
             OverflowError: Row metadata contains an infinite row ID; propagated
                 from ``plan_row_repair`` before any edges are added.
         """
-        if not self._topo_doc:
-            self.f2c_save_status = 'ERROR: map not loaded'
+        try:
+            edit = self._topo_edit_service.stage_repair(self._row_action, connect_to)
+        except TopologyEditError as e:
+            self._log_edit_lines(e.warnings, ())
+            self.f2c_save_status = str(e)
             return
-
-        plan = plan_row_repair(self._topo_doc, self._row_action)
-        if plan is None:
-            self.f2c_save_status = 'ERROR: no row nodes found'
-            return
-        if plan.headlands_skipped:
-            self.get_logger().warn(
-                'repair: row nodes lack x/y coords — cannot classify headland '
-                'ends; skipping headland edges (in-row edges still restored)')
-        if connect_to and not self._topo_doc.has_node(connect_to):
-            self.get_logger().warn(
-                f'repair: connect_to={connect_to!r} not in map, ignoring')
-            connect_to = None
-
-        added_count = add_missing_edges(self._topo_doc, plan.edges)
-        if added_count == 0:
-            self.f2c_save_status = f'repair: already wired ({plan.row_count} rows)'
-            return
-
-        self.f2c_save_status = f'repair: adding {added_count} edges…'
-        target_str = (f' @ {connect_to}' if connect_to
-                      else ' — NO SPLICE, chain still isolated')
-        self._persist_and_reload(
-            lambda doc: add_missing_edges(doc, plan.edges),
-            self, 'f2c_save_status',
-            f'repair: wired {added_count} edges{target_str}',
-        )
+        self._log_edit_lines(edit.warnings, edit.infos)
+        self.f2c_save_status = edit.pending
+        self._persist_and_reload(edit.modify, self, 'f2c_save_status', edit.success)
 
     # ── Delete topo nodes / rows ─────────────────────────────────────────────
 
@@ -886,65 +694,40 @@ class NiceGuiNode(Node):
         Parameters:
             name (str): Name of the topology node to delete.
         """
-        if not self._topo_doc:
-            self._run_vm.topo.delete_status = 'ERROR: map not loaded'
-            return
-        if not name or not self._topo_doc.has_node(name):
-            self._run_vm.topo.delete_status = f'ERROR: {name!r} not in map'
-            return
-
-        if self._topo_vm.selected_node == name:
-            self._topo_vm.set_selected_node(None)
-        self._run_vm.topo.delete_status = f'deleting {name}…'
-
-        def _modify(file_doc):
-            """
-            Remove the node identified by ``name`` from the topology document.
-
-            Parameters:
-                file_doc: Topology document to modify.
-            """
-            file_doc.remove_node(name)
-
-        self._persist_and_reload(
-            _modify, self._run_vm.topo, 'delete_status', f'deleted {name}'
-        )
+        self._persist_deletion(self._topo_edit_service.stage_delete_node, name)
 
     def delete_row(self, row_id: int) -> None:
-        """
-        Delete all topology nodes belonging to a row and persist the updated map.
+        """Delete all topology nodes belonging to a row and persist the updated map.
 
         Parameters:
             row_id (int): Identifier of the row whose nodes should be deleted.
         """
-        targets = {node.name for node in self._topo_doc.nodes
-                   if node.meta.get('row_id') == row_id}
-        if not targets:
-            self._run_vm.topo.delete_status = f'ERROR: no nodes for row {row_id}'
-            return
-        if not self._topo_doc:
-            self._run_vm.topo.delete_status = 'ERROR: map not loaded'
-            return
+        self._persist_deletion(self._topo_edit_service.stage_delete_row, row_id)
 
-        if self._topo_vm.selected_node in targets:
+    def _persist_deletion(self, stage, target) -> None:
+        """Stage a deletion, clear a selection it removes, and persist it in the background.
+
+        Parameters:
+            stage: TopologyEditService method that returns the StagedEdit for target.
+            target: Node name or row id passed to stage.
+        """
+        status_owner = self._run_vm.topo
+        try:
+            edit = stage(target)
+        except TopologyEditError as e:
+            status_owner.delete_status = str(e)
+            return
+        if self._topo_vm.selected_node in edit.affected:
             self._topo_vm.set_selected_node(None)
-        self._run_vm.topo.delete_status = f'deleting row {row_id} ({len(targets)} nodes)…'
+        status_owner.delete_status = edit.pending
+        self._persist_and_reload(edit.modify, status_owner, 'delete_status', edit.success)
 
-        def _modify(file_doc):
-            """
-            Remove the selected nodes from a topology document.
-
-            Parameters:
-                file_doc: The topology document to modify.
-            """
-            file_doc.remove_nodes(targets)
-
-        self._persist_and_reload(
-            _modify,
-            self._run_vm.topo,
-            'delete_status',
-            f'deleted row {row_id} ({len(targets)} nodes)',
-        )
+    def _log_edit_lines(self, warnings: tuple[str, ...], infos: tuple[str, ...]) -> None:
+        """Log the warning and info lines produced while staging a topology edit."""
+        for line in infos:
+            self.get_logger().info(line)
+        for line in warnings:
+            self.get_logger().warn(line)
 
     # ── Confirmation dialogs ─────────────────────────────────────────────────
 
