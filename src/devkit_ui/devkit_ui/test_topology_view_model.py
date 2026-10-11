@@ -47,6 +47,41 @@ class TestMapArchive(unittest.TestCase):
         self.assertEqual(self.vm.save_map_as('copy'), 'saved → copy')
         self.app.save_map_as.assert_called_once_with('copy')
 
+    def test_callbacks_observe_updated_map_in_registration_order(self):
+        events = []
+        self.vm.register_map_archived_callback(lambda: events.append(('first', self.vm.map_name)))
+        self.vm.register_map_archived_callback(lambda: events.append(('second', self.vm.map_name)))
+
+        def archive():
+            events.append(('archive', self.vm.map_name))
+            on_changed = self.app.register_doc_changed_callback.call_args.args[0]
+            on_changed(TopoDoc(name='default'))
+            return 'live_2'
+
+        self.app.archive_and_clear.side_effect = archive
+        self.assertEqual(self.vm.archive_and_clear_map(), 'archived → live_2')
+        self.assertEqual(events, [('archive', 'live'), ('first', 'default'), ('second', 'default')])
+        self.app.archive_and_clear.assert_called_once_with()
+
+    def test_failed_callback_propagates_and_does_not_run_later_callbacks(self):
+        error = RuntimeError('refresh failed')
+        self.archived.side_effect = error
+        later = Mock()
+        self.vm.register_map_archived_callback(later)
+        with self.assertRaises(RuntimeError) as caught:
+            self.vm.archive_and_clear_map()
+        self.assertIs(caught.exception, error)
+        self.app.archive_and_clear.assert_called_once_with()
+        later.assert_not_called()
+
+    def test_saving_copy_keeps_live_map_and_does_not_notify_archive_callbacks(self):
+        self.app.save_map_as.return_value = 'ERROR: name exists'
+        document = self.vm.topo_doc
+        self.assertEqual(self.vm.save_map_as('existing'), 'ERROR: name exists')
+        self.assertIs(self.vm.topo_doc, document)
+        self.assertEqual(self.vm.map_name, 'live')
+        self.archived.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -65,6 +65,60 @@ class TestSimWorldService(unittest.TestCase):
         with self.assertRaisesRegex(WorldRebuildError, 'timed out'):
             self.service.rebuild(*ARGS)
 
+    def test_runner_is_bounded_captures_text_and_does_not_use_a_shell(self):
+        self.service.rebuild(*ARGS)
+        self.assertEqual(self.run.call_args.kwargs, {
+            'capture_output': True, 'text': True, 'timeout': 120, 'check': False,
+        })
+        self.assets.has_crop_model.assert_called_once_with('plant')
+
+    def test_zero_and_multidigit_counts_are_parsed_from_multiline_output(self):
+        for output, expected in (
+            ('generating\nWeed density: 0\ndone', '0'),
+            ('Weed density:\t12345\n', '12345'),
+            ('cached world', '?'),
+            (None, '?'),
+        ):
+            with self.subTest(output=output):
+                self.run.return_value.stdout = output
+                self.assertEqual(self.service.rebuild(*ARGS), expected)
+
+    def test_failure_prefers_stderr_then_stdout_then_unknown_error(self):
+        for stderr, stdout, expected in (
+            ('  stderr failure\n', 'stdout failure', 'stderr failure'),
+            ('', '  stdout failure\n', 'stdout failure'),
+            (None, None, 'unknown error'),
+        ):
+            with self.subTest(stderr=stderr, stdout=stdout):
+                self.run.return_value = SimpleNamespace(
+                    returncode=1, stderr=stderr, stdout=stdout)
+                with self.assertRaises(WorldRebuildError) as caught:
+                    self.service.rebuild(*ARGS)
+                self.assertEqual(str(caught.exception), f'rebuild failed: {expected}')
+
+    def test_timeout_preserves_cause_and_does_not_retry(self):
+        timeout = subprocess.TimeoutExpired('bash', 120)
+        self.run.side_effect = timeout
+        with self.assertRaises(WorldRebuildError) as caught:
+            self.service.rebuild(*ARGS)
+        self.assertIs(caught.exception.__cause__, timeout)
+        self.run.assert_called_once()
+
+    def test_process_start_error_propagates_without_becoming_rebuild_error(self):
+        error = PermissionError('cannot execute worldgen')
+        self.run.side_effect = error
+        with self.assertRaises(PermissionError) as caught:
+            self.service.rebuild(*ARGS)
+        self.assertIs(caught.exception, error)
+
+    def test_arguments_with_spaces_and_metacharacters_remain_single_values(self):
+        self.service.rebuild(0.1, 0.2, 0.05, 'crop', 'maize; echo unexpected', 0)
+        self.assertEqual(self.run.call_args.args[0], [
+            'bash', '/x/worldgen.sh', '--plant-spacing', '0.1', '--row-width', '0.2',
+            '--plant-scale', '0.05', '--scale-category', 'crop',
+            '--crop-model', 'maize; echo unexpected', '--weed-density', '0',
+        ])
+
 
 if __name__ == '__main__':
     unittest.main()
