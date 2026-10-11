@@ -18,7 +18,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from html import escape
 from importlib import resources
-from itertools import pairwise
 from pathlib import Path
 
 # The following imports get generated in the Dockerfile, they aren't available to pylint
@@ -39,11 +38,7 @@ from std_msgs.msg import Bool, Float64, String
 
 # F2C: lat/lon<->XY projection + swath generator, now a standalone package
 # (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
-from devkit_f2c_planner.f2c_planner import (
-    _f2c_latlon_to_xy,
-    _f2c_xy_to_latlon,
-    _run_f2c,
-)
+from devkit_f2c_planner.f2c_planner import _run_f2c
 from devkit_ui import plan_import
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
@@ -71,11 +66,9 @@ from devkit_ui.domain_services.telemetry_domain_service import TelemetryDomainSe
 from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
-    NodeID,
     TopoDoc,
     TopoEdge,
     TopoNode,
-    TopoPose,
     TopoProperties,
     Vector2,
 )
@@ -95,11 +88,14 @@ from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.ros_gateway import RosGateway
-from devkit_ui.row_planning import (
-    CONTOUR_WAYPOINT_INTERVAL_M,
-    headland_neighbour_pairs,
-    plan_contour_rows,
-    resample_row_xy,
+from devkit_ui.row_planning import plan_contour_rows
+from devkit_ui.topo_row_builder import (
+    RowAnchor,
+    RowBuildSettings,
+    add_missing_edges,
+    apply_row_nodes,
+    build_row_nodes,
+    plan_row_repair,
 )
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
@@ -696,20 +692,20 @@ class NiceGuiNode(Node):
 
     def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int,
                               overwrite: bool = False) -> None:
+        """Save the most recently planned F2C swaths as rows in the loaded topology map.
+
+        In-row edges use the selected row action and headland edges use point-to-point
+        navigation. The checks here are gates: a missing fix, odometry or map reports an
+        error in ``f2c_save_status`` and writes nothing. Persistence runs in the
+        background, and worker errors are also reported in ``f2c_save_status``.
+
+        Args:
+            prefix: Prefix for the generated node names. It is upper-cased and stripped
+                to ``A-Z``, ``0-9`` and ``_``.
+            row_id_start: Row id given to the first planned swath.
+            overwrite: Replace existing ``<prefix>_R*`` nodes instead of skipping
+                names that are already taken.
         """
-                              Save the most recently planned F2C swaths as rows in the loaded
-                              topology map.
-
-                              In-row edges use the selected row action; headland edges use
-                              point-to-point navigation. Persistence runs in the background,
-                              with validation failures and worker errors in f2c_save_status.
-
-                              Parameters:
-                                  prefix (str): Prefix used to name the generated row nodes.
-                                  row_id_start (int): Identifier assigned to the first planned row.
-                                  overwrite (bool): Whether to replace existing nodes with the
-                                  specified prefix.
-                              """
         prefix = re.sub(r'[^A-Z0-9_]', '',
                         (prefix or '').strip().upper().replace(' ', '_'))
         if not prefix:
@@ -748,8 +744,6 @@ class NiceGuiNode(Node):
             self.f2c_save_status = 'ERROR: map not loaded'
             return
 
-        anchor_x   = 0.0 if self._is_sim else self.latest_odom.pose.pose.position.x
-        anchor_y   = 0.0 if self._is_sim else self.latest_odom.pose.pose.position.y
         # Anchor for the lat/lon -> local xy conversion. On real hardware
         # latest_gps IS the survey origin and is correct. In sim, latest_gps is
         # the static datum fix, which is generally NOT where the F2C field was
@@ -768,11 +762,10 @@ class NiceGuiNode(Node):
         else:
             anchor_lat = self.latest_gps.latitude
             anchor_lon = self.latest_gps.longitude
-        fix_type   = int(self.latest_gps.status.status)
-
-        map_name  = self._topo_doc.name or 'mixed_test_map'
-        nav_frame = self._topo_doc.transformation.get('topo_frame_id') or 'map'
-        timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
+        anchor = RowAnchor(
+            lat=anchor_lat, lon=anchor_lon,
+            x=0.0 if self._is_sim else self.latest_odom.pose.pose.position.x,
+            y=0.0 if self._is_sim else self.latest_odom.pose.pose.position.y)
 
         current_node = self._topo_vm.current_node
         connect_to = (current_node
@@ -784,222 +777,46 @@ class NiceGuiNode(Node):
         if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
             connect_to = selected_node
 
-        new_topo_nodes: dict[NodeID, TopoNode] = {}
-
-        added: list[int] = []
-        row_names: dict[int, tuple[NodeID, NodeID]] = {}
-        skipped: list[int] = []
-
-        verts = [Vector2(x=-0.5, y=-0.5), Vector2(x= 0.5, y=-0.5),
-                 Vector2(x= 0.5, y= 0.5), Vector2(x=-0.5, y= 0.5)]
-
-        def _disk_node(name, x, y, role, lat, lon, edges, rid) -> TopoNode:
-            return TopoNode(
-                name=name,
-                nav_frame=nav_frame,
-                edges=edges,
-                pose=TopoPose(x=x, y=y),
-                properties=TopoProperties(
-                    xy_goal_tolerance=0.1,
-                    yaw_goal_tolerance=0.05,
-                    dropped_by='webui_f2c',
-                    timestamp=timestamp,
-                    gps_lat=round(lat, 7),
-                    gps_lon=round(lon, 7),
-                    gps_fix_type=fix_type,
-                    gps_hdop=None,
-                    row_id=rid,
-                    row_role=role,
-                ),
-                verts=verts,
-                # row_id/row_role must live in .meta, not just .properties —
-                # topo_renderer.py's build_svg() reads nd.meta.get('row_role')
-                # for the in-circle label. Omitting it here (the earlier bug)
-                # made every row node fall back to '?', regardless of type.
-                meta={'map': map_name, 'node': name, 'row_id': rid, 'row_role': role}
-            )
-
+        nav_frame = self._topo_doc.transformation.get('topo_frame_id') or 'map'
         self.get_logger().info(
             f'F2C save: nav_frame={nav_frame!r}, '
             f'topo_doc type={type(self._topo_doc).__name__}')
-
-        for i, swath in enumerate(self._f2c_swaths):
-            if len(swath) < 2:
-                continue
-            rid = row_id_start + i
-            in_lat,  in_lon  = swath[0]
-            out_lat, out_lon = swath[-1]
-
-            ie, in_n = _f2c_latlon_to_xy(in_lat,  in_lon,  anchor_lat, anchor_lon)
-            oe, on_  = _f2c_latlon_to_xy(out_lat, out_lon, anchor_lat, anchor_lon)
-            ix, iy = round(anchor_x + ie, 3), round(anchor_y + in_n, 3)
-            ox, oy = round(anchor_x + oe, 3), round(anchor_y + on_, 3)
-
-            in_name  = f'{prefix}_R{rid}_IN'
-            out_name = f'{prefix}_R{rid}_OUT'
-            if not overwrite and (in_name in new_topo_nodes or out_name in new_topo_nodes):
-                skipped.append(rid)
-                continue
-
-            ui_meta_common = {'dropped_by': 'webui_f2c', 'timestamp': timestamp,
-                              'gps_fix_type': fix_type, 'gps_hdop': None,
-                              'row_id': rid}
-
-            # WAYPOINTS: for contour rows, drop intermediate topo nodes along
-            # the curve at ~1m intervals (see resample_row_xy()) instead of
-            # a single entry->exit edge — limbic_row_follow otherwise has
-            # nothing telling it the row bends. Straight rows (contour mode
-            # off, or a flat-field fallback) get no waypoints and behave
-            # exactly as before: a direct entry->exit edge.
-            wp_names: list[str] = []
-            if self._f2c_contour_used and len(swath) > 2:
-                for k, (wx, wy) in enumerate(
-                        resample_row_xy(swath, anchor_lat, anchor_lon,
-                                         CONTOUR_WAYPOINT_INTERVAL_M),
-                        start=1):
-                    wp_name = f'{prefix}_R{rid}_W{k}'
-                    if not overwrite and wp_name in new_topo_nodes:
-                        continue
-                    wlat, wlon = _f2c_xy_to_latlon(wx, wy, anchor_lat, anchor_lon)
-                    wp_node = _disk_node(
-                        wp_name, round(anchor_x + wx, 3), round(anchor_y + wy, 3),
-                        'waypoint', wlat, wlon, [], rid)
-                    wp_node.add_metadata(**ui_meta_common)
-                    new_topo_nodes[wp_name] = wp_node
-                    wp_names.append(wp_name)
-
-            in_node = _disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  [], rid)
-            in_node.add_metadata(**ui_meta_common)
-            out_node = _disk_node(out_name, ox, oy, 'exit',  out_lat, out_lon, [], rid)
-            out_node.add_metadata(**ui_meta_common)
-
-            new_topo_nodes[in_name] = in_node
-            new_topo_nodes[out_name] = out_node
-
-            # Chain entry -> [waypoints] -> exit with row-follow edges. With
-            # no waypoints this is exactly the old direct in_name -> out_name
-            # edge.
-            for a_name, b_name in pairwise([in_name, *wp_names, out_name]):
-                new_topo_nodes[a_name].add_edge(b_name, action=self._row_action)
-
-            added.append(rid)
-            row_names[rid] = (in_name, out_name)
-
-        if not added:
+        build = build_row_nodes(self._f2c_swaths, anchor, RowBuildSettings(
+            prefix=prefix,
+            row_id_start=row_id_start,
+            row_action=self._row_action,
+            nav_frame=nav_frame,
+            map_name=self._topo_doc.name or 'mixed_test_map',
+            timestamp=datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S'),
+            fix_type=int(self.latest_gps.status.status),
+            overwrite=overwrite,
+            contour_used=self._f2c_contour_used,
+            break_after=frozenset(self._f2c_break_after),
+            connect_to=connect_to,
+        ))
+        if not build.added:
             self.f2c_save_status = 'ERROR: nothing added (all names already taken)'
             return
 
-        # ── Headland edges (point-to-point nav_to_pose) ──────────────────────
-        # Connect row i's OUT to row i+1's IN, in swath order. This used to
-        # go through headland_neighbour_pairs(), which re-derives adjacency
-        # from coordinates alone by guessing which axis separates the two
-        # headland ends (whichever of x/y has the larger spread across ALL
-        # endpoints). That guess silently breaks once a field has enough
-        # rows that its cross-row width (spread of the SHORT axis) catches
-        # up to row length (spread of the LONG axis): the split then happens
-        # on the wrong axis and roughly bisects the field by row number
-        # instead of by physical end, leaving two fully disconnected halves
-        # (e.g. rows 1-4 cut off from rows 5-8 on an 8-row field).
-        #
-        # We don't need to guess here: self._f2c_swaths is already in snake
-        # order (that's what snake_order means), so row i's OUT and row
-        # i+1's IN are known, by construction, to be the pair that should
-        # get a headland edge — no coordinates required. This intentionally
-        # gives up the extra same-end shortcut edges the geometric version
-        # produced for non-consecutive rows (e.g. R1_IN<->R4_OUT on a 4-row
-        # field); those only ever tightened A*'s path along the headland,
-        # they were never load-bearing for connectivity.
-        #
-        # repair_row_connectivity() below still uses
-        # headland_neighbour_pairs() and still needs the geometric guess —
-        # it rewires whatever topo map is already on disk, which may
-        # contain hand-dropped nodes from the web UI with no known
-        # generation order, so coordinates are all it has to go on.
-        def _add_headland_edge(p: str, q: str) -> None:
-            """Bidirectional nav_to_pose edge p<->q in both graph structures."""
-
-            edge_name = f'{p}_{q}'
-
-            for a, b in ((p, q), (q, p)):
-                a_node = new_topo_nodes[a]
-                a_node.add_edge(TopoEdge(action=NAV_ACTION, edge_id=edge_name, node=b))
-
-            for node in new_topo_nodes.values():
-                if node.name not in (p, q):
-                    continue
-
-                other = q if node.name == p else p
-                node.add_edge(other, action=NAV_ACTION)
-
-        for rid_a, rid_b in pairwise(added):
-            # Fragments of one row must not be linked across obstacles or field gaps.
-            if rid_a - row_id_start in self._f2c_break_after:
-                continue
-            _, out_a = row_names[rid_a]
-            in_b, _  = row_names[rid_b]
-            _add_headland_edge(out_a, in_b)
-
-        if connect_to:
-            first_in = row_names[added[0]][0]
-            last_out = row_names[added[-1]][1]
-
-            for tgt in (first_in, last_out):
-                if tgt not in new_topo_nodes:
-                    continue
-                node = new_topo_nodes[tgt]
-                node.add_edge(connect_to, action=NAV_ACTION)
-
-        skip_str   = f' (skipped {len(skipped)} dup ids)' if skipped else ''
+        skip_str = f' (skipped {len(build.skipped)} dup ids)' if build.skipped else ''
         splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
         self.f2c_save_status = (
-            f'writing {len(added)} rows · {prefix}{splice_str}{skip_str}…')
-
-        def _modify(file_doc):
-            """Update the topology document with the planned row nodes and edges.
-
-            When overwrite is enabled, existing nodes for the configured row prefix are
-            removed before the planned nodes are inserted. Existing nodes with matching
-            names are preserved.
-            """
-            if overwrite:
-                old_names = {
-                    e.name
-                    for e in file_doc.nodes
-                    if e.name.startswith(f'{prefix}_R')
-                }
-                if old_names:
-                    # remove_nodes() removes the nodes AND prunes dangling
-                    # edges pointing at them in one call — same effect as
-                    # the old two-step version, without treating the
-                    # .nodes/.edges properties (dict_values views) as if
-                    # they were plain mutable lists.
-                    file_doc.remove_nodes(old_names)
-            existing = {e.name for e in file_doc.nodes}
-            for entry in new_topo_nodes.values():
-                if entry.name in existing:
-                    continue
-                # insert_node(), not add_node(): edges within this batch
-                # (headland links) are already wired bidirectionally above,
-                # so add_node()'s reverse-edge backfill would KeyError on a
-                # sibling not yet inserted, and would add an unwanted
-                # reverse edge back onto any pre-existing connect_to node.
-                file_doc.insert_node(entry)
-
+            f'writing {len(build.added)} rows · {prefix}{splice_str}{skip_str}…')
         self._persist_and_reload(
-            _modify, self, 'f2c_save_status',
-            f'saved {len(added)} rows · {prefix}{splice_str}{skip_str}',
+            lambda doc: apply_row_nodes(doc, build, prefix, overwrite),
+            self, 'f2c_save_status',
+            f'saved {len(build.added)} rows · {prefix}{splice_str}{skip_str}',
         )
 
     # ── Repair row connectivity ──────────────────────────────────────────────
 
     def repair_row_connectivity(self, connect_to: str | None = None) -> None:
-        """
-        Rebuild missing in-row and headland connections for existing rows in the loaded topology
-        map.
+        """Rebuild missing in-row and headland edges for rows already in the loaded map.
 
-        New in-row connections use the selected row action; existing edge actions are preserved.
-        Update memory immediately and persist in the background, reporting validation failures
-        and worker errors in f2c_save_status. Ignore an unknown connect_to node.
+        New in-row edges use the selected row action, and existing edge actions are
+        kept. The in-memory map is updated immediately and the change is persisted in
+        the background. Validation failures and worker errors are reported in
+        ``f2c_save_status``.
 
         Parameters:
             connect_to (str | None): Optional node name included in the success status if it exists.
@@ -1009,103 +826,30 @@ class NiceGuiNode(Node):
             self.f2c_save_status = 'ERROR: map not loaded'
             return
 
-        rows: dict = {}
-        coords: dict = {}   # node_name -> (x, y) for same-end classification
-        for node in self._topo_doc.nodes:
-            meta = node.meta
-            rid = meta.get('row_id')
-            role = meta.get('row_role')
-            if rid is None or role not in ('entry', 'exit', 'waypoint'):
-                continue
-            try:
-                rid_int = int(rid)
-            except (TypeError, ValueError):
-                continue
-            if role == 'waypoint':
-                # Waypoints aren't row ends, so they're deliberately excluded
-                # from `coords` — including them would corrupt the
-                # same-end classification headland_neighbour_pairs() does
-                # on row endpoints only.
-                rows.setdefault(rid_int, {}).setdefault('waypoints', []).append(node.name)
-            else:
-                rows.setdefault(rid_int, {})[role] = node.name
-                coords[node.name] = (node.x, node.y)
-
-        if not rows:
+        plan = plan_row_repair(self._topo_doc, self._row_action)
+        if plan is None:
             self.f2c_save_status = 'ERROR: no row nodes found'
             return
-
-        sorted_rids = sorted(rows)
+        if plan.headlands_skipped:
+            self.get_logger().warn(
+                'repair: row nodes lack x/y coords — cannot classify headland '
+                'ends; skipping headland edges (in-row edges still restored)')
         if connect_to and not self._topo_doc.has_node(connect_to):
             self.get_logger().warn(
                 f'repair: connect_to={connect_to!r} not in map, ignoring')
             connect_to = None
 
-        wanted_edges: list = []
-
-        # In-row edges: every row's entry -> [waypoints] -> exit is a chain
-        # of row-follow edges. Waypoints (if any) are re-threaded in name
-        # order (W1, W2, ...) so a repair after nodes/edges got lost still
-        # produces entry->W1->W2->...->exit rather than collapsing back to
-        # a single entry->exit hop that would skip the curve entirely.
-        _wp_num = re.compile(r'_W(\d+)$')
-        for rid in sorted_rids:
-            inn = rows[rid].get('entry')
-            outn = rows[rid].get('exit')
-            wps = sorted(rows[rid].get('waypoints', []),
-                         key=lambda n: int(m.group(1)) if (m := _wp_num.search(n)) else 0)
-            if inn and outn and inn != outn:
-                chain = [inn, *wps, outn]
-                for a, b in pairwise(chain):
-                    wanted_edges.append((a, b, self._row_action))
-
-        # Headland edges: same-end neighbours only, classified by geometry —
-        # NOT by entry/exit label (snake ordering flips label vs physical end).
-        # Shared with the build path so the two cannot diverge.
-        if len(coords) >= 2:
-            for a_name, b_name in headland_neighbour_pairs(coords):
-                wanted_edges.append((a_name, b_name, NAV_ACTION))
-                wanted_edges.append((b_name, a_name, NAV_ACTION))
-        else:
-            self.get_logger().warn(
-                'repair: row nodes lack x/y coords — cannot classify headland '
-                'ends; skipping headland edges (in-row edges still restored)')
-
-        new_topo_nodes = {node.name: node for node in self._topo_doc.nodes}
-        added_count = 0
-        for src, tgt, _action in wanted_edges:
-            if src not in new_topo_nodes or src == tgt:
-                continue
-            node = new_topo_nodes[src]
-            if node.is_connected_to(tgt):
-                continue
-            node.add_edge(tgt, action=_action)
-            added_count += 1
-
+        added_count = add_missing_edges(self._topo_doc, plan.edges)
         if added_count == 0:
-            self.f2c_save_status = (
-                f'repair: already wired ({len(sorted_rids)} rows)')
+            self.f2c_save_status = f'repair: already wired ({plan.row_count} rows)'
             return
 
         self.f2c_save_status = f'repair: adding {added_count} edges…'
-
-        def _modify(file_doc):
-            """Add missing desired connections to the persisted topology."""
-            for src, tgt, action in wanted_edges:
-                if src == tgt:
-                    continue
-                for entry in file_doc.nodes:
-                    if entry.name != src:
-                        continue
-                    if entry.is_connected_to(tgt):
-                        break
-                    entry.add_edge(tgt, action=action)
-                    break
-
         target_str = (f' @ {connect_to}' if connect_to
                       else ' — NO SPLICE, chain still isolated')
         self._persist_and_reload(
-            _modify, self, 'f2c_save_status',
+            lambda doc: add_missing_edges(doc, plan.edges),
+            self, 'f2c_save_status',
             f'repair: wired {added_count} edges{target_str}',
         )
 

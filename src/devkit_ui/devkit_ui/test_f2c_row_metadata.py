@@ -11,11 +11,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from devkit_ui import row_planning
+from devkit_ui import row_planning, topo_row_builder
+from devkit_ui.constants import NAV_ACTION
 from devkit_ui.models import NodeID, TopoDoc, TopoEdge, TopoNode, TopoPose, TopoProperties, Vector2
-from devkit_ui.row_planning import headland_neighbour_pairs
+from devkit_ui.topo_row_builder import (
+    RowAnchor,
+    RowBuildSettings,
+    add_missing_edges,
+    apply_row_nodes,
+    build_row_nodes,
+    plan_row_repair,
+)
 
-NAV_ACTION = 'nav_to_pose'
 ROW_ACTION = 'row_follow'
 
 
@@ -31,6 +38,16 @@ def xy_to_latlon(x: float, y: float, anchor_lat: float, anchor_lon: float) -> tu
 
 def resample_row_xy(_points, _anchor_lat, _anchor_lon, _interval):
     return [(1.0, 1.5)]
+
+
+def patch_row_geometry(test: unittest.TestCase) -> None:
+    """Replace projection and resampling with simple stand-ins so expected poses stay readable."""
+    test.enterContext(patch.multiple(
+        topo_row_builder,
+        _f2c_latlon_to_xy=latlon_to_xy,
+        _f2c_xy_to_latlon=xy_to_latlon,
+        resample_row_xy=resample_row_xy,
+    ))
 
 
 def load_f2c_save_harness():
@@ -56,11 +73,12 @@ def load_f2c_save_harness():
         'Vector2': Vector2,
         'NAV_ACTION': NAV_ACTION,
         'ROW_ACTION': ROW_ACTION,
-        'CONTOUR_WAYPOINT_INTERVAL_M': 1.0,
-        '_f2c_latlon_to_xy': latlon_to_xy,
-        '_f2c_xy_to_latlon': xy_to_latlon,
-        'resample_row_xy': resample_row_xy,
-        'headland_neighbour_pairs': headland_neighbour_pairs,
+        'RowAnchor': RowAnchor,
+        'RowBuildSettings': RowBuildSettings,
+        'add_missing_edges': add_missing_edges,
+        'apply_row_nodes': apply_row_nodes,
+        'build_row_nodes': build_row_nodes,
+        'plan_row_repair': plan_row_repair,
         'UTC': UTC,
         'datetime': datetime,
         'math': math,
@@ -104,6 +122,9 @@ def make_node(swaths, *, contour_used=False):
 
 
 class TestF2CRowMetadata(unittest.TestCase):
+    def setUp(self) -> None:
+        patch_row_geometry(self)
+
     def test_repair_preserves_existing_modes_and_is_idempotent_after_mode_change(self) -> None:
         """Verify repair preserves existing actions and skips saving fully connected rows."""
         node = make_node([])
@@ -228,6 +249,9 @@ class TestF2CRowMetadata(unittest.TestCase):
 
 
 class TestDirectContourPlanning(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        patch_row_geometry(self)
+
     async def test_fragment_breaks_reach_topo_and_reset_for_straight_plans(self):
         swaths = [
             [(51.0, -2.0), (51.001, -2.0)],
