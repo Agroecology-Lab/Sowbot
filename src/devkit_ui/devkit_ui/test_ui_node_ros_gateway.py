@@ -64,3 +64,29 @@ class TestUiNodeRosGateway(unittest.TestCase):
         self.node._ros.create_timer.assert_not_called()
         self.assertIsNone(self.node._track_timer)
         self.assertEqual(self.node._run_vm.track.status, 'ERROR: prefix required')
+
+    def test_existing_timer_prevents_duplicate_gateway_timer_and_immediate_drop(self) -> None:
+        """Starting twice must keep the original timer and its recording callback."""
+        self.node.start_track('row', 1.0, 2, 'entry')
+        original_timer = self.node._track_timer
+        self.node.drop_topo_node.reset_mock()
+
+        self.node.start_track('other', 5.0, 3, 'entry')
+
+        self.node._ros.create_timer.assert_called_once()
+        self.node.drop_topo_node.assert_not_called()
+        self.assertIs(self.node._track_timer, original_timer)
+        self.assertEqual(self.node._run_vm.track.status, 'ERROR: already running')
+        self.assertTrue(self.node._run_vm.track.running)
+
+    def test_gateway_callback_preserves_row_id_and_advances_from_entry_to_middle(self) -> None:
+        """A timer callback must retain row zero and mark only the first node as entry."""
+        self.node.start_track('row', 0.5, 0, 'exit')
+        callback = self.node._ros.create_timer.call_args.args[1]
+        callback()
+        callback()
+
+        self.assertEqual([c.args for c in self.node.drop_topo_node.call_args_list], [
+            ('ROW_1', 0, 'entry'), ('ROW_2', 0, 'middle'), ('ROW_3', 0, 'middle'),
+        ])
+        self.assertEqual(self.node._run_vm.track.status, 'recording  ROW_3  (#3)')
