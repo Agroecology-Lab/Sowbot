@@ -16,9 +16,11 @@ SWATHS = [[(51.0, -2.0), (51.5, -1.5)]]
 
 class TestSaveValidation(unittest.TestCase):
     def setUp(self) -> None:
+        """Replace row geometry with deterministic projection and resampling stubs."""
         patch_row_geometry(self)
 
     def test_missing_inputs_report_errors_without_persisting(self) -> None:
+        """Verify missing save inputs report errors without changing or persisting the map."""
         cases = (
             ({'_f2c_swaths': []}, 'no rows planned'),
             ({'_is_sim': False}, 'no odometry'),
@@ -43,6 +45,7 @@ class TestSaveValidation(unittest.TestCase):
                     self.assertEqual(node._topo_doc.to_dict(), before)
 
     def test_empty_or_sanitized_away_prefix_never_writes(self) -> None:
+        """Verify prefixes without usable characters prevent saving rows."""
         for prefix in (None, '', '  ', '-.!'):
             with self.subTest(prefix=prefix):
                 node = make_node(SWATHS)
@@ -54,6 +57,7 @@ class TestSaveValidation(unittest.TestCase):
                 self.assertEqual(list(node._topo_doc.nodes), [])
 
     def test_nonfinite_or_zero_gps_coordinates_never_write(self) -> None:
+        """Verify nonfinite coordinates and fixes near the origin prevent saving rows."""
         cases = [(0.0, 0.0), (5e-10, -5e-10)]
         for value in (float('nan'), float('inf'), float('-inf')):
             cases.extend(((value, -2.0), (51.0, value)))
@@ -70,6 +74,7 @@ class TestSaveValidation(unittest.TestCase):
                 self.assertEqual(list(node._topo_doc.nodes), [])
 
     def test_a_single_zero_coordinate_is_a_valid_fix(self) -> None:
+        """Verify a zero latitude or longitude alone does not prevent saving rows."""
         for lat, lon in ((0.0, -2.0), (51.0, 0.0)):
             with self.subTest(lat=lat, lon=lon):
                 node = make_node(SWATHS)
@@ -82,6 +87,7 @@ class TestSaveValidation(unittest.TestCase):
                 self.assertTrue(node.f2c_save_status.startswith('saved 1 rows'))
 
     def test_negative_fix_status_warns_but_preserves_usable_coordinates(self) -> None:
+        """Verify a negative GPS status warns but saves usable coordinates with that status."""
         node = make_node(SWATHS)
         node.latest_gps.status.status = -1
 
@@ -96,9 +102,11 @@ class TestSaveValidation(unittest.TestCase):
 
 class TestSavePersistence(unittest.TestCase):
     def setUp(self) -> None:
+        """Replace row geometry with deterministic projection and resampling stubs."""
         patch_row_geometry(self)
 
     def test_simulation_uses_field_origin_even_when_gps_and_odometry_differ(self) -> None:
+        """Verify simulation anchors rows to the field origin despite other pose inputs."""
         node = make_node(SWATHS)
         node.latest_gps.latitude = 40.0
         node.latest_gps.longitude = 10.0
@@ -112,6 +120,7 @@ class TestSavePersistence(unittest.TestCase):
         self.assertEqual((exit_node.x, exit_node.y), (0.5, 0.5))
 
     def test_hardware_uses_gps_and_odometry_without_field_origin(self) -> None:
+        """Verify hardware anchors rows using GPS and odometry without a field origin."""
         node = make_node(SWATHS)
         node._is_sim = False
         node._f2c_origin_ll = None
@@ -127,6 +136,7 @@ class TestSavePersistence(unittest.TestCase):
         self.assertEqual((exit_node.x, exit_node.y), (13.5, -6.5))
 
     def test_save_callback_updates_supplied_document_with_normalized_prefix_and_frame(self) -> None:
+        """Verify the save callback applies normalized names and the selected map frame."""
         node = make_node(SWATHS)
         node._topo_doc = TopoDoc(name='survey', transformation={'topo_frame_id': 'survey_frame'})
         node._persist_and_reload.side_effect = None
@@ -155,6 +165,7 @@ class TestSavePersistence(unittest.TestCase):
             self.assertEqual(saved['meta']['map'], 'survey')
 
     def test_empty_map_name_and_frame_use_defaults(self) -> None:
+        """Verify empty map names and frames fall back to the save defaults."""
         node = make_node(SWATHS)
         node._topo_doc = TopoDoc(name='', transformation={'topo_frame_id': ''})
 
@@ -165,6 +176,7 @@ class TestSavePersistence(unittest.TestCase):
         self.assertEqual(entry['meta']['map'], 'mixed_test_map')
 
     def test_splice_prefers_current_node_then_valid_selection(self) -> None:
+        """Verify splicing prefers the current node, then a valid selection, with no backfill."""
         cases = [('CURRENT', 'SELECTED', 'CURRENT'), ('missing', 'SELECTED', 'SELECTED')]
         cases.extend((value, 'SELECTED', 'SELECTED') for value in ('—', 'none', 'None', '', None))
         cases.append(('missing', 'absent', None))
@@ -191,6 +203,7 @@ class TestSavePersistence(unittest.TestCase):
 
 class TestRepairPersistence(unittest.TestCase):
     def test_missing_map_or_rows_never_persists(self) -> None:
+        """Verify repair reports missing maps or row metadata without scheduling persistence."""
         for doc, error in ((None, 'map not loaded'), (TopoDoc(name='field'), 'no row nodes found')):
             with self.subTest(error=error):
                 node = make_node([])
@@ -202,6 +215,7 @@ class TestRepairPersistence(unittest.TestCase):
                 node._persist_and_reload.assert_not_called()
 
     def test_repair_updates_memory_and_replays_edges_on_separate_persisted_document(self) -> None:
+        """Verify repair updates memory and replays idempotently while preserving saved actions."""
         node = make_node([])
         node._row_action = 'limbic_row_follow'
         for name, role, y in (('IN', 'entry', 0), ('W1', 'waypoint', 5), ('OUT', 'exit', 10)):
@@ -233,6 +247,7 @@ class TestRepairPersistence(unittest.TestCase):
         self.assertEqual(disk_doc.to_dict(), before)
 
     def test_lone_endpoint_warns_and_does_not_schedule_empty_repair(self) -> None:
+        """Verify a lone row end warns about headlands without scheduling an empty repair."""
         node = make_node([])
         node._topo_doc.insert_node(TopoNode(
             name='IN', x=0, y=0, meta={'row_id': 7, 'row_role': 'entry'}))

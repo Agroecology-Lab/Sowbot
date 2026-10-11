@@ -11,6 +11,7 @@ from devkit_ui.topo_row_builder import add_missing_edges, apply_row_nodes, build
 
 class TestBuildBoundaries(unittest.TestCase):
     def test_empty_and_short_swaths_do_not_consume_splice_endpoints(self) -> None:
+        """Verify unusable swaths retain ID slots but leave splicing to usable row endpoints."""
         rows = [[], *straight_rows(1), swath((1, 1)), *straight_rows(1), []]
         before = copy.deepcopy(rows)
 
@@ -30,6 +31,7 @@ class TestBuildBoundaries(unittest.TestCase):
         self.assertEqual(targets(build.nodes['FIELD_R8_OUT']), {'FIELD_R10_IN': NAV_ACTION})
 
     def test_break_indices_are_relative_to_nondefault_row_start(self) -> None:
+        """Verify break indices remain relative to the swaths when row numbering starts later."""
         build = build_row_nodes(straight_rows(3), ANCHOR, settings(
             row_id_start=20, break_after=frozenset({0})))
 
@@ -39,6 +41,7 @@ class TestBuildBoundaries(unittest.TestCase):
         self.assertEqual(targets(build.nodes['FIELD_R22_IN'])['FIELD_R21_OUT'], NAV_ACTION)
 
     def test_wide_field_keeps_every_consecutive_row_connected(self) -> None:
+        """Verify wide fields retain bidirectional headland links between consecutive rows."""
         build = build_row_nodes(straight_rows(5, spacing=10, length=2), ANCHOR, settings())
         expected = {(f'FIELD_R{i}_IN', f'FIELD_R{i}_OUT', ROW_ACTION) for i in range(1, 6)}
         for i in range(1, 5):
@@ -49,6 +52,7 @@ class TestBuildBoundaries(unittest.TestCase):
                           for node in build.nodes.values() for edge in node.edges}, expected)
 
     def test_contour_without_intermediate_samples_keeps_direct_row_edge(self) -> None:
+        """Verify short contour rows retain a direct entry-to-exit edge without waypoints."""
         for points in ([(0, 0), (0, 1)], [(0, 0), (0, 0.5), (0.1, 1)]):
             with self.subTest(points=points):
                 build = build_row_nodes([swath(*points)], ANCHOR, settings(
@@ -60,6 +64,7 @@ class TestBuildBoundaries(unittest.TestCase):
                 self.assertEqual(targets(build.nodes['FIELD_R1_OUT']), {})
 
     def test_waypoints_use_anchor_offset_and_serializable_survey_metadata(self) -> None:
+        """Verify waypoint poses include the anchor offset and retain survey metadata."""
         build = build_row_nodes([swath((0, 0), (0, 10), (10, 10))], ANCHOR, settings(
             contour_used=True, waypoint_interval_m=5, row_id_start=9, nav_frame='survey'))
         waypoint = build.nodes['FIELD_R9_W1'].to_dict()
@@ -84,6 +89,7 @@ class TestBuildBoundaries(unittest.TestCase):
 
 class TestApplyPreservation(unittest.TestCase):
     def test_overwrite_prunes_incoming_edges_and_keeps_other_prefixes(self) -> None:
+        """Verify overwrite removes old rows and incoming edges while preserving other prefixes."""
         old = build_row_nodes([swath((0, 0), (0, 10), (10, 10))], ANCHOR, settings(
             contour_used=True, waypoint_interval_m=5))
         dock = TopoNode(name='DOCK', x=0, y=0)
@@ -104,6 +110,7 @@ class TestApplyPreservation(unittest.TestCase):
         self.assertIs(doc.get_node('FIELD_R1_IN'), replacement.nodes['FIELD_R1_IN'])
 
     def test_partial_duplicate_preserves_authored_node_and_inserts_missing_nodes(self) -> None:
+        """Verify duplicate names preserve authored nodes while missing nodes are inserted."""
         existing = TopoNode(name='FIELD_R1_IN', x=99, y=88, meta={'note': 'surveyed'})
         existing.add_edge('DOCK', action='authored')
         doc = TopoDoc(name='field', nodes=[existing, TopoNode(name='DOCK', x=0, y=0)])
@@ -118,6 +125,7 @@ class TestApplyPreservation(unittest.TestCase):
         self.assertTrue(doc.get_node('FIELD_R1_OUT').is_connected_to('FIELD_R2_IN'))
 
     def test_splice_does_not_backfill_edges_into_existing_node(self) -> None:
+        """Verify splicing adds outgoing row links without changing the existing target node."""
         dock = TopoNode(name='DOCK', x=0, y=0)
         doc = TopoDoc(name='field', nodes=[dock])
         build = build_row_nodes(straight_rows(1), ANCHOR, settings(connect_to=dock.name))
@@ -131,6 +139,7 @@ class TestApplyPreservation(unittest.TestCase):
 
 class TestRepairBoundaries(unittest.TestCase):
     def test_invalid_metadata_is_ignored(self) -> None:
+        """Verify invalid row IDs and roles produce no repair plan or document changes."""
         for row_id, role in (
             (None, 'entry'), ('bad', 'exit'), ([], 'entry'), ({}, 'waypoint'), (1, 'dock'),
         ):
@@ -142,6 +151,7 @@ class TestRepairBoundaries(unittest.TestCase):
                 self.assertEqual(doc.to_dict(), before)
 
     def test_string_ids_and_unsuffixed_waypoints_form_a_chain_without_mutating_doc(self) -> None:
+        """Verify repair accepts string IDs and orders unsuffixed waypoints before numbered ones."""
         doc = TopoDoc(name='field')
         for name, role, y in (
             ('OUT', 'exit', 30), ('ROW_W10', 'waypoint', 20),
@@ -164,6 +174,7 @@ class TestRepairBoundaries(unittest.TestCase):
         ))
 
     def test_incomplete_rows_do_not_create_partial_row_chains(self) -> None:
+        """Verify rows without both endpoints produce no partial chains or headland links."""
         for roles in (('waypoint',), ('entry', 'waypoint'), ('waypoint', 'exit')):
             with self.subTest(roles=roles):
                 doc = TopoDoc(name='field', nodes=[
@@ -176,6 +187,7 @@ class TestRepairBoundaries(unittest.TestCase):
                 self.assertTrue(plan.headlands_skipped)
 
     def test_waypoints_far_from_endpoints_do_not_change_headland_connections(self) -> None:
+        """Verify headland classification uses row endpoints even when waypoints are far away."""
         build = build_row_nodes(straight_rows(2), ANCHOR, settings())
         doc = TopoDoc(name='field', nodes=list(build.nodes.values()))
         doc.insert_node(TopoNode(name='FIELD_R1_W1', x=10000, y=10000, meta={
@@ -195,6 +207,7 @@ class TestRepairBoundaries(unittest.TestCase):
         })
 
     def test_edge_application_ignores_missing_sources_self_links_and_duplicates(self) -> None:
+        """Verify edge application skips missing sources, self-links and duplicate targets."""
         original = TopoEdge(action='authored', edge_id='survey-edge', node='B')
         node = TopoNode(name='A', x=0, y=0, edges=[original])
         doc = TopoDoc(name='field', nodes=[node, TopoNode(name='B', x=0, y=1)])
