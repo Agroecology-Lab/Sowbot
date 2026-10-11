@@ -86,9 +86,9 @@ from devkit_ui.models import (
 )
 
 # pylint: enable=import-error
-# OBSTACLE: obstacle manager + UI attachment helpers
-from devkit_ui.obstacles import (
-    ObstacleManager,
+# OBSTACLE: obstacle manager, view model and card helpers
+from devkit_ui.obstacles import ObstacleManager
+from devkit_ui.pages.obstacle_cards import (
     attach_mission_obstacle_panel,
     attach_mission_sidebar_controls,
     attach_nav_card,
@@ -111,6 +111,7 @@ from devkit_ui.topo_row_builder import (
 )
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.mission_view_model import MissionViewModel
+from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
@@ -342,11 +343,12 @@ class NiceGuiNode(Node):
         self._f2c_break_after: set = set()
         self.f2c_save_status: str   = ''
 
-        # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher.
-        # Attach after latest_odom / latest_gps fields exist so the
-        # manager can read them when projecting to the map frame.
-        self._obstacle_mgr = ObstacleManager(self._ros)
-        self._obstacle_mgr.attach(self)
+        # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher; the view model is what
+        # the cards bind to. Start after the telemetry service exists so the getters resolve.
+        self._obstacle_mgr = ObstacleManager(
+            self._ros, lambda: self.latest_odom, lambda: self.latest_gps)
+        self._obstacle_vm = ObstacleViewModel(self._obstacle_mgr, lambda: self.latest_gps)
+        self._obstacle_mgr.start()
 
         # MISSION: store owns missions.yaml, scheduling, and run recording.
         self._mission_store = MissionStore()
@@ -1063,7 +1065,7 @@ class NiceGuiNode(Node):
                     )
 
                     # OBSTACLE: Mark Obstacle card next to Drop Node
-                    attach_nav_card(self, self._obstacle_mgr)
+                    attach_nav_card(self._obstacle_vm)
 
             navigation_sidebar = NavigationSidebar(
                 global_store=self._global_vm,
@@ -1241,7 +1243,7 @@ class NiceGuiNode(Node):
                     _redraw_polygon()
 
                 draw_handle = attach_mission_sidebar_controls(
-                    self, self._obstacle_mgr, mission_map, _boundary_click)
+                    self._obstacle_vm, mission_map, _boundary_click)
                 obstacle_pad = draw_handle.obstacle_pad
 
                 ui.separator().classes('my-3')
@@ -1347,7 +1349,7 @@ class NiceGuiNode(Node):
             contour_on = bool(f2c_contour.value)
 
             # OBSTACLE: snapshot obstacle rings and pad
-            obstacle_rings = self._obstacle_mgr.rings_ll()
+            obstacle_rings = self._obstacle_vm.rings_ll()
             pad_m          = float(obstacle_pad.value or 0.0)
 
             mode_note = ''

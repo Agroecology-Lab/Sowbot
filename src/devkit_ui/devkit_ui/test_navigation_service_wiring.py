@@ -52,7 +52,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
         ]))
         for name in ('start_track', 'stop_track', 'drop_topo_node', 'set_row_action',
                      'start_discovery', 'stop_discovery', 'send_nav_goal',
-                     'cancel_nav_goal', 'confirm_delete_node', '_obstacle_mgr'):
+                     'cancel_nav_goal', 'confirm_delete_node', '_obstacle_vm'):
             setattr(self.node, name, Mock())
         self.telemetry = SimpleNamespace(
             latest_gps=None,
