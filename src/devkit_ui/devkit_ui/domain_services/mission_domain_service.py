@@ -98,10 +98,15 @@ class MissionDomainService:
                 raise MissionError('mission already running')
             self._running = True
             self._cancel = False
-        on_status(INFO, f'Starting {len(steps)} step(s)…')
-        threading.Thread(
-            target=self._execute, args=(steps, navigate, on_status, estop_active),
-            daemon=True).start()
+        try:
+            on_status(INFO, f'Starting {len(steps)} step(s)…')
+            threading.Thread(
+                target=self._execute, args=(steps, navigate, on_status, estop_active),
+                daemon=True).start()
+        except BaseException:
+            with self._lock:
+                self._running = False
+            raise
 
     def _execute(self, steps, navigate, on_status, estop_active) -> None:
         """Run each step: transit to entry with the implement off, then traverse to exit with it on.

@@ -135,6 +135,37 @@ class TestMissionExecution(unittest.TestCase):
         self.svc.publish_tool_msgs.assert_not_called()
         self.assertEqual(self.events[-1], (WARN, 'Cancelled'))
 
+    def test_start_status_failure_releases_slot_and_preserves_exception(self) -> None:
+        """Verify a failed initial status callback permits a later mission start."""
+        failure = RuntimeError('status callback failed')
+        on_status = Mock(side_effect=failure)
+        with patch.object(mds.threading, 'Thread') as worker:
+            with self.assertRaises(RuntimeError) as raised:
+                self.svc.start([], Mock(), on_status, lambda: False)
+            self.assertIs(raised.exception, failure)
+            self.assertFalse(self.svc.running)
+            worker.assert_not_called()
+
+            on_status.side_effect = None
+            self.svc.start([], Mock(), on_status, lambda: False)
+            worker.return_value.start.assert_called_once()
+            self.assertTrue(self.svc.running)
+
+    def test_thread_start_failure_releases_slot_and_preserves_exception(self) -> None:
+        """Verify a failed worker start propagates unchanged and permits a retry."""
+        failure = RuntimeError('thread start failed')
+        with patch.object(mds.threading, 'Thread') as worker:
+            worker.return_value.start.side_effect = failure
+            with self.assertRaises(RuntimeError) as raised:
+                self.svc.start([], Mock(), Mock(), lambda: False)
+            self.assertIs(raised.exception, failure)
+            self.assertFalse(self.svc.running)
+
+            worker.return_value.start.side_effect = None
+            self.svc.start([], Mock(), Mock(), lambda: False)
+            self.assertEqual(worker.return_value.start.call_count, 2)
+            self.assertTrue(self.svc.running)
+
     def test_second_start_rejected_while_running(self) -> None:
         """Verify start() raises while a mission is running and clears state after it ends."""
         release = threading.Event()
