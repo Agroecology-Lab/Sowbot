@@ -20,6 +20,8 @@ jobs:
             command: make ruff
           - name: mypy
             command: make mypy
+          - name: import-linter
+            command: make lint-imports
           - name: test
             command: make test
     runs-on: ubuntu-latest

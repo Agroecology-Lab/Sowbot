@@ -23,6 +23,10 @@ install-ci:
 mypy:
 	mypy ./src/devkit_driver ./src/devkit_bringup ./src/devkit_ui --exclude 'setup\.py$$' --non-interactive --install-types
 
+## lint-imports	Check UI layer dependency rules.
+lint-imports:
+	cd src/devkit_ui && lint-imports --config ../../.importlinter
+
 ## pylint		Run pylint code analysis.
 pylint:
 	pylint \

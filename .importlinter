@@ -1,0 +1,80 @@
+[importlinter]
+root_package = devkit_ui
+include_external_packages = True
+
+[importlinter:contract:pages-only-view-models]
+name = Pages import only ViewModels
+type = forbidden
+source_modules =
+    devkit_ui.pages
+forbidden_modules =
+    devkit_ui.application_services
+    devkit_ui.domain_services
+    devkit_ui.missions
+    devkit_ui.obstacles
+    devkit_ui.ros_gateway
+    devkit_ui.qos
+    rclpy
+allow_indirect_imports = True
+
+[importlinter:contract:view-models-no-backend]
+name = ViewModels do not reach domain services, stores or ROS
+type = forbidden
+source_modules =
+    devkit_ui.view_models
+forbidden_modules =
+    devkit_ui.domain_services
+    devkit_ui.missions
+    devkit_ui.obstacles
+    devkit_ui.ros_gateway
+    devkit_ui.qos
+    rclpy
+allow_indirect_imports = True
+unmatched_ignore_imports_alerting = error
+ignore_imports =
+    # TODO(#116): ObstacleViewModel -> ObstacleApplicationService
+    devkit_ui.view_models.obstacle_view_model -> devkit_ui.obstacles
+
+[importlinter:contract:services-ui-neutral]
+name = Services are UI-neutral
+type = forbidden
+source_modules =
+    devkit_ui.application_services
+    devkit_ui.domain_services
+forbidden_modules =
+    nicegui
+    devkit_ui.pages
+    devkit_ui.view_models
+allow_indirect_imports = True
+
+[importlinter:contract:domain-not-upward]
+name = Domain services do not import application services
+type = forbidden
+source_modules =
+    devkit_ui.domain_services
+forbidden_modules =
+    devkit_ui.application_services
+allow_indirect_imports = True
+
+[importlinter:contract:rclpy-via-gateway]
+name = Only RosGateway touches rclpy
+type = forbidden
+source_modules =
+    devkit_ui.pages
+    devkit_ui.view_models
+    devkit_ui.application_services
+    devkit_ui.domain_services
+    devkit_ui.missions
+    devkit_ui.obstacles
+    devkit_ui.qos
+forbidden_modules =
+    rclpy
+allow_indirect_imports = True
+unmatched_ignore_imports_alerting = error
+ignore_imports =
+    # TODO(#116): move rclpy.qos profiles behind RosGateway
+    devkit_ui.domain_services.row_discovery_domain_service -> rclpy
+    devkit_ui.domain_services.telemetry_domain_service -> rclpy
+    devkit_ui.domain_services.topology_domain_service -> rclpy
+    devkit_ui.obstacles -> rclpy
+    devkit_ui.qos -> rclpy

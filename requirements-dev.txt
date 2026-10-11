@@ -9,6 +9,7 @@ pytest
 pytest-asyncio
 mypy
 pylint
+import-linter
 ruff==0.16.6
 pre-commit
 livesync
