@@ -54,7 +54,7 @@ def attach_topology(node, maps_dir):
     domain = FakeTopologyDomain(node)
     store = TopoMapStore(str(maps_dir))
     app = TopologyApplicationService(domain, store)
-    # Populate the namespace used by the methods compiled into the test harness.
+    # NOTE: Populate the namespace used by the methods compiled into the test harness.
     vars(node).update(
         _topo_map_pub=Mock(),
         _topo_domain=domain,
