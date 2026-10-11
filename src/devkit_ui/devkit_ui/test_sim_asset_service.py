@@ -59,6 +59,42 @@ class TestValidateMesh(SimAssetTestCase):
                 with self.assertRaisesRegex(SimAssetError, message):
                     self.service.validate_mesh(data, name, collision=collision)
 
+    def test_size_limit_is_inclusive_for_both_mesh_roles_and_formats(self) -> None:
+        """Accept exactly 50 MiB and reject the very next byte for either role."""
+        for filename, header in [('crop.glb', b'glTF'), ('crop.gltf', b'{"asset":{}}')]:
+            data = header.ljust(MAX_MESH_BYTES, b' ')
+            for collision in (False, True):
+                with self.subTest(filename=filename, collision=collision):
+                    self.service.validate_mesh(data, filename, collision=collision)
+                    prefix = 'collision file' if collision else 'file'
+                    with self.assertRaisesRegex(SimAssetError, rf'^{prefix} too large \(max 50MB\)$'):
+                        self.service.validate_mesh(data + b' ', filename, collision=collision)
+
+    def test_accepts_whitespace_padded_json_objects_and_arrays(self) -> None:
+        """The JSON signature check supports both roots and mixed-case suffixes."""
+        for data in (b'\t\r\n {"asset": {}} \n', b' \n [] \t'):
+            with self.subTest(data=data):
+                self.service.validate_mesh(data, 'crop.mesh.GlTf')
+
+    def test_rejects_missing_or_disguised_extensions(self) -> None:
+        """A valid signature cannot bypass the uploaded filename restriction."""
+        for filename in ('crop', '', 'crop.', 'crop.glb.exe', 'crop.gltf ', 'crop.GLB/texture'):
+            with self.subTest(filename=filename):
+                with self.assertRaisesRegex(SimAssetError, r'^only \.glb/\.gltf files accepted$'):
+                    self.service.validate_mesh(GLB, filename)
+
+    def test_rejects_empty_truncated_and_mismatched_signatures(self) -> None:
+        """Choose signature validation by extension without accepting empty content."""
+        cases = [
+            ('crop.glb', b''), ('crop.glb', b'g'), ('crop.glb', b'glT'),
+            ('crop.glb', b'GLTF'), ('crop.glb', b' glTF'), ('crop.glb', b'{}'),
+            ('crop.gltf', b''), ('crop.gltf', b' \n\t'), ('crop.gltf', GLB),
+        ]
+        for filename, data in cases:
+            with self.subTest(filename=filename, data=data):
+                with self.assertRaisesRegex(SimAssetError, '^invalid glTF file$'):
+                    self.service.validate_mesh(data, filename)
+
 
 class TestCropModels(SimAssetTestCase):
     """Crop models are written as a folder Gazebo can load."""
@@ -118,6 +154,25 @@ class TestCropModels(SimAssetTestCase):
         (self.crop_dir / 'no_sdf').mkdir(parents=True)
         self.assertEqual(self.service.list_crop_models(), ['plant'])
 
+    def test_lists_only_complete_model_directories_in_sorted_order(self) -> None:
+        """Discovery ignores ordinary files and incomplete uploads."""
+        for name in ('zucchini', 'beet', 'maize'):
+            self.service.create_crop_model(name, GLB)
+        (self.crop_dir / 'incomplete').mkdir()
+        (self.crop_dir / 'ordinary_file').write_bytes(GLB)
+
+        self.assertEqual(self.service.list_crop_models(), ['beet', 'maize', 'zucchini'])
+
+    def test_has_crop_model_requires_a_directory_and_an_sdf_file(self) -> None:
+        """The dropdown fallback and a directory named model.sdf are not models."""
+        self.assertFalse(self.service.has_crop_model('plant'))
+        (self.crop_dir / 'incomplete').mkdir(parents=True)
+        (self.crop_dir / 'sdf_directory' / 'model.sdf').mkdir(parents=True)
+        (self.crop_dir / 'ordinary_file').write_bytes(GLB)
+        for name in ('missing', 'incomplete', 'sdf_directory', 'ordinary_file'):
+            with self.subTest(name=name):
+                self.assertFalse(self.service.has_crop_model(name))
+
 
 class TestSoilImport(SimAssetTestCase):
     """Soil zips replace the previous texture set."""
@@ -126,6 +181,26 @@ class TestSoilImport(SimAssetTestCase):
         """Verify file names map to PBR roles the way Forest3D does it."""
         cases = {'Soil_Diffuse.jpg': 'albedo', 'x_normal.png': 'normal',
                  'x_Rough.png': 'roughness', 'height.png': 'other'}
+        for name, role in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(self.service.classify_map(name), role)
+
+    def test_classifies_all_aliases_case_insensitively(self) -> None:
+        """Recognize all supported Forest3D PBR naming conventions."""
+        aliases = {
+            'albedo': ('diff', 'albedo', 'base', 'color'),
+            'normal': ('normal', 'nor', 'nrm'),
+            'roughness': ('rough',),
+            'other': ('height', 'ao', 'displacement', 'metallic'),
+        }
+        for role, keywords in aliases.items():
+            for keyword in keywords:
+                with self.subTest(keyword=keyword):
+                    self.assertEqual(self.service.classify_map(f'SOIL_{keyword.upper()}.JPEG'), role)
+
+    def test_classification_prioritizes_albedo_then_normal_then_roughness(self) -> None:
+        """Ambiguous filenames retain the same role as Forest3D's first match."""
+        cases = {'rough_normal_color.png': 'albedo', 'rough_nrm.jpg': 'normal', '': 'other'}
         for name, role in cases.items():
             with self.subTest(name=name):
                 self.assertEqual(self.service.classify_map(name), role)
