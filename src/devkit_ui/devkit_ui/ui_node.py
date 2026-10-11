@@ -695,13 +695,18 @@ class NiceGuiNode(Node):
         """Save the most recently planned F2C swaths as rows in the loaded topology map.
 
         In-row edges use the selected row action and headland edges use point-to-point
-        navigation. The checks here are gates: a missing fix, odometry or map reports an
-        error in ``f2c_save_status`` and writes nothing. Persistence runs in the
-        background, and worker errors are also reported in ``f2c_save_status``.
+        navigation. A missing prefix, planned swaths, GPS fix or map reports an error
+        in ``f2c_save_status`` and writes nothing, as do nonfinite GPS coordinates
+        or coordinates both within 1e-9 degrees of zero. Hardware requires odometry;
+        simulation requires the planned field origin instead. A negative GPS fix
+        status alone does not prevent saving. Persistence runs in the background,
+        and worker errors are also reported in ``f2c_save_status``. Errors from
+        ``build_row_nodes`` propagate synchronously before persistence is scheduled.
 
         Args:
-            prefix: Prefix for the generated node names. It is upper-cased and stripped
-                to ``A-Z``, ``0-9`` and ``_``.
+            prefix: Prefix for the generated node names. Surrounding whitespace is
+                stripped, letters are uppercased, spaces become underscores, and
+                characters outside ``A-Z``, ``0-9`` and ``_`` are removed.
             row_id_start: Row id given to the first planned swath.
             overwrite: Replace existing ``<prefix>_R*`` nodes instead of skipping
                 names that are already taken.
@@ -816,11 +821,15 @@ class NiceGuiNode(Node):
         New in-row edges use the selected row action, and existing edge actions are
         kept. The in-memory map is updated immediately and the change is persisted in
         the background. Validation failures and worker errors are reported in
-        ``f2c_save_status``.
+        ``f2c_save_status``. No persistence is scheduled if no edges are added.
 
         Parameters:
-            connect_to (str | None): Optional node name included in the success status if it exists.
-                No connections to this node are added.
+            connect_to (str | None): Optional node name used only in the success status
+                text; it does not add connections. An unknown node is ignored.
+
+        Raises:
+            OverflowError: Row metadata contains an infinite row ID; propagated
+                from ``plan_row_repair`` before any edges are added.
         """
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'

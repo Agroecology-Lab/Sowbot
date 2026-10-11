@@ -107,7 +107,11 @@ def _make_node(name: str, x: float, y: float, role: str, lat: float, lon: float,
 
 
 def _add_headland_edge(nodes: dict[NodeID, TopoNode], p: NodeID, q: NodeID) -> None:
-    """Link p and q with a bidirectional nav_to_pose edge."""
+    """Link p and q with a bidirectional nav_to_pose edge.
+
+    Replace any existing edges between them. Raise KeyError if either name is
+    absent from ``nodes``; an edge may already have been added before the error.
+    """
     edge_id = f'{p}_{q}'
     for src, dst in ((p, q), (q, p)):
         nodes[src].add_edge(TopoEdge(action=NAV_ACTION, edge_id=edge_id, node=dst))
@@ -118,20 +122,43 @@ def _add_headland_edge(nodes: dict[NodeID, TopoNode], p: NodeID, q: NodeID) -> N
 def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings) -> RowBuild:
     """Turn planned swaths into entry, waypoint and exit nodes with their edges.
 
-    Each swath becomes an IN and an OUT node joined by row-follow edges. Contour
-    rows also get intermediate waypoints so ``limbic_row_follow`` knows the row
-    bends; straight rows keep a single entry-to-exit edge.
+    Each usable swath becomes an IN and an OUT node joined by directed edges using
+    ``settings.row_action``. With contour mode and more than two points, rows may
+    also get intermediate waypoints; otherwise they keep a single entry-to-exit edge.
 
-    Consecutive rows are joined OUT to the next row's IN with a headland edge. The
+    Consecutive built rows are joined OUT to the next row's IN in both directions. The
     swaths arrive in snake order, so that pairing is known by construction and no
     coordinate guessing is needed. Guessing from coordinates alone
     (``headland_neighbour_pairs``) splits the field on the wrong axis once the
     cross-row width approaches the row length, leaving two disconnected halves.
-    Rows listed in ``settings.break_after`` are not linked to the next row.
+    Swaths whose zero-based indices are in ``settings.break_after`` are not linked
+    to the next built row.
 
-    If ``settings.connect_to`` is set, the first IN and last OUT are linked to it.
-    Swaths with fewer than two points are skipped silently. Names that are already
-    taken are skipped and reported in ``RowBuild.skipped`` unless ``overwrite`` is set.
+    If ``settings.connect_to`` is set, the first IN and last OUT get outgoing
+    navigation edges to it, without checking that the target exists. Swaths with
+    fewer than two points are omitted without renumbering later rows or appearing
+    in ``RowBuild.skipped``. Name collisions are checked only within this batch;
+    existing map nodes are handled by ``apply_row_nodes``.
+
+    Args:
+        swaths: Sequences of (latitude, longitude) points in degrees, in snake order.
+        anchor: Projection origin in degrees and its map position in meters.
+            Generated map coordinates are rounded to three decimal places.
+        settings: Naming, metadata and edge options. Row IDs are ``row_id_start``
+            plus the swath index; ``prefix`` is used verbatim. Contour waypoint
+            spacing is ``waypoint_interval_m`` meters along the swath.
+
+    Returns:
+        Generated nodes, added row IDs, endpoint names and row IDs skipped for
+        endpoint-name collisions when overwrite is disabled. Empty if no swath
+        has at least two points. No map is mutated or persisted.
+
+    Raises:
+        TypeError: A consumed coordinate is nonnumeric or a point is not iterable.
+        ValueError: A consumed point does not unpack into two coordinates, or
+            projection or resampling encounters invalid numeric input.
+        ZeroDivisionError: Contour resampling uses a zero waypoint interval.
+        OverflowError: A resampling count cannot be converted to an integer.
     """
     build = RowBuild()
     prefix, row_action = settings.prefix, settings.row_action
@@ -195,10 +222,12 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
 
 
 def apply_row_nodes(doc: TopoDoc, build: RowBuild, prefix: str, overwrite: bool) -> None:
-    """Insert the generated nodes into ``doc``.
+    """Insert the generated nodes into ``doc`` in place, without persisting it.
 
     With ``overwrite``, existing ``<prefix>_R*`` nodes are removed first, together
-    with any edges pointing at them. Nodes whose names already exist are kept.
+    with any edges pointing at them, even when the build is empty. Any remaining
+    nodes whose names match generated nodes are kept unchanged. Inserted nodes
+    are shared with ``build``; no reverse edges are added to existing nodes.
     """
     if overwrite:
         old_names = {node.name for node in doc.nodes if node.name.startswith(f'{prefix}_R')}
@@ -235,8 +264,18 @@ def plan_row_repair(doc: TopoDoc, row_action: str) -> RepairPlan | None:
     classification, since they are not row ends.
 
     This works from coordinates alone because the map on disk may contain nodes
-    dropped by hand with no known generation order. Returns None if no row nodes
-    are found.
+    dropped by hand with no known generation order. Nodes with missing IDs,
+    unrecognized roles, or IDs whose integer conversion raises TypeError or
+    ValueError are ignored. In-row chains require distinct entry and exit nodes.
+
+    Returns:
+        A plan of (source, destination, action) edges without modifying ``doc`` or
+        filtering existing edges, or None if no usable row metadata is found.
+        The row count includes incomplete rows. Headlands are marked skipped
+        when fewer than two endpoint coordinates are available.
+
+    Raises:
+        OverflowError: A row ID is infinite and cannot be converted to an integer.
     """
     rows: dict[int, dict] = {}
     coords: dict[NodeID, tuple[float, float]] = {}
@@ -259,6 +298,7 @@ def plan_row_repair(doc: TopoDoc, row_action: str) -> RepairPlan | None:
         return None
 
     def waypoint_order(name: str) -> int:
+        """Return the numeric ``_W<n>`` suffix, or zero when the suffix is absent."""
         match = _WAYPOINT_SUFFIX.search(name)
         return int(match.group(1)) if match else 0
 
@@ -280,7 +320,10 @@ def plan_row_repair(doc: TopoDoc, row_action: str) -> RepairPlan | None:
 def add_missing_edges(doc: TopoDoc, edges: tuple[tuple[NodeID, NodeID, str], ...]) -> int:
     """Add each wanted edge that ``doc`` lacks, and return how many were added.
 
-    Edges from unknown nodes, self-links and edges that already exist are ignored.
+    Each edge is a (source, destination, action) tuple. Mutate ``doc`` in place
+    without persisting it. Edges from unknown nodes, self-links and edges to an
+    already connected destination are ignored, preserving existing actions.
+    Destination nodes need not exist; reverse edges are not added.
     """
     nodes = {node.name: node for node in doc.nodes}
     added = 0
