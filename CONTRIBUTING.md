@@ -27,10 +27,14 @@ If you're new to ROS, [this course](https://github.com/henki-robotics/robotics_e
 
 Before diving into contributing, see the [Quick Start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) section of the main README to get a working build running first.
 
-Then install the development dependencies:
+Then create a virtual environment and install the development dependencies.
+Use Python 3.11 to 3.13 (`rosys` does not support 3.14), for example 3.12:
 
 ```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
 make sync
+make test
 ```
 
 ## Coding Style
