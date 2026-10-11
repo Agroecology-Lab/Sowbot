@@ -89,7 +89,7 @@ class SimAssetService:
         ext = filename.lower().rsplit('.', 1)[-1] if '.' in filename else ''
         if ext not in ('glb', 'gltf'):
             raise SimAssetError('only .glb/.gltf files accepted')
-        valid = data[:4] == b'glTF' if ext == 'glb' else data.strip()[:1] in (b'{', b'[')
+        valid = data[:4] == b'glTF' if ext == 'glb' else data.strip()[:1] == b'{'
         if not valid:
             raise SimAssetError('invalid glTF file')
         if len(data) > MAX_MESH_BYTES:

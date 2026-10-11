@@ -70,11 +70,15 @@ class TestValidateMesh(SimAssetTestCase):
                     with self.assertRaisesRegex(SimAssetError, rf'^{prefix} too large \(max 50MB\)$'):
                         self.service.validate_mesh(data + b' ', filename, collision=collision)
 
-    def test_accepts_whitespace_padded_json_objects_and_arrays(self) -> None:
-        """The JSON signature check supports both roots and mixed-case suffixes."""
-        for data in (b'\t\r\n {"asset": {}} \n', b' \n [] \t'):
+    def test_json_root_signature_with_whitespace_and_mixed_case_suffix(self) -> None:
+        """Accept object roots and reject array roots with whitespace padding."""
+        for data, valid in ((b'\t\r\n {"asset": {}} \n', True), (b' \n [] \t', False)):
             with self.subTest(data=data):
-                self.service.validate_mesh(data, 'crop.mesh.GlTf')
+                if valid:
+                    self.service.validate_mesh(data, 'crop.mesh.GlTf')
+                else:
+                    with self.assertRaisesRegex(SimAssetError, '^invalid glTF file$'):
+                        self.service.validate_mesh(data, 'crop.mesh.GlTf')
 
     def test_rejects_missing_or_disguised_extensions(self) -> None:
         """A valid signature cannot bypass the uploaded filename restriction."""
