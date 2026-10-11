@@ -41,9 +41,11 @@ def resample_row_xy(points_ll: list, anchor_lat: float, anchor_lon: float,
                     interval_m: float) -> list[tuple[float, float]]:
     """Return evenly spaced waypoints along a row, in local xy.
 
-    ``points_ll`` is the row's full lat/lon point list as f2c_planner returns it.
-    Waypoints are placed every ``interval_m`` of arc length, in a local frame
-    anchored at ``anchor_lat``/``anchor_lon``.
+    ``points_ll`` is the row's full lat/lon point list as f2c_planner returns it,
+    in degrees, as are ``anchor_lat`` and ``anchor_lon``.
+    Waypoints are placed every ``interval_m`` meters of arc length, in a local
+    frame anchored at ``anchor_lat``/``anchor_lon``, with x east and y north, in meters.
+    Supply a finite, positive interval; zero raises ZeroDivisionError for two or more points.
 
     The row's first and last points are excluded, because callers already turn
     them into the IN and OUT topo nodes. Returns an empty list if the row has
@@ -85,21 +87,21 @@ def resample_row_xy(points_ll: list, anchor_lat: float, anchor_lon: float,
 def headland_neighbour_pairs(coords: dict) -> list:
     """Return the node-name pairs to join with headland (nav_to_pose) edges.
 
-    ``coords`` maps each row-end node name to its (x, y). Each node is linked
-    only to its immediate neighbour at the same end of the field, so a route
-    between rows follows the headland and never cuts across a crop row.
+    ``coords`` maps each row-end node name to its local (x, y).
+    Consecutive nodes within each inferred field end are paired without modifying ``coords``.
 
     The IN/OUT label cannot be used to tell which end a node is at, because snake
     (boustrophedon) ordering flips the label-to-end mapping on alternate rows.
-    Ends are classified by geometry instead: rows are long, so the two ends lie at
-    the extremes of the axis with the larger spread. The nodes are split into two
-    ends on that axis, each end is ordered along the other axis, and consecutive
-    nodes are paired. Neighbours are always chained, never skip-linked, so A*
-    walks the headland instead of cutting a chord across a row mouth.
+    Ends are inferred using the axis with the larger spread (y for a tie), split
+    below versus at or above its upper median.
+    Each group is ordered along the other axis.
+    This assumes the chosen axis separates the physical row ends; wide or irregular
+    fields can violate that assumption and produce pairs that cross rows.
 
-    save_f2c_rows_to_topo (initial build) and repair_row_connectivity (rewire)
-    both use this, so the two cannot drift apart. Returns an empty list for fewer
-    than two endpoints, and never pairs a node with itself.
+    Used by repair_row_connectivity; initial row saving uses swath order instead.
+    Returns an empty list for fewer than two endpoints, and never pairs a node
+    with itself.
+    Each pair is returned once; callers add any reverse edge.
     """
     pts = list(coords.items())
     if len(pts) < 2:
@@ -131,13 +133,33 @@ def plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float,
     (RBFInterpolator fit and swath offsetting), so callers run it off the event
     loop, for example through ``ng_run.io_bound``.
 
-    Returns None, which is not an error, when the field is too flat for a usable
-    reference contour (see dem.select_reference_contour_xy()). Callers should then
-    fall back to straight swaths from ``_run_f2c``.
+    ``corners_ll`` and ``obstacle_rings`` contain (latitude, longitude) points in
+    degrees; the field needs at least three corners.
+    ``tool_width`` is the row spacing in meters.
+    Positive ``pad_m`` expands obstacles; positive ``headland_m`` insets the field,
+    falling back to the full boundary if the inset is empty or is not a single polygon.
+    ``snake`` reverses alternate rows.
+    ``dem_resolution_m`` is the finite, positive grid cell size in meters.
 
-    Raises FileNotFoundError or ValueError, unchanged, from load_recon_points().
-    A missing or too-short recon log is a setup mistake that should be reported to
-    the user rather than silently treated as a flat field.
+    Returns swaths as lists of (latitude, longitude) points in degrees, or an
+    empty list if no rows survive planning.
+    Returns None when no usable reference contour exists, including flat terrain,
+    contours shorter than one meter, or
+    a centroid outside the elevation grid (see dem.select_reference_contour_xy()).
+    Callers should then fall back to straight swaths from ``_run_f2c``.
+
+    When a reference contour exists, ``break_after`` is cleared and filled in
+    place with zero-based output indices after which headland links must be
+    skipped because of field or obstacle gaps.
+    It is unchanged on a None return.
+
+    Reading ``recon_path`` propagates OSError (including FileNotFoundError),
+    KeyError for missing CSV columns, and ValueError for invalid numbers or fewer
+    than three samples.
+    ValueError also propagates for invalid grid resolution or an oversized grid.
+    Empty ``corners_ll`` raises IndexError after loading the CSV.
+    Interpolation and uncaught geometry errors propagate; offset-curve
+    failures are caught by the planner and stop further offsets on that side.
     """
     _xy_native, elevation, latlon = load_recon_points(recon_path)
     lat0, lon0 = corners_ll[0]

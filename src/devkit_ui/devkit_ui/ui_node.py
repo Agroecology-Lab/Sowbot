@@ -1002,8 +1002,8 @@ class NiceGuiNode(Node):
         and worker errors in f2c_save_status. Ignore an unknown connect_to node.
 
         Parameters:
-            connect_to (str | None): Optional node name to connect bidirectionally to the first row
-            entry and last row exit.
+            connect_to (str | None): Optional node name included in the success status if it exists.
+                No connections to this node are added.
         """
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'
