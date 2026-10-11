@@ -25,10 +25,9 @@ If you're new to ROS, [this course](https://github.com/henki-robotics/robotics_e
 
 ### Local Setup
 
-Python 3.11 to 3.13.
 Before diving into contributing, see the [Quick Start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) section of the main README to get a working build running first.
 
-Install the development dependencies:
+Then install the development dependencies:
 
 ```bash
 make sync
