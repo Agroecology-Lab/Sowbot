@@ -74,8 +74,77 @@ class TestResampleRowXy(unittest.TestCase):
         self.assertEqual(len(points), 2)
         self.assertAlmostEqual(math.dist(points[0], points[1]), 5.0, places=3)
 
+    def test_exit_clearance_boundary_keeps_exactly_thirty_percent(self) -> None:
+        """Keep the last waypoint at the clearance threshold, but not just below it."""
+        # NOTE: Exact local coordinates isolate the boundary from projection roundoff.
+        with patch.object(row_planning, '_f2c_latlon_to_xy', side_effect=lambda x, y, *_: (x, y)):
+            for length, expected in (
+                (22.999, [(10.0, 0.0)]),
+                (23.0, [(10.0, 0.0), (20.0, 0.0)]),
+                (23.001, [(10.0, 0.0), (20.0, 0.0)]),
+            ):
+                with self.subTest(length=length):
+                    self.assertEqual(resample([(0.0, 0.0), (length, 0.0)], 10.0), expected)
+
+    def test_repeated_vertices_do_not_change_waypoints(self) -> None:
+        """Zero-length segments at the start, bend, and exit must not add nodes."""
+        row = row_from_xy(
+            (0.0, 0.0), (0.0, 0.0), (6.0, 0.0), (6.0, 0.0),
+            (6.0, 6.0), (6.0, 6.0),
+        )
+        original = list(row)
+
+        self.assert_points_close(resample(row, 3.0), [(3.0, 0.0), (6.0, 0.0), (6.0, 3.0)])
+        self.assertEqual(row, original)
+
+    def test_coincident_row_has_no_waypoints(self) -> None:
+        """A stationary row cannot produce useful intermediate nodes."""
+        self.assertEqual(resample(row_from_xy(*[(3.0, 4.0)] * 4), 2.5), [])
+
+    def test_waypoints_accumulate_across_multiple_short_segments(self) -> None:
+        """Spacing carries across vertices instead of restarting on each segment."""
+        row = row_from_xy((0.0, 0.0), (1.0, 0.0), (1.0, 2.0), (3.0, 2.0), (3.0, 6.0))
+
+        self.assert_points_close(resample(row, 4.0), [(2.0, 2.0)])
+
+    def test_reversed_row_measures_spacing_from_its_new_entry(self) -> None:
+        """Snake rows must emit waypoints in traversal order, including negative coordinates."""
+        row = row_from_xy((-7.0, -3.0), (-7.0, 9.0))
+
+        self.assert_points_close(resample(row[::-1], 5.0), [(-7.0, 4.0), (-7.0, -1.0)])
+
+    def test_exactly_one_interval_does_not_duplicate_exit(self) -> None:
+        """A row of one interval needs only the existing entry and exit nodes."""
+        self.assertEqual(resample(row_from_xy((0.0, 0.0), (0.0, 2.5)), 2.5), [])
+
 
 class TestHeadlandNeighbourPairs(unittest.TestCase):
+    def test_shuffled_endpoints_are_sorted_geometrically_without_mutating_input(self) -> None:
+        """Input order and translation must not introduce skip-links or cross-field edges."""
+        coords = {
+            'east_middle': (80.0, -7.0), 'west_last': (-20.0, -1.0),
+            'east_last': (80.0, -1.0), 'west_first': (-20.0, -10.0),
+            'east_first': (80.0, -10.0), 'west_middle': (-20.0, -7.0),
+        }
+        original = list(coords.items())
+        expected = {
+            frozenset({'west_first', 'west_middle'}),
+            frozenset({'west_middle', 'west_last'}),
+            frozenset({'east_first', 'east_middle'}),
+            frozenset({'east_middle', 'east_last'}),
+        }
+
+        for endpoints in (coords, dict(reversed(original))):
+            with self.subTest(order=list(endpoints)):
+                pairs = headland_neighbour_pairs(endpoints)
+                self.assertEqual(len(pairs), len(expected))
+                self.assertEqual(as_pairs(pairs), expected)
+        self.assertEqual(list(coords.items()), original)
+
+    def test_single_row_does_not_connect_opposite_ends(self) -> None:
+        """Without a neighbouring row there is no headland connection to create."""
+        self.assertEqual(headland_neighbour_pairs({'IN': (-10.0, 0.0), 'OUT': (10.0, 0.0)}), [])
+
     def test_fewer_than_two_endpoints_have_no_pairs(self) -> None:
         """Verify there is nothing to join with zero or one endpoint."""
         self.assertEqual(headland_neighbour_pairs({}), [])

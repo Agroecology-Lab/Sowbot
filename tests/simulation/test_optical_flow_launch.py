@@ -59,6 +59,26 @@ def test_lifecycle_node_is_configured_then_activated_once(launch_file, tmp_path)
     assert activations[0].kwargs['event'].kwargs['lifecycle_node_matcher'].args == (node,)
 
 
+@pytest.mark.usefixtures('launch_file')
+def test_repeated_launch_descriptions_target_their_own_driver():
+    """Repeated inclusion must not retain lifecycle actions targeting a previous node."""
+    # NOTE: The fixture supplies ROS doubles; reuse one module to catch cached node state.
+    module = runpy.run_path(str(REPO_ROOT / 'src/devkit_bringup/launch/optical_flow.launch.py'))
+    generate = module['generate_launch_description']
+    first_actions = generate().args[0]
+    actions = generate().args[0]
+    first_node, = [action for action in first_actions if action.kind == 'LifecycleNode']
+    second_node, = [action for action in actions if action.kind == 'LifecycleNode']
+
+    assert second_node is not first_node
+    configure, = [action for action in actions if action.kind == 'EmitEvent']
+    handler, = [action.args[0] for action in actions if action.kind == 'RegisterEventHandler']
+    assert configure.kwargs['event'].kwargs['lifecycle_node_matcher'].args == (second_node,)
+    assert handler.kwargs['target_lifecycle_node'] is second_node
+    activate, = handler.kwargs['entities']
+    assert activate.kwargs['event'].kwargs['lifecycle_node_matcher'].args == (second_node,)
+
+
 @pytest.mark.parametrize('missing_package', ['optical_flow_ros', 'devkit_bringup'])
 def test_missing_package_aborts_before_creating_driver(
     launch_file, monkeypatch, tmp_path, missing_package,
