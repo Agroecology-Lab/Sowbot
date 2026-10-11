@@ -16,16 +16,23 @@ If you encounter a bug or have a feature request:
 We are committed to providing a welcoming and inclusive environment.
 Please be respectful and constructive in all interactions.
 
+## Background
+
+We welcome volunteers of all levels to contribute.
+If you're new to ROS, [this course](https://github.com/henki-robotics/robotics_essentials_ros2) may be useful.
+
 ## Development Setup
-
-### Prerequisites
-
-- Python 3.11+ and pip installed
-- Git for version control
 
 ### Local Setup
 
+Python 3.11 to 3.13.
 Before diving into contributing, see the [Quick Start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) section of the main README to get a working build running first.
+
+Install the development dependencies:
+
+```bash
+make sync
+```
 
 ## Coding Style
 
@@ -67,7 +74,7 @@ Before diving into contributing, see the [Quick Start](https://github.com/Agroec
 
 ## ROS2 Best Practices
 
-We work towards [https://henkirobotics.com/ros-2-best-practices/](Henki ROS2 Best Practises)
+We work towards the [Henki ROS 2 Best Practices](https://github.com/henki-robotics/henki_ros2_best_practices).
 
 ## Workflow Guidelines
 
@@ -88,34 +95,22 @@ We work towards [https://henkirobotics.com/ros-2-best-practices/](Henki ROS2 Bes
 
 ### Testing
 
-Run tests before submitting:
+Run before pushing.
+This runs the CI checks (ruff, mypy, pylint, unit tests) plus the tests in `tests/`:
 
 ```bash
-pytest
+make pre-commit ruff mypy pylint test && pytest
 ```
+
+- pylint must score 10.0
+- Pre-commit hooks may modify files and exit non-zero; re-stage and re-run
+- CI auto-commits ruff fixes to pushed branches; pull before pushing again
+- Industrial CI (ROS 2 Jazzy build) runs in CI only
 
 Write tests for:
 - New features
 - Bug fixes
 - Edge cases
-
-### Code Quality
-
-Check your code with:
-
-```bash
-make check # which runs:
-# ruff check .
-# mypy .
-# pylint ./feldfreund_devkit_ros
-```
-
-Or let pre-commit handle it:
-
-```bash
-make pre-commit # which runs:
-# pre-commit run --all-files
-```
 
 ## Pull Requests
 
@@ -145,29 +140,6 @@ We welcome AI-assisted development! When using AI coding assistants:
 - Ensure AI-generated code follows project principles
 - Always review and understand AI suggestions before committing
 - Test AI-generated code thoroughly
-
-### For Reviewers
-
-AI can assist with code reviews according to [.github/copilot-instructions.md](.github/copilot-instructions.md).
-
-**Before submitting a PR**, you should review your changes with an AI assistant:
-
-In **Cursor** or **VS Code with GitHub Copilot Chat**:
-
-Select Agent Mode with claude-sonnet-4 and write:
-```
-Review my current branch according to @.github/copilot-instructions.md
-```
-
-Or in **Cursor**, use these custom commands for easy access:
-1. Type `/` in Cursor chat
-2. Select commands:
-   - `/review-uncommitted` - Review your local uncommitted changes
-   - `/review-branch` - Review your current branch vs main
-   - `/simplify` - Suggest ways to simplify code
-   - `/explain` - Explain what code does
-
-Ensure to address any valid feedback. This will make your life and that of the maintainers much easier.
 
 ## Documentation
 
