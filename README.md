@@ -221,16 +221,22 @@ ros2 launch devkit_bringup optical_flow.launch.py
 
 Do not use upstream's `optical_flow_launch.py`: it broadcasts `odom` -> `base_link`, which FusionCore owns.
 
-- Sensor parameters: `config/sensor_params.yaml` in the upstream package (`board`, `spi_nr`, `spi_slot`, `rotation`, `z_height`, `sensor_timeout`). `src/devkit_bringup/config/optical_flow.yaml` is loaded after it and sets `publish_tf: false`. Put local driver settings there, not in the cloned source.
+- Sensor parameters: `config/sensor_params.yaml` in the upstream package (`board`, `spi_nr`, `spi_slot`, `rotation`, `z_height`, `sensor_timeout`).
+  `src/devkit_bringup/config/optical_flow.yaml` is loaded after it and sets `publish_tf: false`.
+  Put local driver settings there, not in the cloned source.
 - The launch remaps `odom` to `flow_odom` and publishes `/diagnostics`.
 - `flow_odom` is not consumed by FusionCore (its inputs are hardcoded to `/gnss/fix` and `/odom/wheels`).
 - Upstream tested on Raspberry Pi (SPI). Not tested here on the supported SBCs.
 - Requires `/dev/spidev*` on the host; the container runs privileged with `/dev` mounted.
 
 Known limitations of the pinned driver, not fixed here:
-- `flow_odom` is not fit for fusion. The orientation is left unset (0, 0, 0, 0), every covariance is zero and angular velocity is zero. Do not feed it to an estimator without fixing the message.
-- `/diagnostics` reports OK whenever the node runs. A sensor timeout is published as zero motion, so it is not a health signal.
-- Each read can block for up to `sensor_timeout` (0.5 s) inside a 100 Hz timer. A stationary sensor therefore publishes slower than 100 Hz, and the linear velocity (distance divided by the nominal 0.01 s) is wrong whenever a callback runs late.
+- `flow_odom` is not fit for fusion.
+  The orientation is left unset (0, 0, 0, 0), every covariance is zero and angular velocity is zero.
+  Do not feed it to an estimator without fixing the message.
+- `/diagnostics` reports OK whenever the node runs.
+  A sensor timeout is published as zero motion, so it is not a health signal.
+- Each read can block for up to `sensor_timeout` (0.5 s) inside a 100 Hz timer.
+  A stationary sensor therefore publishes slower than 100 Hz, and the linear velocity (distance divided by the nominal 0.01 s) is wrong whenever a callback runs late.
 
 ## Management & Tools
 
