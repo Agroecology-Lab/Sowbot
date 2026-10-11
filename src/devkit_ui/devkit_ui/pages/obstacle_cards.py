@@ -74,6 +74,7 @@ def attach_nav_card(vm: ObstacleViewModel) -> None:
     _prev = ['']
 
     def _refresh() -> None:
+        """Update the Nav card's status text and color when the message changes."""
         cur = vm.status
         if cur == _prev[0]:
             return
@@ -100,6 +101,7 @@ class MissionDrawHandle:
 
     def __init__(self, vm: ObstacleViewModel, mission_map,
                  obstacle_pad_widget) -> None:
+        """Store shared widgets and initialize drawing state and obstacle layers."""
         self.vm           = vm
         self.mission_map  = mission_map
         self.obstacle_pad = obstacle_pad_widget
@@ -177,16 +179,19 @@ def attach_mission_sidebar_controls(
     handle = MissionDrawHandle(vm, mission_map, obstacle_pad)
 
     def _on_mode(e):
+        """Select the draw mode and show obstacle controls only in obstacle mode."""
         handle.draw_mode[0] = e.args
         obs_controls.set_visibility(e.args == 'obstacle')
 
     def _on_shape(e):
+        """Select the obstacle shape used for subsequent map clicks."""
         handle.obs_shape[0] = e.args
 
     mode_toggle.on('update:model-value',  _on_mode)
     shape_toggle.on('update:model-value', _on_shape)
 
     def _redraw_in_progress() -> None:
+        """Replace the polygon preview, drawing it when at least two corners exist."""
         if handle.layer[0] is not None:
             try:
                 handle.layer[0].run_method('remove')
@@ -203,6 +208,7 @@ def attach_mission_sidebar_controls(
             )
 
     def _finish_polygon() -> None:
+        """Submit the polygon corners and clear the drawing only if accepted."""
         added = vm.add_polygon(list(handle.corners))
         # On failure (dup name etc.) keep in-progress state for retry.
         # Only tear down on success.
@@ -212,6 +218,7 @@ def attach_mission_sidebar_controls(
     finish_btn.on_click(_finish_polygon)
 
     def _on_map_click(e) -> None:
+        """Route a map click to the boundary, a circle, or an in-progress polygon."""
         lat = e.args['latlng']['lat']
         lon = e.args['latlng']['lng']
         if handle.draw_mode[0] == 'boundary':
@@ -246,6 +253,7 @@ def attach_mission_obstacle_panel(handle: MissionDrawHandle) -> None:
     _prev = {'version': -1, 'status': None}
 
     def _refresh() -> None:
+        """Refresh status on changes and rebuild the list and map layers on a new version."""
         v      = vm.version
         status = vm.status
         if v == _prev['version'] and status == _prev['status']:
