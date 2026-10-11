@@ -2296,9 +2296,9 @@ class NiceGuiNode(Node):
                             ).classes('w-28')
                     with ui.column().classes('flex-1 gap-0'):
                         ui.html('<div class="sec-label">Model</div>')
+                        crop_models = self._sim_assets.list_crop_models()
                         plant_model = ui.select(
-                            options=self._sim_assets.list_crop_models(),
-                            value=self._sim_assets.list_crop_models()[0] if self._sim_assets.list_crop_models() else None
+                            options=crop_models, value=crop_models[0]
                         ).classes('w-full')
 
                 # Row 3: weed_density + category (coming)
