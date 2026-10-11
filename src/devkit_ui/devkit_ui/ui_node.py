@@ -559,16 +559,20 @@ class NiceGuiNode(Node):
 
     def start_track(self, prefix: str, interval: float,
                     row_id: int | None, row_role: str | None) -> None:
-        """
-                    Start periodic recording of topology nodes using the specified naming prefix.
+        """Record a topology node immediately, then periodically using the node's clock.
 
-                    Parameters:
-                        prefix (str): Prefix used for numbered node names after normalization.
-                        interval (float): Time in seconds between recorded nodes.
-                        row_id (int | None): Optional row identifier associated with each node.
-                        row_role (str | None): Role assigned to recorded nodes when no row
-                        identifier is provided.
-                    """
+        Parameters:
+            prefix (str): Prefix used for numbered node names after normalization.
+            interval (float): Time in seconds between recorded nodes.
+            row_id (int | None): Optional row identifier; its first node is an entry,
+                and subsequent nodes are middle nodes.
+            row_role (str | None): Role assigned when no row identifier is provided.
+
+        Continue numbering after existing nodes with the same prefix.
+        Report an empty normalized prefix or an existing timer in tracking status and return.
+        Requires a loaded topology document; timer creation errors propagate after the
+        initial recording attempt.
+        """
         prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
         if not prefix:
             self._run_vm.track.running = False
@@ -1696,6 +1700,7 @@ class NiceGuiNode(Node):
                     'Leave blank for one-shot')
 
                 def _save_mission():
+                    """Save the queue using the entered name and optional repeat interval in hours."""
                     rpt = int(save_repeat.value) if save_repeat.value else None
                     self._mission_vm.save_queue(
                         mission_queue, save_name_input.value or '', rpt)
@@ -1708,6 +1713,7 @@ class NiceGuiNode(Node):
 
             _mstore_prev = [-1]
             def _refresh_missions():
+                """Refresh status; rebuild the saved list and run button when the version changes."""
                 # Store status line
                 cur_status = self._mission_vm.status
                 mission_store_status.set_text(cur_status)
@@ -1779,8 +1785,13 @@ class NiceGuiNode(Node):
         Parameters:
             queue (list): Tuples containing a row ID, action key, and action parameters.
             status_lbl: UI status label updated with mission progress and outcome.
+
+        Report an empty queue, an active mission, unavailable navigation, or MissionError
+        in the label and return; other startup errors propagate.
+        Valid missions run on a worker thread.
         """
         def show(level: str, text: str) -> None:
+            """Set the status label's text and color for a mission status level."""
             status_lbl.set_text(text)
             status_lbl.style(f'color:{MISSION_STATUS_COLOURS[level]}')
 
@@ -1803,6 +1814,12 @@ class NiceGuiNode(Node):
 
     def _send_goal_sync(self, target: str) -> bool:
         """Navigate to a topology node and block until it ends.
+
+        Call from a worker thread.
+        Use a 300-second wait budget after sending the goal, excluding the server wait.
+        Mission cancellation or soft e-stop requests cancellation while waiting.
+        See NavigationApplicationService.navigate_and_wait for polling and cancellation timing.
+        Synchronous navigation errors propagate.
 
         Returns:
             bool: True if the robot arrived, False if navigation failed, was cancelled, timed

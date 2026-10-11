@@ -324,6 +324,11 @@ class ObstacleManager:
     # ── persistence ───────────────────────────────────────────────────────
 
     def _load(self) -> None:
+        """Load the YAML obstacle snapshot, update attached state, and attempt publication.
+
+        Leave state unchanged when the file is missing.
+        Load errors are caught; publication is skipped without a usable GPS/odometry anchor.
+        """
         try:
             if not os.path.exists(self._path):
                 return
@@ -350,6 +355,7 @@ class ObstacleManager:
 
         Snapshot under lock, write + publish lock-free. The topic can
         briefly reflect a state newer than disk (by ms) — see module docs.
+        Persistence errors are caught and reported in the attached node's status.
         """
         try:
             os.makedirs(os.path.dirname(self._path), exist_ok=True)

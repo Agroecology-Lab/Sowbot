@@ -152,6 +152,11 @@ class MissionStore:
         {'name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active'})
 
     def __init__(self, path: str = MISSIONS_FILE) -> None:
+        """Select YAML storage for .yaml or open SQLite storage for .sqlite and .db.
+
+        YAML records are loaded by attach(); SQLite opens and creates its schema here.
+        Raises ValueError for other suffixes; SQLite initialization errors propagate.
+        """
         if path.endswith('.yaml'):
             self._store = MissionYamlStore(path, on_write_done=self.set_status)
         elif path.endswith('.sqlite') or path.endswith('.db'):
@@ -171,7 +176,12 @@ class MissionStore:
             self._store.close()
 
     def attach(self, ros) -> None:
-        """Load saved missions. ros supplies get_logger() for load and write results."""
+        """Load YAML missions synchronously and increment the version for either backend.
+
+        ros supplies get_logger() for YAML load and write results.
+        Missing YAML files leave the snapshot unchanged; YAML load errors are caught.
+        SQLite needs no additional loading here.
+        """
         with self._lock:
             self._store.attach(ros)
             self._version += 1
@@ -200,8 +210,16 @@ class MissionStore:
             name: str = '',
             repeat_every_hours: int | None = None,
             active: bool = True) -> str | None:
-        """Add a mission. Returns its allocated id, or None on failure.
-        Status carries the reason either way."""
+        """Add a mission and return its allocated ID, or None for a validation error.
+
+        rows contains topology entry-node names.
+        Clean name to uppercase letters, digits, and underscores, using the ID if empty.
+        repeat_every_hours is a positive interval after a successful run, or None for
+        a one-shot mission; active controls inclusion in scheduling.
+        Validation errors are reported in status.
+        YAML writes are queued and report failures in status; SQLite database and JSON
+        serialization errors propagate to the caller.
+        """
 
         name = _NAME_CLEAN.sub('', (name or '').strip().upper().replace(' ', '_'))
 
@@ -219,6 +237,12 @@ class MissionStore:
         return mid
 
     def delete(self, mid: str) -> bool:
+        """Delete a saved mission and increment the version.
+
+        Return False and set status for an unknown ID; otherwise return the backend result.
+        YAML persistence is asynchronous; SQLite lookup and write errors propagate,
+        including ValueError for an ID that cannot be converted to a database integer.
+        """
         with self._lock:
             mission = self.find(mid)
             if mission is None:
@@ -231,6 +255,15 @@ class MissionStore:
         return result
 
     def update(self, mid: str, **fields) -> bool:
+        """Validate and persist edits to a saved mission, incrementing the version.
+
+        Accept name, rows, action, action_params, repeat_every_hours, and active.
+        Clean names as in add(), falling back to mid when the cleaned name is empty.
+        Return False and set status for unsupported fields, an unknown ID, or invalid
+        mission values; otherwise return the backend result.
+        YAML persistence is asynchronous; SQLite lookup, write, and JSON serialization
+        errors propagate, including ValueError for malformed database IDs.
+        """
         bad = set(fields) - _MUTABLE_FIELDS
         if bad:
             self.set_status(f'ERROR: cannot update field(s) {sorted(bad)}')
@@ -390,7 +423,7 @@ class MissionStore:
     # ── internals ────────────────────────────────────────────────────────
 
     def _write_run_state(self, mid: str, **fields) -> bool:
-        """Persist run state, increment the version, and refresh attached node state.
+        """Persist run state, increment the version, and return the backend update result.
 
         The caller must hold self._lock.
         """

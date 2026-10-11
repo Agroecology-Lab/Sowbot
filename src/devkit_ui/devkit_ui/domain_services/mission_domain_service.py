@@ -36,6 +36,9 @@ class MissionError(Exception):
 def resolve_steps(topo_doc, queue: list) -> list[MissionStep]:
     """Resolve queued (row_id, action, params) tuples to entry and exit nodes.
 
+    Return (row_id, entry_name, exit_name, action, params) tuples in queue order,
+    preserving repeated rows; an empty queue returns an empty list when a map is loaded.
+    Map row IDs are converted to integers; the last node for each row and role wins.
     Raises MissionError if there is no map or any queued row lacks an entry or exit node.
     """
     if not topo_doc:
@@ -79,7 +82,7 @@ class MissionDomainService:
 
     @property
     def cancel_requested(self) -> bool:
-        """Whether cancel() was called for the current mission."""
+        """Whether cancel() was called since the last mission start or worker cleanup."""
         return self._cancel
 
     def cancel(self) -> None:
@@ -90,8 +93,16 @@ class MissionDomainService:
               on_status: StatusCallback, estop_active: Callable[[], bool]) -> None:
         """Start executing steps on a daemon thread.
 
-        navigate(node) must block until arrival and return True only on arrival.
-        estop_active() is polled between legs. Raises MissionError if one is already running.
+        steps contains (row_id, entry_node, exit_node, action_key, action_params) tuples.
+        navigate(node) must block until navigation ends and return True only on arrival.
+        estop_active() and the cancel flag are checked before each leg; interrupting
+        an active goal is the caller's responsibility.
+        on_status(level, text) runs first on the calling thread, then on the worker,
+        with levels INFO, PROGRESS, WARN, ERROR, or OK.
+        Empty steps report completion without navigating.
+
+        Raises MissionError if a mission is already running.
+        Initial status callback and thread startup errors propagate after clearing running.
         """
         with self._lock:
             if self._running:
@@ -109,10 +120,13 @@ class MissionDomainService:
             raise
 
     def _execute(self, steps, navigate, on_status, estop_active) -> None:
-        """Run each step: transit to entry with the implement off, then traverse to exit with it on.
+        """Navigate to each entry, then request tool activation for the exit traversal.
 
-        Stop on cancel, soft e-stop or navigation failure. Always disengage the implement
-        after a traversal and always clear the running state.
+        Check cancel and soft e-stop before each leg, and stop on navigation failure.
+        Attempt tool deactivation after exit navigation, even if navigation raises.
+        Execution exceptions are reported through on_status(ERROR, text); errors from
+        that error callback propagate out of the worker.
+        Always clear the running and cancel flags on exit.
         """
         try:
             ok = True
@@ -156,7 +170,11 @@ class MissionDomainService:
                 self._cancel = False
 
     def get_tool_publisher(self, topic: str, is_float: bool = False):
-        """Return (creating if needed) the publisher for a tool topic: Float64 if is_float, else Bool."""
+        """Return a cached tool publisher: Float64 if is_float, else Bool.
+
+        Cache separately by topic and message type, creating publishers with depth 1.
+        Gateway creation errors propagate and leave the publisher uncached.
+        """
         key = (topic, is_float)
         if key not in self._tool_publishers:
             self._tool_publishers[key] = self._ros.create_publisher(
@@ -164,7 +182,14 @@ class MissionDomainService:
         return self._tool_publishers[key]
 
     def publish_tool_msgs(self, action_key: str, action_params: dict | None, enable: bool) -> None:
-        """Publish every (topic, value) pair for the action. Per-topic errors are logged, not raised."""
+        """Publish the action's tool commands to enable or disable its implement.
+
+        Boolean values use Bool; numeric values and numeric strings use Float64.
+        Unknown actions and actions without tool topics publish nothing.
+        action_params is forwarded to action_ros_msgs, which currently ignores it.
+        Per-topic conversion and publication errors are caught so later topics continue;
+        errors from action_ros_msgs itself propagate.
+        """
         for topic, value in action_ros_msgs(action_key, action_params, enable):
             try:
                 if isinstance(value, bool):

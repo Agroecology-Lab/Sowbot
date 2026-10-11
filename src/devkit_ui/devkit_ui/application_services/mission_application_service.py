@@ -40,15 +40,26 @@ class MissionApplicationService:
         return self._mission_service.running
 
     def next_due_in_hours(self, mission_id: str) -> float | None:
-        """Return hours until the mission is due, 0.0 if due now, or None if it is done."""
+        """Return hours until due, 0.0 if due now, or -1.0 after a failed run.
+
+        Return None for inactive missions, completed one-shots, or unknown IDs.
+        SQLite lookup errors, including ValueError for malformed IDs, propagate.
+        """
         return self._store.next_due_in_hours(mission_id)
 
     def set_active(self, mission_id: str, active: bool) -> None:
-        """Include or exclude a mission from scheduling. Failures are reported in status."""
+        """Include or exclude a mission from scheduling.
+
+        Missing missions and validation failures are reported in status.
+        SQLite lookup and write errors propagate, including ValueError for malformed IDs.
+        """
         self._store.set_active(mission_id, active)
 
     def delete(self, mission_id: str) -> None:
-        """Delete a mission. Failures are reported in status."""
+        """Delete a mission, reporting an unknown ID in status.
+
+        SQLite lookup and write errors propagate, including ValueError for malformed IDs.
+        """
         self._store.delete(mission_id)
 
     def save_queue(self, queue: list, name: str, repeat_every_hours: int | None) -> str | None:
@@ -59,6 +70,8 @@ class MissionApplicationService:
         The store has no per-step actions yet, so the first step's action and parameters
         apply to the whole mission. An empty queue or a store validation error is
         reported in status.
+        repeat_every_hours is a positive interval after success, or None for a one-shot.
+        SQLite database and JSON serialization errors propagate.
         """
         if not queue:
             self._store.set_status('ERROR: queue is empty')

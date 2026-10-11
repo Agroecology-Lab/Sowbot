@@ -36,7 +36,11 @@ class MissionViewModel:
         return self._app_service.running
 
     def next_due_in_hours(self, mission_id: str) -> float | None:
-        """Return hours until the mission is due, 0.0 if due now, or None if it is done."""
+        """Return hours until due, 0.0 if due now, or -1.0 after a failed run.
+
+        Return None for inactive missions, completed one-shots, or unknown IDs.
+        SQLite lookup errors, including ValueError for malformed IDs, propagate.
+        """
         return self._app_service.next_due_in_hours(mission_id)
 
     def set_active(self, mission_id: str, active: bool) -> None:
@@ -48,5 +52,11 @@ class MissionViewModel:
         self._app_service.delete(mission_id)
 
     def save_queue(self, queue: list, name: str, repeat_every_hours: int | None) -> str | None:
-        """Save the row queue as a mission; return its id, or None if it was rejected."""
+        """Save (row_id, action_key, action_params) tuples; return the ID or None if rejected.
+
+        The first step's action and parameters apply to all saved rows.
+        repeat_every_hours is a positive interval after success, or None for a one-shot.
+        See MissionApplicationService.save_queue for entry-node resolution and status behavior.
+        SQLite database and JSON serialization errors propagate.
+        """
         return self._app_service.save_queue(queue, name, repeat_every_hours)
