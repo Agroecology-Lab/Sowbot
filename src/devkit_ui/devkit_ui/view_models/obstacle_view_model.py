@@ -20,7 +20,7 @@ class ObstacleViewModel:
 
     @property
     def obstacles(self) -> tuple[dict, ...]:
-        """Return the saved obstacles to display."""
+        """Return the current in-memory obstacles, which may still be awaiting persistence."""
         return self._manager.obstacles
 
     @property
@@ -42,10 +42,13 @@ class ObstacleViewModel:
         return self._manager.rings_ll()
 
     def mark_here(self, name: str = '') -> str | None:
-        """Add a circle at the latest GPS fix using the default radius.
+        """Add a circle at the latest GPS fix using the default radius in meters.
 
         Return the allocated name, or None if there is no GPS message or the
         manager rejected it; the status carries the reason either way.
+        Name normalization and background saving follow ObstacleManager.add().
+        GPS getter and field-access errors propagate, as do TypeError or ValueError
+        from converting the radius and errors raised by the manager.
         """
         gps = self._get_gps()
         if gps is None:
@@ -56,17 +59,33 @@ class ObstacleViewModel:
             radius_m=float(self.default_radius), name=name)
 
     def add_circle(self, lat: float, lon: float) -> str | None:
-        """Add a circle at (lat, lon) using the default radius; return its name or None."""
+        """Add a circle at WGS84 (lat, lon) in degrees using the default radius in meters.
+
+        Return its allocated name or None on rejection, with details in status.
+        Saving runs in the background.
+        TypeError or ValueError from converting the radius and errors raised by
+        ObstacleManager.add() propagate.
+        """
         return self._manager.add(
             'circle', lat=lat, lon=lon, radius_m=float(self.default_radius))
 
     def add_polygon(self, points_ll: list[tuple[float, float]]) -> str | None:
-        """Add a polygon from (lat, lon) corners; return its name or None if rejected."""
+        """Add a polygon from WGS84 (lat, lon) corners in degrees.
+
+        Require at least three corners; repeating the first corner is unnecessary.
+        Return its allocated name or None if rejected, with details in status.
+        Saving runs in the background.
+        Malformed coordinates can raise TypeError or ValueError through ObstacleManager.add().
+        """
         if len(points_ll) < 3:
             self._manager.set_status('ERROR: polygon needs 3+ corners')
             return None
         return self._manager.add('polygon', points_ll=points_ll)
 
     def delete(self, name: str) -> bool:
-        """Delete the named obstacle; return False if it does not exist."""
+        """Delete the named obstacle; return False if it does not exist.
+
+        Return True after in-memory removal and background saving have started.
+        Persistence failures update status; thread startup errors propagate.
+        """
         return self._manager.delete(name)

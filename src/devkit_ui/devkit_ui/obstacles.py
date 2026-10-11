@@ -201,7 +201,11 @@ class ObstacleManager:
 
     def start(self) -> None:
         """Create the publisher, load saved obstacles in the background, and start the
-        cold-start anchor watcher."""
+        cold-start anchor watcher.
+
+        Publisher, thread, and timer creation errors propagate to the caller;
+        background load errors are caught by _load().
+        """
         self._publisher = self._ros.create_publisher(
             PolygonStamped, '/obstacles', _OBS_QOS)
 
@@ -241,8 +245,21 @@ class ObstacleManager:
             radius_m: float = 0.5,
             points_ll: list | None = None,
             name: str = '') ->str | None:
-        """Add a circle or polygon obstacle. Returns the allocated name on
-        success, None on failure (status carries the reason either way)."""
+        """Add a circle or polygon using WGS84 coordinates in degrees.
+
+        Circles use lat/lon and a positive radius_m in meters; polygons use
+        at least three (latitude, longitude) pairs in points_ll.
+        Normalize name to uppercase letters, digits, and underscores; allocate
+        an unused OBS_N name when the normalized name is empty.
+
+        Return the allocated name after updating memory and starting background
+        persistence and publication.
+        Return None for validation or name rejection, with the reason in status.
+        A returned name does not confirm a disk save;
+        persistence failures set an error status without undoing the addition.
+        Malformed polygon coordinates can raise TypeError or ValueError during
+        validation; errors from rounding coordinates or starting the thread also propagate.
+        """
 
         err = validate_obstacle(kind, lat, lon, radius_m, points_ll)
         if err:
@@ -301,6 +318,12 @@ class ObstacleManager:
         return clean
 
     def delete(self, name: str) -> bool:
+        """Remove matching obstacles from memory and start background saving and publication.
+
+        Return False and set an error status if name is absent; otherwise return True.
+        Persistence failures set an error status without restoring the obstacles.
+        Thread startup errors propagate after the in-memory removal.
+        """
         with self._lock:
             if not any(o.get('name') == name for o in self._obstacles):
                 self.set_status(f'ERROR: {name!r} not found')
@@ -374,8 +397,13 @@ class ObstacleManager:
     # ── publishing ────────────────────────────────────────────────────────
 
     def _current_anchor(self) -> tuple | None:
-        """(map_x, map_y, lat, lon) for projecting obstacles into the map
-        frame. Returns None if either odom or GPS is missing/degenerate."""
+        """Return (map_x, map_y, lat, lon), in meters and degrees, for projection.
+
+        Return None if either message is missing, GPS coordinates are nonfinite,
+        or both GPS coordinates have magnitude below 1e-9 degrees.
+        Odometry coordinates are returned without validation.
+        Getter errors and errors accessing or checking message fields propagate.
+        """
         odom = self._get_odom()
         gps  = self._get_gps()
         if odom is None or gps is None:
@@ -390,7 +418,12 @@ class ObstacleManager:
 
     def _publish(self) -> None:
         """Publish each obstacle as a PolygonStamped in the map frame.
-        Silent no-op if there's no projection anchor."""
+        Silent no-op if there's no publisher or projection anchor.
+
+        Anchor lookup errors propagate.
+        Conversion and publication errors are caught, ending the attempt after
+        any polygons already published.
+        """
         if self._publisher is None:
             return
         anchor = self._current_anchor()
