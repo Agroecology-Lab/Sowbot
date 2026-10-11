@@ -191,7 +191,11 @@ class TopologyEditService:
                 'field, offsetting every node.', tuple(warnings))
         else:
             anchor_lat, anchor_lon = lat, lon
-        anchor_x, anchor_y = (0.0, 0.0) if is_sim else odom_xy
+        if is_sim or odom_xy is None:
+            # Hardware without odometry was rejected above, so None only occurs in sim.
+            anchor_x, anchor_y = 0.0, 0.0
+        else:
+            anchor_x, anchor_y = odom_xy
         anchor = RowAnchor(lat=anchor_lat, lon=anchor_lon, x=anchor_x, y=anchor_y)
 
         connect_to = self._connect_target(doc, current_node, selected_node)
