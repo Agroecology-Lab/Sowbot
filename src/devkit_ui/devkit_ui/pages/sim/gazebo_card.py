@@ -1,31 +1,26 @@
 # pylint: disable=consider-using-with
 import os
-import re
-import subprocess
 from collections.abc import Callable
 
 from nicegui import run as ng_run
 from nicegui import ui
 
+from devkit_ui.constants import SIM_MAP_FILE
 from devkit_ui.pages.sim.plant_placement_card import PlantSettings
-from devkit_ui.process_utils import (
+from devkit_ui.pages.widgets import link_button, request_host, restore_label
+from devkit_ui.process_registry import (
     alive,
     kill_group,
-    link_button,
-    request_host,
-    restore_label,
     shared,
     spawn_logged,
     start_vnc_stack,
     stop_all,
 )
-from devkit_ui.view_models.sim_view_model import SimViewModel
+from devkit_ui.view_models.sim_view_model import SimViewModel, WorldRebuildError
 
 _MUTED = 'color:#57606a'
 _OK = 'color:#1a7f37'
 _ERROR = 'color:#cf222e'
-
-_MAP_FILE = '/workspace/maps/maize_map'
 
 # Robot model selector: controls which xacro is passed as the urdf arg to sowbot_sim.launch.py.
 # sowbot_01:     TrackedVehicle + TrackController (DART required)
@@ -45,7 +40,7 @@ class GazeboCard(ui.card):
         """Build the robot model selector and the launch controls.
 
         Parameters:
-            sim_vm (SimViewModel): Checks that the selected crop model exists before a rebuild.
+            sim_vm (SimViewModel): Rebuilds the world from the saved map and plant placement.
             plant_settings (Callable[[], PlantSettings]): Returns the plant placement to rebuild with.
         """
         super().__init__()
@@ -58,7 +53,7 @@ class GazeboCard(ui.card):
         self._daemons: list = shared('gazebo_daemons', list)  # Xvfb, x11vnc, websockify
         self._env = {
             **os.environ,
-            'TMAP2_FILE': _MAP_FILE,
+            'TMAP2_FILE': SIM_MAP_FILE,
             'GZ_SIM_RESOURCE_PATH': (
                 # Forest3D-generated models (model://ground, model://crop/plant) live here; it must
                 # come first or gz sim aborts world load with "Unable to find uri".
@@ -180,47 +175,26 @@ class GazeboCard(ui.card):
 
         Plants are studded in the inter-row gaps of the R*_IN/OUT nodes. Gazebo reads the world only
         at launch, so a running sim must be stopped and relaunched to see a rebuild; this refuses
-        mid-run rather than silently doing nothing. It uses the shared worldgen.sh (also called by
-        Launch Sim), so Rebuild and Launch Sim agree on the cache key and never regenerate each
-        other's world.
+        mid-run rather than silently doing nothing.
         """
         if alive(self._gazebo[0]):
             self._show('stop the sim before rebuilding — Gazebo reads the world only at launch', _ERROR)
             return
-        if not os.path.exists(_MAP_FILE):
-            self._show(f'no saved map at {_MAP_FILE} — drop/save nodes first', _ERROR)
-            return
         try:
             self._show('rebuilding world from map…')
             plant = self._plant_settings()
-            if not self._sim_vm.has_crop_model(plant.model):
-                self._show(f'model "{plant.model}" not found — upload it first', _ERROR)
-                return
-            result = await ng_run.io_bound(
-                subprocess.run,
-                ['bash', '/workspace/worldgen.sh',
-                 '--plant-spacing', str(plant.spacing_m),
-                 '--row-width', str(plant.row_width_m),
-                 '--plant-scale', str(plant.scale),
-                 '--scale-category', plant.category,
-                 '--crop-model', plant.model,
-                 '--weed-density', str(plant.weed_density)],
-                capture_output=True, text=True, timeout=120, check=False)
-            if result is None:
+            weeds = await ng_run.io_bound(
+                self._sim_vm.rebuild_world, plant.spacing_m, plant.row_width_m, plant.scale,
+                plant.category, plant.model, plant.weed_density)
+            if weeds is None:
                 self._show('rebuild cancelled', _ERROR)
                 return
-            if result.returncode != 0:
-                error = (result.stderr or result.stdout or 'unknown error').strip()
-                self._show(f'rebuild failed: {error[-200:]}', _ERROR)
-                return
-            match = re.search(r'Weed density:\s*(\d+)', result.stdout or '')
-            weeds = match.group(1) if match else '?'
             self._show(
                 f'world rebuilt (spacing={plant.spacing_m:.2f}m, row={plant.row_width_m:.2f}m, '
                 f'scale={plant.scale:.2f} on {plant.category}, '
                 f'weed density={plant.weed_density}% ({weeds} weeds), '
                 f'model={plant.model}) — relaunch to view', _OK)
-        except subprocess.TimeoutExpired:
-            self._show('rebuild timed out', _ERROR)
+        except WorldRebuildError as exc:
+            self._show(str(exc), _ERROR)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self._show(f'ERROR: {exc}', _ERROR)

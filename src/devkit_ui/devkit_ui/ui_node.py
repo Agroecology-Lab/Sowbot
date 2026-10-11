@@ -39,6 +39,7 @@ from devkit_ui.application_services.row_discovery_application_service import (
     RowDiscoveryApplicationService,
 )
 from devkit_ui.application_services.sim_asset_service import SimAssetService
+from devkit_ui.application_services.sim_world_service import SimWorldService
 from devkit_ui.application_services.telemetry_application_service import (
     TelemetryApplicationService,
 )
@@ -86,7 +87,7 @@ from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.pages.sim.sim_page import SimPage
 from devkit_ui.pages.system.system_page import SystemPage
-from devkit_ui.process_utils import shutdown_tools
+from devkit_ui.process_registry import shutdown_tools
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.row_planning import plan_contour_rows
 from devkit_ui.topo_results import TopologyEditError
@@ -175,7 +176,8 @@ class NiceGuiNode(Node):
         self._topo_vm = TopologyViewModel(self._topo_app_service)
         self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
         self._robot_brain_vm = RobotBrainViewModel(self._robot_brain_app_service)
-        self._sim_vm = SimViewModel(SimAssetService())
+        sim_assets = SimAssetService()
+        self._sim_vm = SimViewModel(sim_assets, SimWorldService(sim_assets))
 
         # Initialize with default demo document
         self._topo_app_service.initialize_with_default()

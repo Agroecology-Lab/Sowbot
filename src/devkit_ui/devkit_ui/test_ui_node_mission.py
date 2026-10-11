@@ -35,7 +35,7 @@ def load_mission_harness():
         'RosGateway', 'DriveDomainService', 'TopologyDomainService', 'RobotBrainDomainService',
         'RowDiscoveryDomainService', 'NavigationDomainService', 'TelemetryDomainService',
         'DriveApplicationService', 'TopologyApplicationService', 'TopologyEditService',
-        'SimAssetService',
+        'SimAssetService', 'SimWorldService',
         'RobotBrainApplicationService',
         'RowDiscoveryApplicationService', 'NavigationApplicationService',
         'TelemetryApplicationService',

@@ -2,21 +2,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-# Re-exported so pages can catch it without importing the application service layer.
+# Re-exported so pages can catch these without importing the application service layer.
 from devkit_ui.application_services.sim_asset_service import SimAssetError
+from devkit_ui.application_services.sim_world_service import WorldRebuildError
 
 if TYPE_CHECKING:
     from devkit_ui.application_services.sim_asset_service import SimAssetService
+    from devkit_ui.application_services.sim_world_service import SimWorldService
 
-__all__ = ['SimAssetError', 'SimViewModel']
+__all__ = ['SimAssetError', 'SimViewModel', 'WorldRebuildError']
 
 
 class SimViewModel:
     """UI-facing access to the crop models and soil textures the simulated world is built from."""
 
-    def __init__(self, assets: SimAssetService) -> None:
-        """Bind to the service that validates and stores the sim assets."""
+    def __init__(self, assets: SimAssetService, world: SimWorldService) -> None:
+        """Bind to the services that store the sim assets and rebuild the world from them."""
         self._assets = assets
+        self._world = world
 
     def list_crop_models(self) -> list[str]:
         """Return the available crop model names."""
@@ -42,3 +45,11 @@ class SimViewModel:
     def classify_map(self, filename: str) -> str:
         """Return the PBR role guessed for a soil texture file."""
         return self._assets.classify_map(filename)
+
+    def rebuild_world(self, spacing_m: float, row_width_m: float, scale: float,
+                      category: str, model: str, weed_density: int) -> str:
+        """Rebuild the world from the saved map and return the weed count worldgen reported.
+
+        Blocking; raises WorldRebuildError with a user-facing message when it cannot.
+        """
+        return self._world.rebuild(spacing_m, row_width_m, scale, category, model, weed_density)

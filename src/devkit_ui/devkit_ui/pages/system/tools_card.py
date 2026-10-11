@@ -9,14 +9,16 @@ from ament_index_python.packages import PackageNotFoundError, get_package_share_
 from nicegui import run as ng_run
 from nicegui import ui
 
-from devkit_ui.process_utils import (
-    alive,
+from devkit_ui.pages.widgets import (
     doc_link,
-    kill_group,
     link_button,
     report_if_exited,
     request_host,
     restore_label,
+)
+from devkit_ui.process_registry import (
+    alive,
+    kill_group,
     shared,
     spawn_logged,
     start_vnc_stack,

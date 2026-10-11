@@ -22,3 +22,7 @@ NAV_ACTION = 'navigate_to_pose'
 # dangerous, not just cosmetic.
 FIELD27_CENTER = (48.0046000, 3.6644000)
 FIELD27_BOUNDS = ((48.0031957, 3.6612233), (48.0060043, 3.6675767))
+
+# The saved topology map the simulated world is generated from (worldgen.sh reads it, and the
+# Gazebo launch passes it to the sim as TMAP2_FILE).
+SIM_MAP_FILE = '/workspace/maps/maize_map'

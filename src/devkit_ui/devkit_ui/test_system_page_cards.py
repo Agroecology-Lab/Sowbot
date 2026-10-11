@@ -38,7 +38,9 @@ class TestSimViewModel(unittest.TestCase):
         assets.create_crop_model.return_value = 'maize'
         assets.import_soil_zip.return_value = ['albedo.png']
         assets.classify_map.return_value = 'albedo'
-        sim = SimViewModel(assets)
+        world = Mock()
+        world.rebuild.return_value = '12'
+        sim = SimViewModel(assets, world)
 
         self.assertEqual(sim.list_crop_models(), ['plant'])
         self.assertTrue(sim.has_crop_model('plant'))
@@ -46,6 +48,8 @@ class TestSimViewModel(unittest.TestCase):
         self.assertEqual(sim.create_crop_model('maize', b'v', b'c'), 'maize')
         self.assertEqual(sim.import_soil_zip(b'zip'), ['albedo.png'])
         self.assertEqual(sim.classify_map('albedo.png'), 'albedo')
+        self.assertEqual(sim.rebuild_world(0.5, 0.75, 1.0, 'maize', 'plant', 20), '12')
+        world.rebuild.assert_called_once_with(0.5, 0.75, 1.0, 'maize', 'plant', 20)
 
         assets.validate_mesh.assert_called_once_with(b'glTF', 'a.glb', collision=True)
         assets.create_crop_model.assert_called_once_with('maize', b'v', b'c')
@@ -55,7 +59,7 @@ class TestSimViewModel(unittest.TestCase):
         assets = Mock()
         assets.validate_mesh.side_effect = SimAssetError('invalid glTF file')
         with self.assertRaisesRegex(SimAssetError, 'invalid glTF file'):
-            SimViewModel(assets).validate_mesh(b'x', 'a.glb')
+            SimViewModel(assets, Mock()).validate_mesh(b'x', 'a.glb')
 
 
 class TestPlantSettings(unittest.TestCase):

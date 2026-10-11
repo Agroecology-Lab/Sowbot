@@ -17,6 +17,19 @@ forbidden_modules =
     rclpy
 allow_indirect_imports = True
 
+[importlinter:contract:pages-no-process-control]
+name = Pages do not spawn processes
+type = forbidden
+source_modules =
+    devkit_ui.pages
+forbidden_modules =
+    subprocess
+allow_indirect_imports = True
+unmatched_ignore_imports_alerting = error
+ignore_imports =
+    # TODO(#116): move the Medkit process behind an application service
+    devkit_ui.pages.system.tools_card -> subprocess
+
 [importlinter:contract:view-models-no-backend]
 name = ViewModels do not reach domain services, stores or ROS
 type = forbidden

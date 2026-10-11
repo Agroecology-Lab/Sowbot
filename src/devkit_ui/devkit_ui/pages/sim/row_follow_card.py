@@ -4,7 +4,8 @@ import os
 from nicegui import run as ng_run
 from nicegui import ui
 
-from devkit_ui.process_utils import alive, kill_group, restore_label, shared, spawn_logged
+from devkit_ui.pages.widgets import restore_label
+from devkit_ui.process_registry import alive, kill_group, shared, spawn_logged
 
 _MUTED = 'color:#57606a'
 _OK = 'color:#1a7f37'
