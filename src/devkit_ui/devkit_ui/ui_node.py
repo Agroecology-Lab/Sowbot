@@ -343,7 +343,7 @@ class NiceGuiNode(Node):
         # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher.
         # Attach after latest_odom / latest_gps fields exist so the
         # manager can read them when projecting to the map frame.
-        self._obstacle_mgr = ObstacleManager()
+        self._obstacle_mgr = ObstacleManager(self._ros)
         self._obstacle_mgr.attach(self)
 
         # MISSION: store owns missions.yaml, scheduling, and run recording.

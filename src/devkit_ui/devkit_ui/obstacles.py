@@ -177,7 +177,9 @@ class ObstacleManager:
         node.default_obstacle_radius : float              shared by UI bindings
     """
 
-    def __init__(self, path: str = OBSTACLES_FILE) -> None:
+    def __init__(self, ros, path: str = OBSTACLES_FILE) -> None:
+        """Store the RosGateway used for the publisher, timer, clock and logging."""
+        self._ros        = ros
         self._path       = path
         self._lock       = threading.Lock()
         self._obstacles: tuple[dict, ...] = ()
@@ -204,7 +206,7 @@ class ObstacleManager:
         if not hasattr(node, 'default_obstacle_radius'):
             node.default_obstacle_radius = 0.5
 
-        self._publisher = node.create_publisher(
+        self._publisher = self._ros.create_publisher(
             PolygonStamped, '/obstacles', _OBS_QOS)
 
         threading.Thread(target=self._load, daemon=True).start()
@@ -213,7 +215,7 @@ class ObstacleManager:
         # soon as they have, publish whatever's loaded and cancel ourselves.
         # After the first publish, all subsequent updates flow through
         # _persist_and_publish, which calls _publish directly.
-        self._anchor_timer = node.create_timer(
+        self._anchor_timer = self._ros.create_timer(
             0.5, self._cold_start_publish)
 
     # ── public API ────────────────────────────────────────────────────────
@@ -333,14 +335,14 @@ class ObstacleManager:
                 self._version  += 1
                 self._sync_node()
             if self._node is not None:
-                self._node.get_logger().info(
+                self._ros.get_logger().info(
                     f'Loaded {len(loaded)} obstacles from {self._path}')
             # Try to publish immediately. May no-op if no GPS yet — the
             # cold-start timer will catch that case.
             self._publish()
         except Exception as e:
             if self._node is not None:
-                self._node.get_logger().warn(
+                self._ros.get_logger().warn(
                     f'Failed to load obstacles: {e}')
 
     def _persist_and_publish(self, success_msg: str) -> None:
@@ -361,13 +363,13 @@ class ObstacleManager:
             os.replace(tmp, self._path)
             self._set_status(success_msg)
             if self._node is not None:
-                self._node.get_logger().info(
+                self._ros.get_logger().info(
                     f'Obstacles saved: {len(snapshot)} total')
             self._publish()
         except Exception as e:
             self._set_status(f'ERROR: {e}')
             if self._node is not None:
-                self._node.get_logger().error(f'persist failed: {e}')
+                self._ros.get_logger().error(f'persist failed: {e}')
 
     # ── publishing ────────────────────────────────────────────────────────
 
@@ -400,7 +402,7 @@ class ObstacleManager:
 
         try:
             snapshot = self._obstacles    # tuple read is atomic in CPython
-            stamp    = self._node.get_clock().now().to_msg()
+            stamp    = self._ros.get_clock().now().to_msg()
             for obs in snapshot:
                 ring_ll = obstacle_to_ring_ll(obs)
                 if not ring_ll:
@@ -419,7 +421,7 @@ class ObstacleManager:
             self._last_anchor = anchor
         except Exception as e:
             if self._node is not None:
-                self._node.get_logger().warn(f'publish failed: {e}')
+                self._ros.get_logger().warn(f'publish failed: {e}')
 
     def _cold_start_publish(self) -> None:
         """Run by a 2 Hz timer during cold start. Publishes once GPS+odom
