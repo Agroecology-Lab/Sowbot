@@ -34,7 +34,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import NavSatFix
-from std_msgs.msg import Bool, Float64, String
+from std_msgs.msg import String
 
 # F2C: lat/lon<->XY projection + swath generator, now a standalone package
 # (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
@@ -42,7 +42,7 @@ from devkit_f2c_planner.f2c_planner import _run_f2c
 from devkit_ui import plan_import
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
-from devkit_ui.actions import ACTIONS, action_ros_msgs
+from devkit_ui.actions import ACTIONS
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
 from devkit_ui.application_services.navigation_application_service import (
     NavigationApplicationService,
@@ -59,6 +59,17 @@ from devkit_ui.application_services.topology_application_service import (
 )
 from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
+from devkit_ui.domain_services.mission_domain_service import (
+    ERROR,
+    INFO,
+    NAV_TIMEOUT_SEC,
+    OK,
+    PROGRESS,
+    WARN,
+    MissionDomainService,
+    MissionError,
+    resolve_steps,
+)
 from devkit_ui.domain_services.navigation_domain_service import NavigationDomainService
 from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
 from devkit_ui.domain_services.row_discovery_domain_service import RowDiscoveryDomainService
@@ -243,6 +254,10 @@ app.on_shutdown(_shutdown_tools)
 
 # ── ROS node ──────────────────────────────────────────────────────────────────
 
+MISSION_STATUS_COLOURS = {
+    INFO: '#57606a', PROGRESS: '#0969da', WARN: '#9a6700', ERROR: '#cf222e', OK: '#1a7f37'}
+
+
 class NiceGuiNode(Node):
 
     def __init__(self) -> None:
@@ -336,15 +351,7 @@ class NiceGuiNode(Node):
         self._mission_store = MissionStore()
         self._mission_store.attach(self)
 
-        # Lazy cache of std_msgs/Bool publishers for tool topics, keyed by
-        # topic name.  Created on first use by _get_tool_publisher().
-        self._tool_publishers: dict = {}
-
-        # Mission executor state.  A running mission sets _mission_running
-        # True; the executor thread clears it when done (or cancelled).
-        self._mission_running:   bool          = False
-        self._mission_cancel:    bool          = False
-        self._mission_run_id:    str | None = None   # active MissionStore id
+        self._mission_service = MissionDomainService(self._ros)
 
         @ui.page('/')
         def page():
@@ -1740,7 +1747,7 @@ class NiceGuiNode(Node):
                 snap = self.missions
                 missions_col.clear()
                 missions_empty_lbl.set_visibility(not snap)
-                run_btn.set_enabled(not self._mission_running)
+                run_btn.set_enabled(not self._mission_service.running)
 
                 if not snap:
                     return
@@ -1790,162 +1797,35 @@ class NiceGuiNode(Node):
 # NiceGuiNode mission executor methods
 # ─────────────────────────────────────────────────────────────────────────────
 
-    def _get_tool_publisher(self, topic: str, is_float: bool = False):
-        """Return (creating if needed) a publisher for the given tool topic.
-        is_float=True → std_msgs/Float64; False → std_msgs/Bool."""
-        key = (topic, is_float)
-        if key not in self._tool_publishers:
-            if is_float:
-                self._tool_publishers[key] = self._ros.create_publisher(Float64, topic, 1)
-            else:
-                self._tool_publishers[key] = self._ros.create_publisher(Bool, topic, 1)
-        return self._tool_publishers[key]
-
-    def _publish_tool_msgs(self, action_key: str,
-                           action_params: dict | None,
-                           enable: bool) -> None:
-        """Publish all (topic, value) pairs from action_ros_msgs."""
-        for topic, value in action_ros_msgs(action_key, action_params, enable):
-            try:
-                if isinstance(value, bool):
-                    pub = self._get_tool_publisher(topic, is_float=False)
-                    msg = Bool()
-                    msg.data = value
-                else:
-                    pub = self._get_tool_publisher(topic, is_float=True)
-                    msg = Float64()
-                    if not isinstance(value, (int, float, str)):
-                        raise TypeError(f'unsupported tool value type: {type(value)!r}')
-                    msg.data = float(value)
-                pub.publish(msg)
-            except Exception as exc:
-                self.get_logger().warn(
-                    f'_publish_tool_msgs({topic}, enable={enable}): {exc}')
-
     def _run_mission(self, queue: list, status_lbl) -> None:
-        """
-        Start executing the queued row mission.
+        """Start executing the queued row mission.
 
         Parameters:
             queue (list): Tuples containing a row ID, action key, and action parameters.
             status_lbl: UI status label updated with mission progress and outcome.
         """
+        def show(level: str, text: str) -> None:
+            status_lbl.set_text(text)
+            status_lbl.style(f'color:{MISSION_STATUS_COLOURS[level]}')
+
         if not queue:
-            status_lbl.set_text('ERROR: queue is empty')
-            status_lbl.style('color:#cf222e')
+            show(ERROR, 'ERROR: queue is empty')
             return
-        if self._mission_running:
-            status_lbl.set_text('ERROR: mission already running')
-            status_lbl.style('color:#cf222e')
+        if self._mission_service.running:
+            show(ERROR, 'ERROR: mission already running')
             return
         if not self._run_vm.navigation_available:
-            status_lbl.set_text('ERROR: action client unavailable')
-            status_lbl.style('color:#cf222e')
+            show(ERROR, 'ERROR: action client unavailable')
             return
-        if not self._topo_doc:
-            status_lbl.set_text('ERROR: no topology map loaded')
-            status_lbl.style('color:#cf222e')
-            return
+        try:
+            steps = resolve_steps(self._topo_doc, queue)
+            self._mission_service.start(
+                steps, self._send_goal_sync, show,
+                lambda: self._global_vm.soft_estop_active)
+        except MissionError as exc:
+            show(ERROR, f'ERROR: {exc}')
 
-        # Resolve row_id → (entry_node, exit_node) from current topo map.
-        row_entry: dict[int, str] = {}
-        row_exit:  dict[int, str] = {}
-        for nd in self._topo_doc.nodes:
-            meta = nd.meta
-            rid  = meta.get('row_id')
-            role = meta.get('row_role', '')
-            if rid is None:
-                continue
-            try:
-                rid_int = int(rid)
-            except (TypeError, ValueError):
-                continue
-            if role == 'entry':
-                row_entry[rid_int] = nd.name
-            elif role == 'exit':
-                row_exit[rid_int] = nd.name
-
-        missing_entry = [rid for rid, _, _ in queue if rid not in row_entry]
-        missing_exit  = [rid for rid, _, _ in queue if rid not in row_exit]
-        if missing_entry or missing_exit:
-            missing = sorted(set(missing_entry) | set(missing_exit))
-            status_lbl.set_text(f'ERROR: incomplete row nodes for row(s) {missing}')
-            status_lbl.style('color:#cf222e')
-            return
-
-        steps = [(rid, row_entry[rid], row_exit[rid], act, params)
-                 for rid, act, params in queue]
-
-        self._mission_running = True
-        self._mission_cancel  = False
-        status_lbl.set_text(f'Starting {len(steps)} step(s)…')
-        status_lbl.style('color:#57606a')
-
-        def _execute():
-            """
-            Execute the queued mission steps and update the mission status.
-
-            Each step navigates to its entry node with the implement disabled, then
-            traverses to its exit node with the configured action enabled. Stops on
-            cancellation, soft-estop activation, or navigation failure, and resets the
-            mission state when execution ends.
-            """
-            success_overall = True
-            for step_idx, (rid, entry_node, exit_node, action, params) in enumerate(steps):
-                if self._mission_cancel or self._global_vm.soft_estop_active:
-                    status_lbl.set_text('Cancelled')
-                    status_lbl.style('color:#9a6700')
-                    success_overall = False
-                    break
-
-                adef = ACTIONS.get(action)
-                label = f'{adef.icon} {adef.label}' if adef else action
-
-                # Leg 1: transit to entry — implement OFF, this isn't the row yet.
-                status_lbl.set_text(
-                    f'[{step_idx+1}/{len(steps)}] Row {rid} → transit to {entry_node}')
-                status_lbl.style('color:#0969da')
-                nav_ok = self._send_goal_sync(entry_node)
-                if not nav_ok:
-                    status_lbl.set_text(
-                        f'Row {rid}: transit to {entry_node} failed — stopping mission')
-                    status_lbl.style('color:#cf222e')
-                    success_overall = False
-                    break
-
-                if self._mission_cancel or self._global_vm.soft_estop_active:
-                    status_lbl.set_text('Cancelled')
-                    status_lbl.style('color:#9a6700')
-                    success_overall = False
-                    break
-
-                # Leg 2: entry -> exit — implement ON, this is the row itself.
-                status_lbl.set_text(
-                    f'[{step_idx+1}/{len(steps)}] Row {rid} {label} → {exit_node}')
-                status_lbl.style('color:#0969da')
-
-                self._publish_tool_msgs(action, params, enable=True)
-                nav_ok = self._send_goal_sync(exit_node)
-                self._publish_tool_msgs(action, params, enable=False)
-
-                if not nav_ok:
-                    status_lbl.set_text(
-                        f'Row {rid}: traversal to {exit_node} failed — stopping mission')
-                    status_lbl.style('color:#cf222e')
-                    success_overall = False
-                    break
-
-            if success_overall:
-                status_lbl.set_text(
-                    f'Mission complete — {len(steps)} step(s) done ✓')
-                status_lbl.style('color:#1a7f37')
-
-            self._mission_running = False
-            self._mission_cancel  = False
-
-        threading.Thread(target=_execute, daemon=True).start()
-
-    def _send_goal_sync(self, target: str, timeout_sec: float = 300.0) -> bool:
+    def _send_goal_sync(self, target: str) -> bool:
         """Navigate to a topology node and block until it ends.
 
         Returns:
@@ -1953,12 +1833,12 @@ class NiceGuiNode(Node):
             out, or the action server was unavailable.
         """
         return self._run_vm.navigate_and_wait(
-            target, timeout_sec,
-            lambda: self._mission_cancel or self._global_vm.soft_estop_active)
+            target, NAV_TIMEOUT_SEC,
+            lambda: self._mission_service.cancel_requested or self._global_vm.soft_estop_active)
 
     def cancel_mission(self) -> None:
-        """Signal the executor thread to stop after the current row."""
-        self._mission_cancel = True
+        """Signal the executor to stop before its next goal and cancel the active goal."""
+        self._mission_service.cancel()
         self.cancel_nav_goal()
 
     # ── Map archive ───────────────────────────────────────────────────────────

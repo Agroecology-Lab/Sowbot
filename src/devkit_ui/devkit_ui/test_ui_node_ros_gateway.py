@@ -1,4 +1,4 @@
-"""Verify NiceGuiNode creates tool publishers and the track timer through RosGateway."""
+"""Verify NiceGuiNode creates the track timer through RosGateway."""
 # pylint: disable=exec-used,no-member,protected-access,attribute-defined-outside-init
 import ast
 import re
@@ -10,25 +10,17 @@ from devkit_ui.models import TopoDoc
 from devkit_ui.view_models.run_view_model import RunViewModel
 
 
-class FakeBool:
-    """Stand in for std_msgs/Bool so the test needs no ROS message packages."""
-
-
-class FakeFloat64:
-    """Stand in for std_msgs/Float64 so the test needs no ROS message packages."""
-
-
 def load_gateway_harness():
-    """Load the real start_track and _get_tool_publisher methods from ui_node.py."""
+    """Load the real start_track method from ui_node.py."""
     source = Path(__file__).with_name('ui_node.py')
     tree = ast.parse(source.read_text(encoding='utf-8'))
     node_class = next(node for node in tree.body
                       if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode')
-    names = {'start_track', '_get_tool_publisher'}
+    names = {'start_track'}
     members = [node for node in node_class.body
                if isinstance(node, ast.FunctionDef) and node.name in names]
     harness = ast.ClassDef(name='Harness', bases=[], keywords=[], body=members, decorator_list=[])
-    namespace = {'re': re, 'Bool': FakeBool, 'Float64': FakeFloat64}
+    namespace = {'re': re}
     module = ast.fix_missing_locations(ast.Module(body=[harness], type_ignores=[]))
     exec(compile(module, source, 'exec'), namespace)
     return namespace['Harness']()
@@ -41,7 +33,6 @@ class TestUiNodeRosGateway(unittest.TestCase):
         self.node._ros = Mock()
         self.node.create_publisher = Mock()
         self.node.create_timer = Mock()
-        self.node._tool_publishers = {}
         self.node._track_timer = None
         self.node._topo_doc = TopoDoc(name='field.yaml')
         self.node._run_vm = RunViewModel(Mock())
@@ -51,29 +42,6 @@ class TestUiNodeRosGateway(unittest.TestCase):
         """Check that nothing bypassed the gateway to reach the node directly."""
         self.node.create_publisher.assert_not_called()
         self.node.create_timer.assert_not_called()
-
-    def test_bool_tool_publisher_uses_gateway(self) -> None:
-        """Verify a Bool tool publisher is created on the gateway with depth 1."""
-        publisher = self.node._get_tool_publisher('/tool/enable')
-
-        self.node._ros.create_publisher.assert_called_once_with(FakeBool, '/tool/enable', 1)
-        self.assertIs(publisher, self.node._ros.create_publisher.return_value)
-
-    def test_float_tool_publisher_uses_gateway(self) -> None:
-        """Verify a Float64 tool publisher is created on the gateway with depth 1."""
-        publisher = self.node._get_tool_publisher('/tool/speed', is_float=True)
-
-        self.node._ros.create_publisher.assert_called_once_with(FakeFloat64, '/tool/speed', 1)
-        self.assertIs(publisher, self.node._ros.create_publisher.return_value)
-
-    def test_tool_publisher_is_cached_per_topic_and_type(self) -> None:
-        """Verify repeat requests reuse a publisher, while the same topic with another type does not."""
-        first = self.node._get_tool_publisher('/tool/x')
-        second = self.node._get_tool_publisher('/tool/x')
-        self.node._get_tool_publisher('/tool/x', is_float=True)
-
-        self.assertIs(first, second)
-        self.assertEqual(self.node._ros.create_publisher.call_count, 2)
 
     def test_track_timer_uses_gateway(self) -> None:
         """Verify start_track records one node at once, then creates the repeating timer on the gateway."""
