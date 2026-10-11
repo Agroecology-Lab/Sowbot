@@ -42,9 +42,8 @@ class TestObstacleManagerGateway(unittest.TestCase):
     def setUp(self) -> None:
         """Create a manager on a mock gateway, with a node that fails if used for ROS calls."""
         self.ros = Mock()
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.mgr = ObstacleManager(self.ros, path=str(Path(self.tmp.name) / 'obstacles.yaml'))
+        tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
+        self.mgr = ObstacleManager(self.ros, path=str(Path(tmp) / 'obstacles.yaml'))
         self.node = SimpleNamespace(
             create_publisher=Mock(side_effect=AssertionError('gateway bypassed')),
             create_timer=Mock(side_effect=AssertionError('gateway bypassed')),
