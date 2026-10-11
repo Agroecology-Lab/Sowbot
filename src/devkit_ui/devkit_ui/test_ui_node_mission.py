@@ -26,6 +26,7 @@ def load_mission_harness():
     class FakeNode:
         """Provide only the node boundary used during initialization."""
         def __init__(self, _name):
+            """Mock node parameters and reject subscriptions that bypass the gateway."""
             self.declare_parameter = Mock()
             self.get_parameter = Mock(return_value=SimpleNamespace(value=False))
             self.create_subscription = Mock(side_effect=AssertionError('gateway bypassed'))
@@ -54,6 +55,7 @@ def load_mission_harness():
 
 class TestUiNodeMission(unittest.TestCase):
     def setUp(self):
+        """Prepare an idle mission UI with a complete row and mocked service collaborators."""
         self.node, self.namespace = load_mission_harness()
         self.service = self.node._mission_service
         self.service.running = False
@@ -66,6 +68,7 @@ class TestUiNodeMission(unittest.TestCase):
         self.queue = [(3, 'weed', {'depth': 0.4})]
 
     def test_constructor_routes_current_node_subscription_and_mission_service_through_gateway(self):
+        """Verify gateway wiring, subscription QoS, and delivery of current-node updates."""
         gateway = self.node._ros
         gateway.create_subscription.assert_called_once()
         message_type, topic, callback, qos = gateway.create_subscription.call_args.args
@@ -79,6 +82,7 @@ class TestUiNodeMission(unittest.TestCase):
         self.assertEqual(self.node._topo_vm.set_current_node.call_args_list, [call('E'), call('X')])
 
     def test_invalid_missions_report_error_without_starting_worker(self):
+        """Verify invalid mission state or row data produces an error without starting execution."""
         cases = [
             ([], False, True, self.node._topo_doc, 'queue is empty'),
             (self.queue, True, True, self.node._topo_doc, 'mission already running'),
@@ -99,6 +103,7 @@ class TestUiNodeMission(unittest.TestCase):
                 self.service.start.assert_not_called()
 
     def test_valid_mission_passes_resolved_steps_and_live_estop_callback(self):
+        """Verify startup receives resolved steps and a callback reading the current e-stop."""
         self.node._run_mission(self.queue, self.label)
         self.service.start.assert_called_once()
         steps, navigate, _show, estop = self.service.start.call_args.args
@@ -109,6 +114,7 @@ class TestUiNodeMission(unittest.TestCase):
         self.assertTrue(estop())
 
     def test_service_status_levels_update_label_text_and_colour(self):
+        """Verify each mission status level updates the label text and its corresponding colour."""
         self.node._run_mission(self.queue, self.label)
         show = self.service.start.call_args.args[2]
         for level, colour in [('info', '#57606a'), ('progress', '#0969da'),
@@ -120,12 +126,14 @@ class TestUiNodeMission(unittest.TestCase):
                 self.label.style.assert_called_once_with(f'color:{colour}')
 
     def test_start_race_is_reported_as_mission_error(self):
+        """Verify a concurrent mission start rejection is displayed as an error."""
         self.service.start.side_effect = mds.MissionError('mission already running')
         self.node._run_mission(self.queue, self.label)
         self.label.set_text.assert_called_once_with('ERROR: mission already running')
         self.label.style.assert_called_once_with('color:#cf222e')
 
     def test_sync_navigation_uses_timeout_and_observes_current_cancel_and_estop(self):
+        """Verify navigation forwards its timeout and checks live cancellation and e-stop state."""
         for result in (True, False):
             with self.subTest(result=result):
                 self.node._run_vm.navigate_and_wait.return_value = result
@@ -138,6 +146,7 @@ class TestUiNodeMission(unittest.TestCase):
                     self.assertIs(cancelled(), cancel or estop)
 
     def test_cancel_signals_worker_before_cancelling_active_navigation(self):
+        """Verify the worker receives cancellation before the navigation goal is cancelled."""
         order = Mock()
         order.attach_mock(self.service.cancel, 'worker_cancel')
         order.attach_mock(self.node.cancel_nav_goal, 'navigation_cancel')
