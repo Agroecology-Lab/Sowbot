@@ -318,33 +318,15 @@ def load_controls_builder():
     Follow the AST harness used by test_navigation_goals, keeping the original
     status initialization and button registration as well as both callbacks.
     """
-    source_path = Path(__file__).with_name('ui_node.py')
+    source_path = Path(__file__).with_name('pages') / 'system' / 'tools_card.py'
     tree = ast.parse(source_path.read_text(encoding='utf-8'))
-    node_class = next(
+    function = next(
         node for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode'
+        if isinstance(node, ast.FunctionDef) and node.name == '_medkit_controls'
     )
-    method = next(
-        node for node in node_class.body
-        if isinstance(node, ast.FunctionDef) and node.name == '_system_content'
-    )
-    tools_row = next(
-        node for node in ast.walk(method)
-        if isinstance(node, ast.With) and any(
-            isinstance(statement, ast.AnnAssign)
-            and isinstance(statement.target, ast.Name)
-            and statement.target.id == '_medkit_proc'
-            for statement in node.body
-        )
-    )
-    boundaries = {
-        statement.target.id: index for index, statement in enumerate(tools_row.body)
-        if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
-    }
     factory = ast.parse('def build_controls(ui, subprocess): pass')
-    factory.body[0].body = tools_row.body[
-        boundaries['_medkit_proc']:boundaries['_gazebo_proc']
-    ]
+    # Skip the docstring: only the checked-in Medkit block executes.
+    factory.body[0].body = function.body[1:]
     namespace = {'signal': signal, 'escape': escape,
                  'ng_run': SimpleNamespace(io_bound=asyncio.to_thread)}
     # NOTE: Only the checked-in Medkit block executes, with UI and subprocess doubles.

@@ -4,24 +4,15 @@ ui_node.py — Sowbot web cockpit on :80
 """
 
 import math
-import os
 import re
-import signal
-import subprocess
 import threading
-import time
 import traceback
 from collections.abc import Callable
-from html import escape
 from importlib import resources
 
 # The following imports get generated in the Dockerfile, they aren't available to pylint
 # pylint: disable=import-error
 import rclpy
-from ament_index_python.packages import (
-    PackageNotFoundError,
-    get_package_share_directory,
-)
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui import run as ng_run
@@ -47,7 +38,7 @@ from devkit_ui.application_services.robot_brain_application_service import Robot
 from devkit_ui.application_services.row_discovery_application_service import (
     RowDiscoveryApplicationService,
 )
-from devkit_ui.application_services.sim_asset_service import SimAssetError, SimAssetService
+from devkit_ui.application_services.sim_asset_service import SimAssetService
 from devkit_ui.application_services.telemetry_application_service import (
     TelemetryApplicationService,
 )
@@ -55,7 +46,7 @@ from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
-from devkit_ui.constants import NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
+from devkit_ui.constants import FIELD27_BOUNDS, FIELD27_CENTER, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 from devkit_ui.domain_services.mission_domain_service import (
     ERROR,
@@ -93,31 +84,20 @@ from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
 from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
+from devkit_ui.pages.sim.sim_page import SimPage
+from devkit_ui.pages.system.system_page import SystemPage
+from devkit_ui.process_utils import shutdown_tools
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.row_planning import plan_contour_rows
 from devkit_ui.topo_results import TopologyEditError
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.mission_view_model import MissionViewModel
 from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
+from devkit_ui.view_models.robot_brain_view_model import RobotBrainViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
+from devkit_ui.view_models.sim_view_model import SimViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
-
-# Field 27's actual GPS extent, derived from maps/recon_logs/recon.csv (the
-# real Agri-Field-Dataset field-27 mesh, Zenodo 7805321 — France, ~372m x
-# 252m footprint, downsampled to a ~6.5m grid — replacing an earlier
-# placeholder India location that was in this file before). FIELD27_CENTER
-# is the anchor the mesh was georeferenced against (the field's actual
-# centroid). FIELD27_BOUNDS pads that extent by 15% on each side so
-# leaflet's fitBounds() shows the whole field with a small margin, rather
-# than butting the boundary against the map edge. This value MUST stay in
-# lockstep with DEFAULT_FIELD_LAT/LON in topo_to_forest3d.py,
-# FIELD_DATUM_LAT/LON's default in manage.py, and --anchor-lat/lon's
-# default in maps/recon_logs/test_contour_planning.py — see
-# _FAKE_GPS_LAT/LON below for why a mismatch there is dangerous, not just
-# cosmetic.
-FIELD27_CENTER = (48.0046000, 3.6644000)
-FIELD27_BOUNDS = ((48.0031957, 3.6612233), (48.0060043, 3.6675767))
 
 _NAME_RE = re.compile(r'^[A-Z0-9_]+$')
 
@@ -134,113 +114,7 @@ def load_css() -> str:
 
 _APP_CSS = load_css()
 
-# ── Tools card: process registry shared by every browser session ────────
-# Handles live here, not in the page closure, so reloading or opening a
-# second tab cannot orphan a running tool or spawn a duplicate.
-_TOOLS: dict = {}
-_GRAPHER_DIR = '/tmp/ros2grapher'
-
-
-def _shared(name: str, factory: Callable):
-    """Return the shared tool entry, storing the factory result if absent."""
-    return _TOOLS.setdefault(name, factory())
-
-
-def _alive(proc) -> bool:
-    """Return whether a process handle exists and is still running."""
-    return proc is not None and proc.poll() is None
-
-
-def _spawn_logged(cmd: list, log: str, **kwargs):
-    """Start cmd in its own session with output going to a log file."""
-    with open(log, 'w', encoding='utf-8') as fh:
-        return subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,
-                                start_new_session=True, **kwargs)
-
-
-def _kill_group(proc, grace: float = 5.0) -> None:
-    """SIGTERM then SIGKILL a process group. Blocking: call off the UI loop."""
-    if proc is None or proc.poll() is not None:
-        return
-    try:
-        pgid = os.getpgid(proc.pid)
-        os.killpg(pgid, signal.SIGTERM)
-        try:
-            proc.wait(timeout=grace)
-            return
-        except subprocess.TimeoutExpired:
-            os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    try:
-        proc.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        pass
-
-
-def _stop_all(procs: list) -> None:
-    """Stop the listed process groups and clear the list; blocks while waiting."""
-    for proc in procs:
-        _kill_group(proc, grace=3.0)
-    procs.clear()
-
-
-def _ensure_xvfb(display: str, daemons: list) -> None:
-    """Start Xvfb unless a live one owns the display; clear stale locks."""
-    num = display.lstrip(':')
-    lock = f'/tmp/.X{num}-lock'
-    if os.path.exists(lock):
-        if subprocess.run(['pgrep', '-f', f'[X]vfb {display}'],
-                          capture_output=True, check=False).returncode == 0:
-            return
-        for path in (lock, f'/tmp/.X11-unix/X{num}'):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-    daemons.append(_spawn_logged(
-        ['Xvfb', display, '-screen', '0', '1920x1080x24', '-nolisten', 'tcp'],
-        f'/tmp/xvfb{num}.log'))
-    time.sleep(0.5)
-
-
-def _start_vnc_stack(display: str, vnc_port: int, web_port: int, daemons: list) -> None:
-    """Xvfb + x11vnc (loopback only) + noVNC websockify. Blocking."""
-    _stop_all(daemons)
-    _ensure_xvfb(display, daemons)
-    daemons.append(_spawn_logged(
-        ['x11vnc', '-display', display, '-nopw', '-forever', '-shared', '-quiet',
-         '-localhost', '-rfbport', str(vnc_port)], f'/tmp/x11vnc-{vnc_port}.log'))
-    daemons.append(_spawn_logged(
-        ['websockify', '--web', '/usr/share/novnc', str(web_port), f'localhost:{vnc_port}'],
-        f'/tmp/websockify-{web_port}.log'))
-    time.sleep(0.5)
-
-
-def _restore_label(lbl, proc) -> None:
-    if _alive(proc):
-        lbl.set_text(f'running (pid {proc.pid})')
-        lbl.style('color:#1a7f37')
-
-
-def _report_if_exited(proc, lbl, log: str) -> None:
-    """Two seconds after start, say so if the process already died."""
-    def check() -> None:
-        if proc.poll() is not None:
-            lbl.set_text(f'exited ({proc.returncode}) - see {log}')
-            lbl.style('color:#cf222e')
-    ui.timer(2.0, check, once=True)
-
-
-def _shutdown_tools() -> None:
-    """Stop registered tool process groups during application shutdown."""
-    for entry in _TOOLS.values():
-        for proc in (entry if isinstance(entry, list) else [entry]):
-            if isinstance(proc, subprocess.Popen):
-                _kill_group(proc, grace=3.0)
-
-
-app.on_shutdown(_shutdown_tools)
+app.on_shutdown(shutdown_tools)
 
 # ── ROS node ──────────────────────────────────────────────────────────────────
 
@@ -287,7 +161,6 @@ class NiceGuiNode(Node):
             self._topo_domain_service
         )
         self._topo_edit_service = TopologyEditService(self._topo_app_service)
-        self._sim_assets = SimAssetService()
         self._robot_brain_app_service = RobotBrainApplicationService(self._robot_brain_domain_service)
         self._row_discovery_app_service = RowDiscoveryApplicationService(
             self._row_discovery_domain_service)
@@ -301,6 +174,8 @@ class NiceGuiNode(Node):
             self._drive_app_service, self._row_discovery_app_service, self._nav_app_service)
         self._topo_vm = TopologyViewModel(self._topo_app_service)
         self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
+        self._robot_brain_vm = RobotBrainViewModel(self._robot_brain_app_service)
+        self._sim_vm = SimViewModel(SimAssetService())
 
         # Initialize with default demo document
         self._topo_app_service.initialize_with_default()
@@ -739,7 +614,7 @@ class NiceGuiNode(Node):
             if rid is not None:
                 ui.label(
                     f'This is part of row {rid}. To delete the whole row '
-                    f'(entry + exit), use the ✕ on the Mission tab instead.'
+                    f'(entry + exit), use the ✕ on the Plan tab instead.'
                 ).classes('text-xs').style('color:#9a6700;max-width:340px')
             ui.label('This persists immediately and cannot be undone.').classes(
                 'text-xs').style('color:#8c959f')
@@ -786,20 +661,31 @@ class NiceGuiNode(Node):
         if _APP_CSS:
             ui.add_head_html(f'<style>{_APP_CSS}</style>')
         with ui.tabs().classes('w-full') as tabs:
-            tab_nav     = ui.tab('Nav',     icon='route')
-            tab_mission = ui.tab('Mission', icon='checklist')
+            tab_run     = ui.tab('Run',     icon='route')
+            tab_plan    = ui.tab('Plan',    icon='checklist')
+            tab_sim     = ui.tab('Sim',     icon='view_in_ar')
             tab_system  = ui.tab('System',  icon='settings')
-        with ui.tab_panels(tabs, value=tab_nav).classes('w-full'):
-            with ui.tab_panel(tab_nav):
-                self._nav_content()
-            with ui.tab_panel(tab_mission):
-                self._mission_content()
+        with ui.tab_panels(tabs, value=tab_run).classes('w-full'):
+            with ui.tab_panel(tab_run):
+                self._run_content()
+            with ui.tab_panel(tab_plan):
+                self._plan_content()
+            with ui.tab_panel(tab_sim):
+                SimPage(
+                    self._sim_vm,
+                    map_name=lambda: self._topo_doc.name if self._topo_doc else '?',
+                    on_save_map=self.save_map_as,
+                    on_archive_map=self.archive_and_clear_map,
+                )
             with ui.tab_panel(tab_system):
-                self._system_content()
+                SystemPage(
+                    telemetry_vm=self._telemetry_vm,
+                    robot_brain_vm=self._robot_brain_vm,
+                )
 
-    # ── Nav tab ───────────────────────────────────────────────────────────────
+    # ── Run tab ───────────────────────────────────────────────────────────────
 
-    def _nav_content(self) -> None:
+    def _run_content(self) -> None:
 
         """Builds the navigation interface and keeps its displayed state synchronized with the robot
         and topology.
@@ -909,10 +795,10 @@ class NiceGuiNode(Node):
 
         ui.timer(0.2, refresh_nav)
 
-    # ── Mission tab ───────────────────────────────────────────────────────────
+    # ── Plan tab ──────────────────────────────────────────────────────────────
 
-    def _mission_content(self) -> None:
-        """Build the Mission tab UI: field boundary drawing, F2C planning, and row saving."""
+    def _plan_content(self) -> None:
+        """Build the Plan tab UI: field boundary drawing, F2C planning, and row saving."""
         corners_ll: list[tuple[float, float]] = []
         swath_layers: list = []
         poly_layer:   list = [None]
@@ -1672,911 +1558,6 @@ class NiceGuiNode(Node):
         self._run_vm.drop_node.row_action = ROW_ACTION
         self.get_logger().info(f'archive_and_clear_map: archived to {archive}')
         return f'archived → {archive}'
-
-    # ── System tab ────────────────────────────────────────────────────────────
-
-    def _system_content(self) -> None:
-        """Build the System tab interface for telemetry, safety monitoring, GPS, simulation tools,
-        plant configuration, and map management.
-        """
-        with ui.row().classes('items-stretch w-full gap-3'):
-            with ui.card().classes('flex-1'):
-                ui.label('Telemetry').classes('font-semibold mb-2')
-                ui.html('<div class="sec-label">Linear velocity</div>')
-                ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green').bind_value_from(
-                        self._telemetry_vm, 'linear_velocity')
-                ui.html('<div class="sec-label mt-2">Angular velocity</div>')
-                ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green').bind_value_from(
-                        self._telemetry_vm, 'angular_velocity')
-                ui.html('<div class="sec-label mt-3">Battery</div>')
-                ui.label().classes('text-sm').bind_text_from(
-                    self._telemetry_vm, 'battery_text')
-            with ui.card().classes('flex-1'):
-                ui.label('Safety').classes('font-semibold mb-2')
-                ui.html('<div class="sec-label">Bumpers</div>')
-                for attr, label in [('bumper_front_top_active', 'Front top'),
-                                    ('bumper_front_bottom_active', 'Front bottom'),
-                                    ('bumper_back_active', 'Rear')]:
-                    with ui.row().classes('items-center gap-0'):
-                        dot = ui.html('<span class="dot-off"></span>')
-                        ui.label(label).classes('text-sm')
-                    def _mk(d=dot, a=attr):
-                        """Return a callback updating HTML element d from telemetry attribute a."""
-                        def _u():
-                            """Refresh the bumper indicator from its current telemetry flag."""
-                            d.set_content(
-                                f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "ok"}"></span>')
-                        return _u
-                    ui.timer(0.2, _mk())
-                ui.html('<div class="sec-label mt-3">E-stops</div>')
-                for attr, label in [('estop_front_active', 'Front'), ('estop_back_active', 'Rear')]:
-                    with ui.row().classes('items-center gap-0'):
-                        dot = ui.html('<span class="dot-off"></span>')
-                        ui.label(label).classes('text-sm')
-                    def _mk2(d=dot, a=attr):
-                        """Return a callback updating HTML element d from telemetry attribute a."""
-                        def _u():
-                            """Refresh the hardware e-stop indicator from its current telemetry flag."""
-                            d.set_content(
-                                f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "off"}"></span>')
-                        return _u
-                    ui.timer(0.2, _mk2())
-        with ui.card().classes('w-full mt-3'):
-            ui.label('ESP').classes('font-semibold mb-2')
-            with ui.row().classes('gap-2 flex-wrap'):
-                ui.button('Enable',
-                    on_click=self._robot_brain_app_service.enable).props(
-                        'color=positive outline no-caps').classes('px-4')
-                ui.button('Disable',
-                    on_click=self._robot_brain_app_service.disable).props(
-                        'color=negative outline no-caps').classes('px-4')
-                ui.button('Reset',
-                    on_click=self._robot_brain_app_service.reset).props(
-                        'color=warning outline no-caps').classes('px-4')
-                ui.button('Restart',
-                    on_click=self._robot_brain_app_service.restart).props(
-                        'color=primary outline no-caps').classes('px-4')
-                ui.button('Configure',
-                    on_click=self._robot_brain_app_service.configure).props(
-                        'outline no-caps').classes('px-4')
-        with ui.card().classes('w-full mt-3'):
-            ui.label('GPS').classes('font-semibold mb-2')
-            leaflet = ui.leaflet(center=FIELD27_CENTER, zoom=18).classes('w-full h-80')
-            leaflet.run_map_method(
-                'fitBounds', [list(FIELD27_BOUNDS[0]), list(FIELD27_BOUNDS[1])])
-            marker  = leaflet.marker(latlng=leaflet.center)
-            gps_status_lbl = ui.label('—').classes('text-xs font-mono mt-1').style('color:#57606a')
-            _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',
-                            2: 'DGNSS', 4: 'RTK FLOAT', 5: 'RTK FIXED'}
-            def update_gps_ui():
-                """Refresh the map marker and GPS details, keeping the display when no message exists."""
-                gps = self._telemetry_vm.gps
-                if gps is not None:
-                    lat, lon = gps.latitude, gps.longitude
-                    leaflet.set_center((lat, lon))
-                    marker.move(lat, lon)
-                    code = gps.status.status
-                    cov  = gps.position_covariance[0]
-                    gps_status_lbl.set_text(
-                        f'{_FIX_LABELS.get(code, str(code))}  '
-                        f'{lat:.6f}, {lon:.6f}  '
-                        f'alt={gps.altitude:.1f}m  '
-                        f'σ={cov**0.5:.2f}m')
-                    col = '#1a7f37' if code == 5 else '#9a6700' if code >= 1 else '#cf222e'
-                    gps_status_lbl.style(f'color:{col}')
-            ui.timer(2.0, update_gps_ui)
-        with ui.card().classes('w-full mt-3'):
-            ui.label('Tools').classes('font-semibold mb-2')
-            with ui.row().classes('items-center gap-3 flex-wrap'):
-                _host = ui.context.client.request.url.hostname or 'localhost'
-                if ':' in _host:
-                    _host = f'[{_host}]'
-                _host = escape(_host, quote=True)
-
-                # ── Graph Explorer ───────────────────────────────────────
-                _explorer_proc: list = _shared('explorer', lambda: [None])
-                _explorer_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-                _restore_label(_explorer_lbl, _explorer_proc[0])
-                def _start_explorer():
-                    if _alive(_explorer_proc[0]):
-                        _explorer_lbl.set_text('already running')
-                        return
-                    try:
-                        _explorer_proc[0] = _spawn_logged(
-                            ['ros2', 'run', 'ros2graph_explorer', 'ros2graph_explorer'],
-                            '/tmp/ros2graph_explorer.log')
-                        _explorer_lbl.set_text(
-                            f'started (pid {_explorer_proc[0].pid}) '
-                            '- log: /tmp/ros2graph_explorer.log')
-                        _explorer_lbl.style('color:#1a7f37')
-                        _report_if_exited(_explorer_proc[0], _explorer_lbl,
-                                          '/tmp/ros2graph_explorer.log')
-                    except Exception as exc:
-                        _explorer_lbl.set_text(f'ERROR: {exc}')
-                        _explorer_lbl.style('color:#cf222e')
-                async def _stop_explorer():
-                    await ng_run.io_bound(_kill_group, _explorer_proc[0])
-                    _explorer_proc[0] = None
-                    _explorer_lbl.set_text('stopped')
-                    _explorer_lbl.style('color:#57606a')
-                ui.button('Start Graph Explorer', on_click=_start_explorer).props(
-                    'outline no-caps').classes('px-4')
-                ui.button('Stop', on_click=_stop_explorer).props(
-                    'outline no-caps').classes('px-4')
-                ui.html(
-                    f'<a href="http://{_host}:8734/" target="_blank" '
-                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
-                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
-                    'font-family:\'Courier New\',monospace;">'
-                    '↗ Graph Explorer</a>'
-                )
-                ui.html(
-                    '<a href="https://github.com/nilseuropa/ros2graph_explorer#build--launch"'
-                    ' target="_blank"'
-                    ' style="font-size:11px;color:var(--txt-muted);text-decoration:none;'
-                    'font-family:\'Courier New\',monospace;">'
-                    '📄 Documentation</a>'
-                )
-
-                ui.separator().classes('w-full my-1')
-
-                # ── ros2grapher ──────────────────────────────────────────
-                _grapher_proc: list = _shared('grapher', lambda: [None])
-                _grapher_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-                _restore_label(_grapher_lbl, _grapher_proc[0])
-                def _start_grapher():
-                    if _alive(_grapher_proc[0]):
-                        _grapher_lbl.set_text('already running')
-                        return
-                    try:
-                        # ros2grapher serves its output directory over plain HTTP on
-                        # all interfaces. Give it a private directory holding only
-                        # index.html so it cannot expose the workspace (.env etc).
-                        os.makedirs(_GRAPHER_DIR, exist_ok=True)
-                        _grapher_proc[0] = _spawn_logged(
-                            ['ros2grapher', '/workspace', '-o', f'{_GRAPHER_DIR}/index.html',
-                             '--port', '8888'],
-                            '/tmp/ros2grapher.log', cwd=_GRAPHER_DIR)
-                        _grapher_lbl.set_text(
-                            f'started (pid {_grapher_proc[0].pid}) - open http://{_host}:8888 '
-                            f'(scan takes a few seconds) - log: /tmp/ros2grapher.log')
-                        _grapher_lbl.style('color:#1a7f37')
-                        _report_if_exited(_grapher_proc[0], _grapher_lbl, '/tmp/ros2grapher.log')
-                    except Exception as exc:
-                        _grapher_lbl.set_text(f'ERROR: {exc}')
-                        _grapher_lbl.style('color:#cf222e')
-                async def _stop_grapher():
-                    await ng_run.io_bound(_kill_group, _grapher_proc[0])
-                    _grapher_proc[0] = None
-                    _grapher_lbl.set_text('stopped')
-                    _grapher_lbl.style('color:#57606a')
-                ui.button('Start ros2grapher', on_click=_start_grapher).props(
-                    'outline no-caps').classes('px-4')
-                ui.button('Stop', on_click=_stop_grapher).props(
-                    'outline no-caps').classes('px-4')
-                ui.html(
-                    f'<a href="http://{_host}:8888/" target="_blank" '
-                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
-                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
-                    'font-family:\'Courier New\',monospace;">'
-                    '↗ ros2grapher</a>'
-                )
-                ui.html(
-                    '<a href="https://github.com/Supull/ros2grapher"'
-                    ' target="_blank"'
-                    ' style="font-size:11px;color:var(--txt-muted);text-decoration:none;'
-                    'font-family:\'Courier New\',monospace;">'
-                    '📄 Documentation</a>'
-                )
-
-                ui.separator().classes('w-full my-1')
-
-                # ── RViz ─────────────────────────────────────────────────
-                _rviz_proc: list = _shared('rviz', lambda: [None])
-                _rviz_daemons: list = _shared('rviz_daemons', list)
-                _rviz_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-                _restore_label(_rviz_lbl, _rviz_proc[0])
-
-                async def _start_rviz():
-                    if _alive(_rviz_proc[0]):
-                        _rviz_lbl.set_text('already running')
-                        return
-                    try:
-                        # Resolve topo_nav RViz config (has MarkerArray displays
-                        # pre-wired to /topological_map_visualisation et al).
-                        # Falls back to no config if topo_nav isn't installed.
-                        try:
-                            rviz_cfg = os.path.join(
-                                get_package_share_directory('topological_navigation'),
-                                'rviz', 'topological_navigation.rviz',
-                            )
-                        except PackageNotFoundError:
-                            rviz_cfg = None
-                        await ng_run.io_bound(_start_vnc_stack, ':98', 5901, 6081, _rviz_daemons)
-                        rviz_args = ['ros2', 'run', 'rviz2', 'rviz2']
-                        if rviz_cfg is not None:
-                            rviz_args += ['-d', rviz_cfg]
-                        _rviz_proc[0] = _spawn_logged(
-                            rviz_args, '/tmp/rviz.log', env={**os.environ, 'DISPLAY': ':98'})
-                        suffix = '' if rviz_cfg else ' (no topo config found)'
-                        _rviz_lbl.set_text(
-                            f'started (pid {_rviz_proc[0].pid}){suffix} - log: /tmp/rviz.log')
-                        _rviz_lbl.style('color:#1a7f37')
-                        _report_if_exited(_rviz_proc[0], _rviz_lbl, '/tmp/rviz.log')
-                    except Exception as exc:
-                        _rviz_lbl.set_text(f'ERROR: {exc}')
-                        _rviz_lbl.style('color:#cf222e')
-
-                async def _stop_rviz():
-                    await ng_run.io_bound(_kill_group, _rviz_proc[0])
-                    _rviz_proc[0] = None
-                    await ng_run.io_bound(_stop_all, _rviz_daemons)
-                    _rviz_lbl.set_text('stopped')
-                    _rviz_lbl.style('color:#57606a')
-
-                ui.button('Launch RViz', on_click=_start_rviz).props(
-                    'outline no-caps').classes('px-4')
-                ui.button('Stop RViz', on_click=_stop_rviz).props(
-                    'outline no-caps').classes('px-4')
-                ui.html(
-                    f'<a href="http://{_host}:6081/vnc.html" target="_blank" '
-                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
-                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
-                    'font-family:\'Courier New\',monospace;">'
-                    '↗ RViz (noVNC)</a>'
-                )
-                ui.separator().classes('w-full my-1')
-
-                # ── Medkit Gateway ───────────────────────────────────────
-                _medkit_proc: list = [None]
-                _medkit_stopping = False
-                _medkit_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-                def _start_medkit():
-                    """Launch Medkit on loopback unless this tab's process is running.
-
-                    Display process creation errors in the status label. A successful
-                    start reports the launch PID without checking gateway readiness.
-                    """
-                    if _medkit_stopping:
-                        return
-                    if _medkit_proc[0] is not None and _medkit_proc[0].poll() is None:
-                        _medkit_lbl.set_text('already running')
-                        return
-                    try:
-                        _medkit_proc[0] = subprocess.Popen(
-                            ['ros2', 'launch', 'ros2_medkit_gateway', 'bringup.launch.py',
-                             'server_host:=127.0.0.1'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
-                        _medkit_lbl.set_text(f'started (pid {_medkit_proc[0].pid})')
-                        _medkit_lbl.style('color:#1a7f37')
-                    except Exception as exc:
-                        _medkit_lbl.set_text(f'ERROR: {exc}')
-                        _medkit_lbl.style('color:#cf222e')
-                async def _stop_medkit():
-                    """Reap the launch process before releasing its handle, off the UI loop."""
-                    nonlocal _medkit_stopping
-                    if _medkit_stopping:
-                        return
-                    _medkit_stopping = True
-                    try:
-                        if _medkit_proc[0] is not None:
-                            _medkit_lbl.set_text('stopping')
-                            await ng_run.io_bound(_shutdown_medkit, _medkit_proc[0])
-                            _medkit_proc[0] = None
-                        _medkit_lbl.set_text('stopped')
-                        _medkit_lbl.style('color:#57606a')
-                    except (OSError, subprocess.TimeoutExpired) as exc:
-                        _medkit_lbl.set_text(f'ERROR: {exc}')
-                        _medkit_lbl.style('color:#cf222e')
-                    finally:
-                        _medkit_stopping = False
-
-                def _shutdown_medkit(proc):
-                    """Allow ROS launch to stop its children before escalating on timeout."""
-                    proc.send_signal(signal.SIGINT)
-                    try:
-                        proc.wait(timeout=15)
-                    except subprocess.TimeoutExpired:
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
-                            proc.wait(timeout=5)
-                ui.button('Start Medkit Gateway', on_click=_start_medkit).props(
-                    'outline no-caps').classes('px-4')
-                ui.button('Stop Medkit Gateway', on_click=_stop_medkit).props(
-                    'outline no-caps').classes('px-4')
-                _medkit_host = ui.context.client.request.url.hostname or 'localhost'
-                if ':' in _medkit_host:
-                    _medkit_host = f'[{_medkit_host}]'
-                _medkit_host = escape(_medkit_host, quote=True)
-                ui.html(
-                    f'<a href="http://{_medkit_host}:8080/" target="_blank" '
-                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
-                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
-                    'font-family:\'Courier New\',monospace;">'
-                    f'↗ Gateway ({_medkit_host}:8080)</a>'
-                )
-                ui.html(
-                    '<div style="font-size:11px;color:var(--txt-muted);'
-                    'font-family:\'Courier New\',monospace;line-height:1.5;">'
-                    'SOVD web UI runs on the host, not in this container. On host:<br>'
-                    '<code>docker run -p 3000:80 ghcr.io/selfpatch/sovd_web_ui:latest</code><br>'
-                    f'Then open <a href="http://{_medkit_host}:3000/" target="_blank" '
-                    f'style="color:var(--blue);text-decoration:none;">{_medkit_host}:3000</a> '
-                    f'and set its gateway URL to <code>http://{_medkit_host}:8080</code>.<br>'
-                    'The gateway starts on loopback for host-local use. Remote access requires '
-                    'authentication, TLS, and restricted network access.'
-                    '</div>'
-                )
-
-                ui.separator().classes('w-full my-1')
-
-                # ── Gazebo Sim ───────────────────────────────────────────
-                _gazebo_proc: list = _shared('gazebo', lambda: [None])
-                _spawn_proc: list = _shared('gazebo_spawn', lambda: [None])
-                _gazebo_daemons: list = _shared('gazebo_daemons', list)  # Xvfb, x11vnc, websockify
-                _gazebo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-                _restore_label(_gazebo_lbl, _gazebo_proc[0])
-
-                # Robot model selector — controls which xacro is spawned and
-                # which urdf arg is passed to sowbot_sim.launch.py.
-                # sowbot_01:       TrackedVehicle + TrackController (DART required)
-                # robo_caatinga:   DiffDrive skid-steer (ODE or DART both fine)
-                # ifarmate:        DiffDrive skid-steer (plugin wiring copied from caatinga)
-                _ROBOT_MODELS = {
-                    'sowbot (tracked)':      'sowbot_01.xacro',
-                    'caatinga (diff drive)': 'robo_caatinga.urdf.xacro',
-                    'ifarmate (diff drive)': 'ifarmate.urdf.xacro',
-                }
-                _robot_model: dict = {'xacro': 'sowbot_01.xacro'}
-
-                with ui.row().classes('items-center gap-3 mb-1'):
-                    ui.html('<span style="font-size:12px;color:#57606a;'
-                            'font-family:monospace">Robot model</span>')
-                    ui.toggle(
-                        list(_ROBOT_MODELS.keys()),
-                        value='sowbot (tracked)',
-                        on_change=lambda e: _robot_model.update(
-                            xacro=_ROBOT_MODELS[e.value]),
-                    ).props('dense')
-
-                _SIM_ENV = {
-                    **os.environ,
-                    'TMAP2_FILE': '/workspace/maps/maize_map',
-                    'GZ_SIM_RESOURCE_PATH': (
-                        # Forest3D-generated models (model://ground,
-                        # model://crop/plant) live here — must be first or
-                        # gz sim aborts world load with "Unable to find uri".
-                        '/workspace/models'
-                        ':/workspace/install/virtual_maize_field'
-                        '/share/virtual_maize_field/models'
-                        + (':' + os.environ['GZ_SIM_RESOURCE_PATH']
-                           if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')
-                    ),
-                }
-                def _sim_cmd(headless: bool = False) -> list:
-                    """Build the sowbot_sim launch command using the current robot model."""
-                    return [
-                        'ros2', 'launch', 'devkit_bringup', 'sowbot_sim.launch.py',
-                        'world:=maize.world',
-                        f'urdf:={_robot_model["xacro"]}',
-                        f'headless:={"true" if headless else "false"}',
-                    ]
-
-                async def _start_gazebo_browser():
-                    if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
-                        _gazebo_lbl.set_text('already running')
-                        return
-                    try:
-                        # We don't use `with` for these because we save the process arguments and
-                        # manage them manually.
-                        # Spawn Xvfb on :99 only if not already taken
-                        await ng_run.io_bound(_start_vnc_stack, ':99', 5900, 6080, _gazebo_daemons)
-                        # Xvfb has no DRI/GLX driver, so it can't honour
-                        # whatever hardware-render env manage.py set for the
-                        # container (nvidia __GLX_VENDOR_LIBRARY_NAME, or
-                        # /dev/dri passthrough). Force llvmpipe software GL
-                        # for this process only, matching docs/research/Sim.md
-                        #
-                        # Env vars alone are NOT enough for gz-sim: RViz's
-                        # Ogre1/GLX renderer honours LIBGL_ALWAYS_SOFTWARE
-                        # directly, but gz-sim's Ogre2 initialises via
-                        # EGL_EXT_platform_device, which explicitly enumerates
-                        # /dev/dri and selects a real GPU node — Mesa's
-                        # software-force guard refuses to override an
-                        # explicitly-selected hardware device (this is the
-                        # "Not allowed to force software rendering..." warning
-                        # immediately before the segfault in gazebo_sim.log).
-                        # No EGL env var changes that once a real render node
-                        # is visible, and this container's /dev:/dev +
-                        # privileged mode means it always is.
-                        #
-                        # Confirmed fix (tested manually in-container): hide
-                        # /dev/dri from just this subprocess with a private
-                        # mount namespace — the same trick gz-sim's own CI
-                        # uses on GPU-less runners. Only this child's view of
-                        # /dev is masked; nothing else in the container.
-                        env = {
-                            **_SIM_ENV,
-                            'DISPLAY': ':99',
-                            'LIBGL_ALWAYS_SOFTWARE': '1',
-                            'GALLIUM_DRIVER': 'llvmpipe',
-                            'MESA_LOADER_DRIVER_OVERRIDE': 'llvmpipe',
-                        }
-                        _quoted_cmd = ' '.join(
-                            "'" + a.replace("'", "'\\''") + "'" for a in _sim_cmd())
-                        wrapped_cmd = [
-                            'unshare', '--mount', '--propagation', 'private',
-                            '--', 'bash', '-c',
-                            f'mount -t tmpfs tmpfs /dev/dri 2>/dev/null; '
-                            f'exec {_quoted_cmd}',
-                        ]
-                        # Log to a file so a crashed launch is diagnosable:
-                        # tail /tmp/gazebo_sim.log.
-                        _gazebo_proc[0] = _spawn_logged(wrapped_cmd, '/tmp/gazebo_sim.log', env=env)
-                        _gazebo_lbl.set_text(
-                            f'browser mode — {_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
-                        _gazebo_lbl.style('color:#1a7f37')
-                    except Exception as exc:
-                        _gazebo_lbl.set_text(f'ERROR: {exc}')
-                        _gazebo_lbl.style('color:#cf222e')
-
-                async def _stop_gazebo():
-                    for proc_var in (_gazebo_proc, _spawn_proc):
-                        await ng_run.io_bound(_kill_group, proc_var[0])
-                        proc_var[0] = None
-                    await ng_run.io_bound(_stop_all, _gazebo_daemons)
-                    _gazebo_lbl.set_text('stopped')
-                    _gazebo_lbl.style('color:#57606a')
-
-                # Rebuild maize.world FROM the saved topo map: plants are
-                # studded in the inter-row gaps of the R*_IN/OUT nodes. Gazebo
-                # reads the world only at launch, so a running sim must be
-                # stopped and relaunched to see a rebuild — we refuse mid-run
-                # rather than silently no-op. Uses the shared worldgen.sh
-                # (also called by Launch Sim) so Rebuild and Launch Sim agree
-                # on the cache key and never regenerate each other's world.
-                _MAP_FILE   = '/workspace/maps/maize_map'
-
-                async def _rebuild_world():
-                    if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
-                        _gazebo_lbl.set_text(
-                            'stop the sim before rebuilding — Gazebo reads the '
-                            'world only at launch')
-                        _gazebo_lbl.style('color:#cf222e')
-                        return
-                    if not os.path.exists(_MAP_FILE):
-                        _gazebo_lbl.set_text(
-                            f'no saved map at {_MAP_FILE} — drop/save nodes first')
-                        _gazebo_lbl.style('color:#cf222e')
-                        return
-                    try:
-                        _gazebo_lbl.set_text('rebuilding world from map…')
-                        _gazebo_lbl.style('color:#57606a')
-                        # Get plant placement values (cm → m conversion)
-                        spacing_m = float(plant_spacing.value or 100) / 100.0
-                        row_w_m = float(row_width_input.value or 80) / 100.0
-                        scale = float(plant_scale.value or 100) / 100.0
-                        cat = scale_category.value or 'all'
-                        model = plant_model.value or 'plant'
-                        weed_density = (
-                            int(weed_density_scale.value)
-                            if weed_density_scale.value is not None else 10)
-                        # Validate selected model exists on disk
-                        if not self._sim_assets.has_crop_model(model):
-                            _gazebo_lbl.set_text(
-                                f'model "{model}" not found — upload it first')
-                            _gazebo_lbl.style('color:#cf222e')
-                            return
-                        r = await ng_run.io_bound(
-                            subprocess.run,
-                            ['bash', '/workspace/worldgen.sh',
-                             '--plant-spacing', str(spacing_m),
-                             '--row-width', str(row_w_m),
-                             '--plant-scale', str(scale),
-                             '--scale-category', cat,
-                             '--crop-model', model,
-                             '--weed-density', str(weed_density)],
-                            capture_output=True, text=True, timeout=120,
-                            check=False
-                        )
-                        if r is None:
-                            _gazebo_lbl.set_text('rebuild cancelled')
-                            _gazebo_lbl.style('color:#cf222e')
-                            return
-                        if r.returncode != 0:
-                            err = (r.stderr or r.stdout or 'unknown error').strip()
-                            _gazebo_lbl.set_text(f'rebuild failed: {err[-200:]}')
-                            _gazebo_lbl.style('color:#cf222e')
-                            return
-                        m = re.search(r'Weed density:\s*(\d+)', r.stdout or '')
-                        weed_count = m.group(1) if m else '?'
-                        summary = (f'world rebuilt (spacing={spacing_m:.2f}m, '
-                                  f'row={row_w_m:.2f}m, '
-                                  f'scale={scale:.2f} on {cat}, '
-                                  f'weed density={weed_density}% '
-                                  f'({weed_count} weeds), '
-                                  f'model={model})')
-                        _gazebo_lbl.set_text(f'{summary} — relaunch to view')
-                        _gazebo_lbl.style('color:#1a7f37')
-                    except subprocess.TimeoutExpired:
-                        _gazebo_lbl.set_text('rebuild timed out')
-                        _gazebo_lbl.style('color:#cf222e')
-                    except Exception as exc:
-                        _gazebo_lbl.set_text(f'ERROR: {exc}')
-                        _gazebo_lbl.style('color:#cf222e')
-
-                # Hardcoded install prefix — avoids shelling out to
-                # `ros2 pkg prefix` which fails when AMENT_PREFIX_PATH
-                # is not set in the UI node's subprocess environment.
-                _AGRO_PKG = '/workspace/install/devkit_simulation/share/devkit_simulation'
-
-                def _launch_sim(headless: bool = False):
-                    """Launch the selected simulation, optionally headless, and update its status.
-                    """
-                    # Single button, runs the exact same thing as the CLI:
-                    # `ros2 launch devkit_bringup sowbot_sim.launch.py
-                    #   world:=maize.world urdf:=<selected xacro>`
-                    # (same command _sim_cmd() builds for the browser button).
-                    # Replaces the old Launch World / Spawn Robot split, which
-                    # ran sim.launch.py + nav2_only.launch.py instead — that
-                    # path skipped preflight_pkill, fusioncore, and
-                    # kill_bootstrap_tfs entirely (all of which only exist in
-                    # sowbot_sim.launch.py), causing stale wall-time bootstrap
-                    # TFs to fight the real sim-time TF forever and FusionCore
-                    # to never run at all. Do not reintroduce that split.
-                    if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
-                        _gazebo_lbl.set_text('already running')
-                        return
-                    try:
-                        _gazebo_proc[0] = _spawn_logged(
-                            _sim_cmd(headless), '/tmp/gazebo_sim.log', env=_SIM_ENV)
-                        _gazebo_lbl.set_text(
-                            f'sim launching{" (headless)" if headless else ""} — '
-                            f'{_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
-                        _gazebo_lbl.style('color:#1a7f37')
-                    except Exception as exc:
-                        _gazebo_lbl.set_text(f'ERROR: {exc}')
-                        _gazebo_lbl.style('color:#cf222e')
-
-                # ── Plant Placement Controls ─────────────────────────────
-                # Configure plant spacing, weed density row width, and model before
-                # rebuilding. Values are stored locally; --plant-spacing and
-                # --row-width are passed to topo_to_forest3d.py on rebuild.
-                # Passed as --plant-scale, --weed-density --scale-category, and --crop-model.
-                ui.separator().classes('w-full my-2')
-                ui.html('<span class="sec-label">Plant Placement</span>')
-
-                # Row 1: Plant Spacing | Row Width
-                with ui.row().classes('w-full gap-4 mt-1'):
-                    with ui.column().classes('flex-1 gap-0'):
-                        ui.html('<div class="sec-label">Plant Spacing</div>')
-                        plant_spacing = ui.number(
-                            value=100, min=10, max=1000, step=5, precision=0,
-                            suffix='cm'
-                        ).classes('w-full')
-                    with ui.column().classes('flex-1 gap-0'):
-                        ui.html('<div class="sec-label">Row width</div>')
-                        row_width_input = ui.number(
-                            value=80, min=20, max=300, step=5, precision=0,
-                            suffix='cm'
-                        ).classes('w-full')
-
-                spacing_warn_lbl = ui.label('').classes('text-xs').style('color:#9a6700')
-
-                def _check_spacing_warning():
-                    rw = float(row_width_input.value or 80)
-                    ps = float(plant_spacing.value or 100)
-                    if rw >= ps:
-                        spacing_warn_lbl.set_text('Warning: row width >= plant spacing')
-                    else:
-                        spacing_warn_lbl.set_text('')
-
-                row_width_input.on('update:model-value', lambda e: _check_spacing_warning())
-                plant_spacing.on('update:model-value', lambda e: _check_spacing_warning())
-
-                # Row 2: Scale + category | Model selector
-                with ui.row().classes('w-full gap-4 mt-1'):
-                    with ui.column().classes('flex-1 gap-0'):
-                        ui.html('<div class="sec-label">Scale</div>')
-                        with ui.row().classes('items-center gap-1 w-full'):
-                            plant_scale = ui.number(
-                                value=100, min=5, max=1000, step=5, precision=0,
-                                suffix='%'
-                            ).classes('flex-1')
-                            ui.label('on').classes('text-xs').style('color:#8c959f')
-                            scale_category = ui.select(
-                                options=['all', 'crop', 'weed', 'irrigation'],
-                                value='all'
-                            ).classes('w-28')
-                    with ui.column().classes('flex-1 gap-0'):
-                        ui.html('<div class="sec-label">Model</div>')
-                        crop_models = self._sim_assets.list_crop_models()
-                        plant_model = ui.select(
-                            options=crop_models, value=crop_models[0]
-                        ).classes('w-full')
-
-                # Row 3: weed_density + category (coming)
-                with ui.row().classes('w-full gap-4 mt-1'):
-                    with ui.column().classes('flex-1 gap-0'):
-                        ui.html('<div class="sec-label">Weed Density</div>')
-                        with ui.row().classes('items-center gap-1 w-full'):
-                            weed_density_scale = ui.number(
-                                value=10, min=0, max=100, step=5, precision=0,
-                                suffix='%'
-                            ).classes('flex-1')
-                            ui.label('on').classes('text-xs').style('color:#8c959f')
-
-                # Upload section
-                ui.html('<div class="sec-label mt-2">Upload new model</div>')
-                _visual_mesh_data: dict = {'name': None, 'data': None}
-                _collision_mesh_data: dict = {'name': None, 'data': None}
-                _plant_upload_lbl = ui.label('').classes('text-xs font-mono').style(
-                    'color:#57606a')
-
-                model_name_input = ui.input(
-                    label='Model name',
-                    placeholder='my_plant',
-                ).classes('w-40')
-
-                async def _handle_visual_upload(e):
-                    try:
-                        if hasattr(e, 'file'):
-                            data = await e.file.read()
-                            fname = e.file.name if hasattr(e.file, 'name') else 'visual.glb'
-                        else:
-                            data = e.content.read()
-                            fname = getattr(e, 'name', 'visual.glb')
-                    except Exception as exc:
-                        _plant_upload_lbl.set_text(f'upload failed: {exc}')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    try:
-                        self._sim_assets.validate_mesh(data, fname)
-                    except SimAssetError as exc:
-                        _plant_upload_lbl.set_text(str(exc))
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    _visual_mesh_data['name'] = fname
-                    _visual_mesh_data['data'] = data
-                    _plant_upload_lbl.set_text(f'visual: {fname} ({len(data)//1024}KB)')
-                    _plant_upload_lbl.style('color:#1a7f37')
-
-                async def _handle_collision_upload(e):
-                    try:
-                        if hasattr(e, 'file'):
-                            data = await e.file.read()
-                            fname = e.file.name if hasattr(e.file, 'name') else 'collision.glb'
-                        else:
-                            data = e.content.read()
-                            fname = getattr(e, 'name', 'collision.glb')
-                    except Exception as exc:
-                        _plant_upload_lbl.set_text(f'collision upload failed: {exc}')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    try:
-                        self._sim_assets.validate_mesh(data, fname, collision=True)
-                    except SimAssetError as exc:
-                        _plant_upload_lbl.set_text(str(exc))
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    _collision_mesh_data['name'] = fname
-                    _collision_mesh_data['data'] = data
-                    _plant_upload_lbl.set_text(
-                        f'visual: {_visual_mesh_data["name"] or "—"}, '
-                        f'collision: {fname}')
-                    _plant_upload_lbl.style('color:#1a7f37')
-
-                async def _create_plant_model():
-                    try:
-                        name = self._sim_assets.create_crop_model(
-                            model_name_input.value, _visual_mesh_data['data'],
-                            _collision_mesh_data['data'])
-                    except SimAssetError as exc:
-                        _plant_upload_lbl.set_text(str(exc))
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    except Exception as exc:
-                        _plant_upload_lbl.set_text(f'failed: {exc}')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    plant_model.options = self._sim_assets.list_crop_models()
-                    plant_model.value = name
-                    _visual_mesh_data['name'] = None
-                    _visual_mesh_data['data'] = None
-                    _collision_mesh_data['name'] = None
-                    _collision_mesh_data['data'] = None
-                    model_name_input.value = ''
-                    _plant_upload_lbl.set_text(f'model "{name}" created')
-                    _plant_upload_lbl.style('color:#1a7f37')
-
-                with ui.row().classes('items-center gap-2 flex-wrap'):
-                    ui.upload(
-                        label='Visual mesh (.glb/.gltf) *',
-                        auto_upload=True,
-                        on_upload=_handle_visual_upload,
-                    ).props('accept=.glb,.gltf').classes('max-w-xs')
-                    ui.upload(
-                        label='Collision mesh (optional)',
-                        auto_upload=True,
-                        on_upload=_handle_collision_upload,
-                    ).props('accept=.glb,.gltf').classes('max-w-xs')
-                    ui.button('Create Model', on_click=_create_plant_model).props(
-                        'color=primary no-caps').classes('px-4')
-
-                ui.separator().classes('w-full my-2')
-
-                with ui.row().classes('items-center gap-2 flex-wrap'):
-                    ui.button('Launch Sim', on_click=_launch_sim).props(
-                        'color=positive no-caps').classes('px-4 font-bold')
-                    ui.button('Rebuild World from Map', on_click=_rebuild_world).props(
-                        'outline no-caps').classes('px-4')
-                    ui.button('Launch Sim (headless)',
-                              on_click=lambda: _launch_sim(headless=True)).props(
-                        'outline no-caps').classes('px-4')
-                    ui.button('Launch Sim (browser)', on_click=_start_gazebo_browser).props(
-                        'outline no-caps').classes('px-4')
-                    ui.button('Stop Sim', on_click=_stop_gazebo).props(
-                        'outline no-caps').classes('px-4')
-                    ui.html(
-                        f'<a href="http://{_host}:6080/vnc.html" target="_blank" '
-                        'style="font-size:13px;color:var(--blue);text-decoration:none;'
-                        'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
-                        'font-family:\'Courier New\',monospace;">'
-                        '↗ Gazebo (noVNC)</a>'
-                    )
-
-
-                # ── Sowbot Row Follow (sim) ──────────────────────────────
-                # Launches neo.launch.py in sim mode: subscribes to the
-                # Gazebo-bridged /camera/image_raw instead of opening a
-                # V4L2 device, runs the TSM detector, and publishes
-                # /cmd_vel via crop_row_node. limbic_row_follow_node
-                # (started by sim_nav.launch.py) calls /row_follow/enable
-                # on this process when topo nav reaches an _IN node.
-                ui.separator().classes('w-full my-1')
-                _neo_proc: list = _shared('neo', lambda: [None])
-                _neo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-                _restore_label(_neo_lbl, _neo_proc[0])
-
-                def _start_neo():
-                    if _neo_proc[0] is not None and _neo_proc[0].poll() is None:
-                        _neo_lbl.set_text('already running')
-                        return
-                    try:
-                        _neo_proc[0] = _spawn_logged(
-                            [
-                                'ros2', 'launch', 'devkit_bringup', 'neo.launch.py',
-                                'use_camera:=false',
-                                'detector:=tsm',
-                                'image_topic:=/camera/image_raw',
-                            ],
-                            '/tmp/neo_sim.log', env=os.environ.copy())
-                        _neo_lbl.set_text(
-                            f'running — pid {_neo_proc[0].pid} · log: /tmp/neo_sim.log')
-                        _neo_lbl.style('color:#1a7f37')
-                    except Exception as exc:
-                        _neo_lbl.set_text(f'ERROR: {exc}')
-                        _neo_lbl.style('color:#cf222e')
-
-                async def _stop_neo():
-                    if _neo_proc[0] is None:
-                        _neo_lbl.set_text('not running')
-                        return
-                    await ng_run.io_bound(_kill_group, _neo_proc[0])
-                    _neo_proc[0] = None
-                    _neo_lbl.set_text('stopped')
-                    _neo_lbl.style('color:#57606a')
-
-                with ui.row().classes('items-center gap-2 flex-wrap'):
-                    ui.html(
-                        '<span class=\"sec-label\" style=\"white-space:nowrap\">'
-                        'Sowbot Row Follow</span>')
-                    ui.button('Start', on_click=_start_neo).props(
-                        'color=positive no-caps').classes('px-4')
-                    ui.button('Stop',  on_click=_stop_neo).props(
-                        'color=negative outline no-caps').classes('px-4')
-
-                # ── Soil texture import ──────────────────────────────────
-                # Import a soil asset folder (zipped): its image maps are
-                # harvested into /workspace/uploads (persisted across image
-                # rebuilds) and staged into the ground model on the next world
-                # rebuild, where Forest3D turns them into a PBR material.
-                _soil_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-
-                async def _import_soil_zip(e):
-                    # NiceGUI changed the upload event shape across versions:
-                    # newer exposes e.file (FileUpload, async read()); older
-                    # exposed e.content (a sync file-like object).
-                    try:
-                        if hasattr(e, 'file'):
-                            data = await e.file.read()
-                        else:
-                            data = e.content.read()
-                    except Exception as exc:
-                        _soil_lbl.set_text(f'import failed: {exc}')
-                        _soil_lbl.style('color:#cf222e')
-                        return
-                    try:
-                        names = await ng_run.io_bound(self._sim_assets.import_soil_zip, data)
-                    except SimAssetError as exc:
-                        _soil_lbl.set_text(str(exc))
-                        _soil_lbl.style('color:#cf222e')
-                        return
-                    except Exception as exc:
-                        _soil_lbl.set_text(f'import failed: {exc}')
-                        _soil_lbl.style('color:#cf222e')
-                        return
-                    if names is None:
-                        _soil_lbl.set_text('import cancelled')
-                        _soil_lbl.style('color:#cf222e')
-                        return
-                    summary = ', '.join(f'{self._sim_assets.classify_map(n)}={n}' for n in names)
-                    _soil_lbl.set_text(
-                        f'imported {len(names)} map(s) — {summary}. '
-                        'Rebuild World to apply.')
-                    _soil_lbl.style('color:#1a7f37')
-
-                with ui.row().classes('items-center gap-2 flex-wrap'):
-                    ui.upload(
-                        label='Import soil asset (.zip)',
-                        auto_upload=True,
-                        on_upload=_import_soil_zip,
-                    ).props('accept=.zip').classes('max-w-md')
-
-        with ui.card().classes('w-full mt-3'):
-            ui.label('Map Archive').classes('font-semibold mb-2')
-            archive_lbl = ui.label('').classes('text-xs font-mono mt-1').style(
-                'color:#57606a')
-
-            with ui.row().classes('items-center gap-2 w-full mb-2'):
-                save_name = ui.input(
-                    label='Save copy as', placeholder='e.g. north_field_2026',
-                ).props('dense').classes('flex-1')
-
-                def _do_save():
-                    """Save a named map copy, show its status, and clear the name on success."""
-                    status = self.save_map_as(save_name.value)
-                    archive_lbl.set_text(status)
-                    archive_lbl.style(
-                        'color:#cf222e' if status.startswith('ERROR')
-                        else 'color:#1a7f37')
-                    if not status.startswith('ERROR'):
-                        save_name.set_value('')
-
-                ui.button('Save', on_click=_do_save).props('outline no-caps')
-
-            async def _do_archive():
-                map_name = self._topo_doc.name if self._topo_doc else '?'
-                with ui.dialog() as dlg, ui.card():
-                    ui.label('Archive and clear map').classes('font-semibold')
-                    ui.label(
-                        f'Copies "{map_name}" to "{map_name}_N" then wipes all '
-                        f'nodes from the live map. Cannot be undone from the UI.'
-                    ).classes('text-xs').style('color:#57606a;max-width:340px')
-                    with ui.row().classes('w-full justify-end gap-2 mt-3'):
-                        ui.button('Cancel',
-                                  on_click=lambda: dlg.submit('cancel')).props(
-                                      'flat no-caps')
-                        ui.button('Archive & Clear', color='negative',
-                                  on_click=lambda: dlg.submit('ok')).props('no-caps')
-
-                result = await dlg
-                if result != 'ok':
-                    return
-                status = self.archive_and_clear_map()
-                archive_lbl.set_text(status)
-                archive_lbl.style(
-                    'color:#cf222e' if status.startswith('ERROR')
-                    else 'color:#1a7f37')
-
-            ui.button('Archive & Clear Map', on_click=_do_archive).props(
-                'color=negative outline no-caps').classes('px-4')
 
     def toggle_estop(self) -> None:
         """

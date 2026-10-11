@@ -23,7 +23,7 @@ def load_navigation_service_harness():
     tree = ast.parse(source.read_text(encoding='utf-8'))
     node_class = next(node for node in tree.body
                       if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode')
-    names = {'_nav_content', '_topo_doc', 'send_speed', 'toggle_estop'}
+    names = {'_run_content', '_topo_doc', 'send_speed', 'toggle_estop'}
     members = [node for node in node_class.body
                if isinstance(node, ast.FunctionDef) and node.name in names]
     harness = ast.ClassDef(name='Harness', bases=[], keywords=[], body=members, decorator_list=[])
@@ -65,7 +65,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
             robot_pose=Mock(return_value=(1.0, 2.0, 0.5)),
         )
         self.node._telemetry_vm = TelemetryViewModel(TelemetryApplicationService(self.telemetry))
-        self.node._nav_content()
+        self.node._run_content()
         self.refresh = fake_ui.timers[0].callback
         self.sidebar = self.namespace['NavigationSidebar'].return_value
 

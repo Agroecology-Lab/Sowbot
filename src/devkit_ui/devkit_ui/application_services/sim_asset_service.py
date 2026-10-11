@@ -1,6 +1,6 @@
 """Create and import the files the Gazebo world is built from (crop models, soil textures).
 
-This is the file-only half of the System tab's simulation controls: it validates
+This is the file-only half of the Sim page's controls: it validates
 uploads and writes them under /workspace. Launching and stopping processes is separate.
 No ROS or NiceGUI imports.
 """

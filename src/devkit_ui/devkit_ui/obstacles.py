@@ -6,7 +6,7 @@ Owns the obstacle list, its YAML persistence and the /obstacles publisher.
 It reaches ROS only through the RosGateway it is given and reads the latest
 GPS and odometry through two getters, so it holds no node or UI state. UI
 state lives in devkit_ui.view_models.obstacle_view_model and the Nav and
-Mission tab cards in devkit_ui.pages.obstacle_cards.
+Plan tab cards in devkit_ui.pages.obstacle_cards.
 
 Threading model
 ---------------

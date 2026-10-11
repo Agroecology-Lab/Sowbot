@@ -40,6 +40,7 @@ def load_mission_harness():
         'RowDiscoveryApplicationService', 'NavigationApplicationService',
         'TelemetryApplicationService',
         'GlobalViewModel', 'RunViewModel', 'TopologyViewModel', 'TelemetryViewModel',
+        'RobotBrainViewModel', 'SimViewModel',
         'ObstacleManager', 'ObstacleViewModel', 'MissionStore', 'MissionDomainService', 'MissionApplicationService',
         'MissionViewModel', 'ui', 'String',
     )}

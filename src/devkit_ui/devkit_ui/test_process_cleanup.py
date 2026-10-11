@@ -12,16 +12,16 @@ from unittest import mock
 
 class TestProcessCleanup(unittest.TestCase):
     def setUp(self):
-        source = Path(__file__).with_name('ui_node.py')
+        source = Path(__file__).with_name('process_utils.py')
         tree = ast.parse(source.read_text(encoding='utf-8'))
         function = next(node for node in tree.body
-                        if isinstance(node, ast.FunctionDef) and node.name == '_kill_group')
+                        if isinstance(node, ast.FunctionDef) and node.name == 'kill_group')
         self.os = mock.Mock(getpgid=mock.Mock(return_value=123))
         namespace = {'os': self.os, 'signal': signal, 'subprocess': subprocess}
         # NOTE: Execute only the checked-in helper with controlled process and OS doubles.
         exec(  # pylint: disable=exec-used
             compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), namespace)
-        self.kill_group = namespace['_kill_group']
+        self.kill_group = namespace['kill_group']
         self.proc = mock.Mock(pid=123, poll=mock.Mock(return_value=None))
         self.timeout = subprocess.TimeoutExpired('tool', 0.1)
 

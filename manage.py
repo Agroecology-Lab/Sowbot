@@ -466,7 +466,7 @@ class DevkitManager:
         # before real Nav2 can handle them.
         if is_sim == 'true':
             # sim_nav.launch.py starts topo nav + Nav2 + UI but NOT Gazebo.
-            # Gazebo is started by the user from the UI System tab, which runs
+            # Gazebo is started by the user from the UI Sim tab, which runs
             # sowbot_sim.launch.py.  Separating them prevents a duplicate Gazebo
             # instance on container boot and lets the user restart Gazebo without
             # tearing down the nav stack.

@@ -1,4 +1,4 @@
-"""NiceGUI cards for marking, drawing and listing obstacles on the Nav and Mission tabs."""
+"""NiceGUI cards for marking, drawing and listing obstacles on the Run and Plan tabs."""
 from __future__ import annotations
 
 from collections.abc import Callable
