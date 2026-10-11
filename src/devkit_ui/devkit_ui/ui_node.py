@@ -21,8 +21,6 @@ from importlib import resources
 from itertools import pairwise
 from pathlib import Path
 
-import numpy as np
-
 # The following imports get generated in the Dockerfile, they aren't available to pylint
 # pylint: disable=import-error
 import rclpy
@@ -44,9 +42,7 @@ from std_msgs.msg import Bool, Float64, String
 from devkit_f2c_planner.f2c_planner import (
     _f2c_latlon_to_xy,
     _f2c_xy_to_latlon,
-    _run_contour_f2c,
     _run_f2c,
-    field_centroid_xy,
 )
 from devkit_ui import plan_import
 
@@ -67,15 +63,6 @@ from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
 from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
-
-# CONTOUR: terrain-aware reference line, from recon-logged elevation data.
-# See dem.py's module docstring for the recon.csv -> elevation_grid ->
-# reference contour pipeline this pulls from.
-from devkit_ui.dem import (
-    build_elevation_grid,
-    load_recon_points,
-    select_reference_contour_latlon,
-)
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 from devkit_ui.domain_services.navigation_domain_service import NavigationDomainService
 from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
@@ -108,6 +95,12 @@ from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.ros_gateway import RosGateway
+from devkit_ui.row_planning import (
+    CONTOUR_WAYPOINT_INTERVAL_M,
+    headland_neighbour_pairs,
+    plan_contour_rows,
+    resample_row_xy,
+)
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
@@ -129,112 +122,8 @@ from devkit_ui.view_models.topology_view_model import TopologyViewModel
 FIELD27_CENTER = (48.0046000, 3.6644000)
 FIELD27_BOUNDS = ((48.0031957, 3.6612233), (48.0060043, 3.6675767))
 
-# CONTOUR: spacing for intermediate topo nodes dropped along curved rows
-# (see save_f2c_rows_to_topo()'s WAYPOINTS block and _resample_row_xy()
-# below) — a single entry->exit edge gives limbic_row_follow nothing to
-# track the bend with, so this chops a curved row into short near-straight
-# hops instead.
-#
-# CAVEAT: this sets hop length, not curve fidelity. Waypoints are
-# interpolated along whatever polyline f2c_planner._run_contour_f2c()
-# already produced, which is a *simplified* offset of the reference
-# contour (dem.select_reference_contour_xy()'s simplify_tolerance_m,
-# default 1.5x the DEM grid resolution — currently 1.5m at the UI's
-# default 1.0m resolution). Between two of that polyline's original
-# vertices the row is geometrically a straight chord; dropping waypoints
-# along it at 1m spacing places nodes exactly ON that chord, not on the
-# true elevation isoline the chord approximates. If tighter tracking than
-# the simplify tolerance matters, lower "DEM grid resolution" in the
-# Mission sidebar (tightens simplify_tolerance_m too) rather than
-# shortening this interval — a denser waypoint chain along the same
-# under-resolved chord doesn't add information the chord doesn't have.
-_CONTOUR_WAYPOINT_INTERVAL_M = 2.5
-
-
-def _resample_row_xy(points_ll: list, anchor_lat: float, anchor_lon: float,
-                      interval_m: float) -> list[tuple[float, float]]:
-    """Resample a row's full point list (lat/lon, as f2c_planner returns it)
-    into evenly-spaced intermediate points at ~interval_m along its arc
-    length, in local xy anchored at anchor_lat/anchor_lon.
-
-    Deliberately excludes the row's first and last points — callers already
-    turn those into the row's IN/OUT topo nodes, this only fills the gap
-    between them. Returns [] if the row's total length is shorter than one
-    interval (nothing to insert) or has fewer than 2 points.
-
-    The last computed waypoint is dropped if it would land within
-    0.3*interval_m of OUT — a node crammed almost on top of OUT achieves
-    nothing and just adds an edge-case-y near-zero-length final hop.
-    """
-    pts_xy = [_f2c_latlon_to_xy(lat, lon, anchor_lat, anchor_lon)
-              for lat, lon in points_ll]
-    if len(pts_xy) < 2:
-        return []
-
-    seg_lens = [math.dist(pts_xy[i], pts_xy[i + 1]) for i in range(len(pts_xy) - 1)]
-    total_len = sum(seg_lens)
-    if total_len < interval_m:
-        return []
-
-    targets = [interval_m * k for k in range(1, int(total_len // interval_m) + 1)]
-    if targets and (total_len - targets[-1]) < 0.3 * interval_m:
-        targets.pop()
-
-    out_xy: list[tuple[float, float]] = []
-    cum = 0.0
-    seg_i = 0
-    for target in targets:
-        while seg_i < len(seg_lens) and cum + seg_lens[seg_i] < target:
-            cum += seg_lens[seg_i]
-            seg_i += 1
-        if seg_i >= len(seg_lens):
-            break
-        frac = (target - cum) / seg_lens[seg_i] if seg_lens[seg_i] > 0 else 0.0
-        x0, y0 = pts_xy[seg_i]
-        x1, y1 = pts_xy[seg_i + 1]
-        out_xy.append((x0 + frac * (x1 - x0), y0 + frac * (y1 - y0)))
-    return out_xy
-
-
-def _headland_neighbour_pairs(coords: dict) -> list:
-    """Given {node_name: (x, y)} for all row endpoints, return the list of
-    (a, b) node-name pairs that should be joined by a headland (nav_to_pose)
-    edge: each node linked only to its immediate same-end neighbour.
-
-    Why this exists: a route between rows must hug the headland and never
-    angle across a crop row. The IN/OUT label is NOT a reliable proxy for
-    which physical end a node sits at — snake (boustrophedon) ordering flips
-    the label↔end correspondence on alternate rows. So we classify ends by
-    geometry: rows are long, so the two ends sit at the extremes of the
-    row-length axis (the coordinate with the larger spread). Split nodes into
-    two ends on that axis, then order each end along the cross (along-headland)
-    axis and pair consecutive nodes. Chaining neighbours (never skip-linking)
-    keeps every edge between physically adjacent row-ends, so A* walks the
-    headland instead of cutting a chord across a row mouth.
-
-    Used by both save_f2c_rows_to_topo (initial build) and
-    repair_row_connectivity (rewire) so the two cannot drift apart. Returns an
-    empty list for < 2 endpoints. Never pairs a node with itself.
-    """
-    pts = list(coords.items())
-    if len(pts) < 2:
-        return []
-    xs = [p[1][0] for p in pts]
-    ys = [p[1][1] for p in pts]
-    end_idx   = 0 if (max(xs) - min(xs)) > (max(ys) - min(ys)) else 1
-    along_idx = 1 - end_idx
-    end_vals = sorted(p[1][end_idx] for p in pts)
-    mid = end_vals[len(end_vals) // 2]
-    end_lo = [p for p in pts if p[1][end_idx] <  mid]
-    end_hi = [p for p in pts if p[1][end_idx] >= mid]
-    out: list = []
-    for group in (end_lo, end_hi):
-        group.sort(key=lambda p: p[1][along_idx])
-        for (a_name, _), (b_name, _) in pairwise(group):
-            if a_name != b_name:
-                out.append((a_name, b_name))
-    return out
 _NAME_RE = re.compile(r'^[A-Z0-9_]+$')
+
 
 # ── Import CSS ────────────────────────────────────────────────────────────────
 
@@ -355,57 +244,6 @@ def _shutdown_tools() -> None:
 
 
 app.on_shutdown(_shutdown_tools)
-
-# ── SVG renderer ──────────────────────────────────────────────────────────────
-
-# ── Fields2Cover geometry helpers ─────────────────────────────────────────────
-
-# F2C core (lat/lon<->XY projection + _run_f2c) — imported at top of file
-# from the standalone devkit_f2c_planner package.
-
-
-def _plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float,
-                        pad_m: float, headland_m: float, snake: bool,
-                        recon_path: str, dem_resolution_m: float,
-                        *, break_after: set[int] | None = None) -> list | None:
-    """Recon CSV -> reference contour -> contour swaths, in one blocking
-    call so do_plan() can run it via ng_run.io_bound() without blocking the
-    event loop (RBFInterpolator fit + swath offsetting are both CPU-bound).
-
-    Returns None (not an error) when the field's too flat for a usable
-    reference contour — see dem.select_reference_contour_xy()'s docstring.
-    do_plan() treats None as "fall back to _run_f2c()'s straight swaths".
-
-    Raises FileNotFoundError / ValueError straight through from
-    load_recon_points() — do_plan() surfaces those as a status message
-    rather than silently falling back, since a missing/too-short recon log
-    is a setup mistake worth fixing, not a legitimate "flat field" case.
-    """
-    _xy_native, elevation, latlon = load_recon_points(recon_path)
-    lat0, lon0 = corners_ll[0]
-    # Recon points are logged in recon_dem_logger.py's own /odom-anchored
-    # frame, unrelated to whatever frame the user's drawn boundary
-    # (corners_ll) happens to be in. Re-anchor them onto corners_ll[0] via
-    # their own lat/lon columns before building the elevation grid, so
-    # origin_xy ends up in the same frame field_centroid_xy() computed
-    # centroid_xy in below — without this, centroid_xy is checked against
-    # an elevation grid built around a completely different, unrelated
-    # local origin, which can easily land outside the grid entirely (this
-    # is what produced the "centroid falls outside the elevation grid"
-    # case with the France field-27 data: the fake India test field was
-    # small enough that this mismatch went unnoticed by coincidence).
-    xy = np.array([_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in latlon])
-    elevation_grid, origin_xy, _smoothing_used = build_elevation_grid(
-        xy, elevation, dem_resolution_m)
-    centroid_xy = field_centroid_xy(corners_ll)
-    reference_line_ll = select_reference_contour_latlon(
-        elevation_grid, dem_resolution_m, origin_xy, centroid_xy, lat0, lon0)
-    if reference_line_ll is None:
-        return None
-    return _run_contour_f2c(
-        corners_ll, obstacle_rings, reference_line_ll, tool_width,
-        pad_m, headland_m, snake, break_after=break_after)
-
 
 # ── ROS node ──────────────────────────────────────────────────────────────────
 
@@ -1008,7 +846,7 @@ class NiceGuiNode(Node):
                               'row_id': rid}
 
             # WAYPOINTS: for contour rows, drop intermediate topo nodes along
-            # the curve at ~1m intervals (see _resample_row_xy()) instead of
+            # the curve at ~1m intervals (see resample_row_xy()) instead of
             # a single entry->exit edge — limbic_row_follow otherwise has
             # nothing telling it the row bends. Straight rows (contour mode
             # off, or a flat-field fallback) get no waypoints and behave
@@ -1016,8 +854,8 @@ class NiceGuiNode(Node):
             wp_names: list[str] = []
             if self._f2c_contour_used and len(swath) > 2:
                 for k, (wx, wy) in enumerate(
-                        _resample_row_xy(swath, anchor_lat, anchor_lon,
-                                          _CONTOUR_WAYPOINT_INTERVAL_M),
+                        resample_row_xy(swath, anchor_lat, anchor_lon,
+                                         CONTOUR_WAYPOINT_INTERVAL_M),
                         start=1):
                     wp_name = f'{prefix}_R{rid}_W{k}'
                     if not overwrite and wp_name in new_topo_nodes:
@@ -1053,7 +891,7 @@ class NiceGuiNode(Node):
 
         # ── Headland edges (point-to-point nav_to_pose) ──────────────────────
         # Connect row i's OUT to row i+1's IN, in swath order. This used to
-        # go through _headland_neighbour_pairs(), which re-derives adjacency
+        # go through headland_neighbour_pairs(), which re-derives adjacency
         # from coordinates alone by guessing which axis separates the two
         # headland ends (whichever of x/y has the larger spread across ALL
         # endpoints). That guess silently breaks once a field has enough
@@ -1073,7 +911,7 @@ class NiceGuiNode(Node):
         # they were never load-bearing for connectivity.
         #
         # repair_row_connectivity() below still uses
-        # _headland_neighbour_pairs() and still needs the geometric guess —
+        # headland_neighbour_pairs() and still needs the geometric guess —
         # it rewires whatever topo map is already on disk, which may
         # contain hand-dropped nodes from the web UI with no known
         # generation order, so coordinates are all it has to go on.
@@ -1186,7 +1024,7 @@ class NiceGuiNode(Node):
             if role == 'waypoint':
                 # Waypoints aren't row ends, so they're deliberately excluded
                 # from `coords` — including them would corrupt the
-                # same-end classification _headland_neighbour_pairs() does
+                # same-end classification headland_neighbour_pairs() does
                 # on row endpoints only.
                 rows.setdefault(rid_int, {}).setdefault('waypoints', []).append(node.name)
             else:
@@ -1225,7 +1063,7 @@ class NiceGuiNode(Node):
         # NOT by entry/exit label (snake ordering flips label vs physical end).
         # Shared with the build path so the two cannot diverge.
         if len(coords) >= 2:
-            for a_name, b_name in _headland_neighbour_pairs(coords):
+            for a_name, b_name in headland_neighbour_pairs(coords):
                 wanted_edges.append((a_name, b_name, NAV_ACTION))
                 wanted_edges.append((b_name, a_name, NAV_ACTION))
         else:
@@ -1754,7 +1592,7 @@ class NiceGuiNode(Node):
                         '/workspace/maps/recon_logs/recon.csv'
                     dem_res = float(f2c_dem_res.value or 1.0)
                     swaths = await ng_run.io_bound(
-                        _plan_contour_rows, list(corners_ll), obstacle_rings,
+                        plan_contour_rows, list(corners_ll), obstacle_rings,
                         width, pad_m, headland_m, snake, recon_path, dem_res,
                         break_after=break_after)
                     if swaths is None:
