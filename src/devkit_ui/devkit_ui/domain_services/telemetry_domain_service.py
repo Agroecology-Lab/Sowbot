@@ -162,7 +162,11 @@ class TelemetryDomainService:
     # ── GNSS ──────────────────────────────────────────────────────────────────
 
     def _on_gps(self, msg: NavSatFix) -> None:
-        """Cache the latest real GNSS fix and refresh the wall-clock staleness timestamp."""
+        """Cache every GNSS message; refresh freshness only for a usable real fix.
+
+        The timestamp advances only for STATUS_FIX or better with finite latitude and
+        longitude that are not both zero. Invalid messages still replace latest_gps.
+        """
         self.latest_gps = msg
         # Anything arriving on the real /gnss/fix topic is by definition a real fix, because
         # the shim publishes elsewhere. Only refresh the timestamp for valid fixes: at least
@@ -175,13 +179,11 @@ class TelemetryDomainService:
             self._last_real_gps_t = self._ros.wall_time_sec()
 
     def _on_fake_gps(self, msg: NavSatFix) -> None:
-        """Consume the sim shim's fix as a fallback only.
+        """Cache the sim fallback unless a valid real fix arrived less than 20 seconds ago.
 
-        This topic is never seen by fusioncore, so it is purely for the UI's own use (e.g. the
-        topo-map save path needing a finite fix at cold start before the real bridge has
-        published one). Content-gated rather than topic-gated: only takes effect if no real
-        fix has arrived recently, so a slow-starting real bridge doesn't leave the UI without
-        any fix while it comes up.
+        This topic is never seen by fusioncore, so it is purely for the UI's own use
+        (e.g. the topo-map save path needing a finite fix at cold start).
+        Use wall-clock arrival time; the fallback message itself is not validated.
         """
         if self._ros.wall_time_sec() - self._last_real_gps_t < FAKE_GPS_YIELD_WINDOW:
             return  # a real fix was seen recently; don't override it
@@ -204,7 +206,12 @@ class TelemetryDomainService:
     # ── Odometry ──────────────────────────────────────────────────────────────
 
     def _on_fusion_odom(self, msg: Odometry) -> None:
-        """Update the latest odometry from fusion once its covariance is trustworthy."""
+        """Accept fusion odometry after checking covariance and real-fix freshness.
+
+        Reject x-position covariance at or below zero or above 1 m², and a real-fix
+        age above 5 wall-clock seconds. Once accepted, fallback odometry stays disabled,
+        even if later fusion messages fail these checks.
+        """
         cov_xx = msg.pose.covariance[0]
         if cov_xx <= 0.0 or cov_xx > FUSION_COV_TRUST_THRESHOLD:
             return  # not trustworthy yet — let /odom keep driving the marker
@@ -263,6 +270,9 @@ class TelemetryDomainService:
         Liveness and staleness are both checked against the TF result itself (not
         latest_odom) so the marker tracks the thing being drawn: if /odom dies but TF is
         still fresh, keep showing it; if TF stalls, blank it even if /odom is still ticking.
+
+        Coordinates are in meters and yaw is in radians. A missing transform or one
+        more than 2 seconds older than the node clock returns None; other errors propagate.
         """
         # Failures are logged at most about once a second, so a persistent failure doesn't
         # flood the log across many UI refresh ticks. This distinguishes "TF lookup failed"

@@ -114,11 +114,15 @@ class TopologyApplicationService:
     def add_node(self, node: TopoNode) -> None:
         """Add a node to the topology and publish it.
 
+        Reverse edges are added to the referenced nodes before publishing. Mutations
+        are not rolled back if adding edges or publishing fails; publisher errors propagate.
+
         Parameters:
-            node: TopoNode to add.
+            node: Node to add; all outgoing edge targets must already exist.
 
         Raises:
             ValueError: If no document is loaded or node already exists.
+            KeyError: If an outgoing edge refers to a missing node.
         """
         self._domain.add_node(node)
 
@@ -142,6 +146,11 @@ class TopologyApplicationService:
         Edits the file on disk when there is one, otherwise a copy of the live map seeded
         with default actions if it has none. Raises on read, modify or write errors, and
         leaves the live document untouched in that case.
+
+        Call from a worker thread. Raises ValueError if no map is loaded. The result
+        reports whether switching succeeded or publishing was used as a fallback.
+        Callback, request-submission, and fallback-publish errors propagate after saving
+        and replacing the live document; those changes are not rolled back.
         """
         with self._lock:
             live = self._require_doc()
@@ -171,6 +180,11 @@ class TopologyApplicationService:
         saved, and no reverse edges are added. If the name is already on disk nothing is
         written and the result is 'skipped'. on_saved runs after the file is written and
         the live document replaced, before the map manager is asked to switch.
+
+        Call from a worker thread. Raises ValueError if no map is loaded; read and
+        write errors propagate. The result reports a successful switch or fallback
+        publication. Callback, request-submission, and fallback-publish errors propagate
+        after saving and replacing the live document, without rollback.
         """
         with self._lock:
             live = self._require_doc()
@@ -193,7 +207,12 @@ class TopologyApplicationService:
         return self._go_live(name, file_doc, on_saved)
 
     def patch_node_role(self, node_name: str, role: str) -> None:
-        """Set a node's role in the saved map. Does nothing if there is no file."""
+        """Set a node's role in the saved map without updating or publishing the live map.
+
+        Do nothing if no map is loaded or no file exists. A missing node leaves the
+        file's nodes unchanged, but the file is still rewritten. Read, parse, and write
+        errors propagate.
+        """
         with self._lock:
             live = self._domain.get_doc()
             if live is None or not self._store.exists(live.name):
@@ -237,6 +256,9 @@ class TopologyApplicationService:
         Returns the archive name. Raises on read or write errors; writes already made are
         not rolled back and the live document is only replaced after both writes succeed.
         A failure to publish is ignored.
+
+        Raises ValueError if no map is loaded. Document-change callback errors propagate
+        after both files have been written and the live document replaced.
         """
         with self._lock:
             live = self._require_doc()
@@ -268,7 +290,13 @@ class TopologyApplicationService:
 
     def _go_live(self, name: str, file_doc: TopoDoc,
                  on_saved: Callable[[], None] | None = None) -> PersistResult:
-        """Replace the live document with the saved one and get the nav stack to load it."""
+        """Replace the live document, call on_saved, then request a map switch.
+
+        Return a PersistResult with kind 'live' on success; otherwise publish and return
+        a result with kind 'no_srv' or 'switch_failed'.
+        Callback, request-submission, and publish errors propagate without restoring the
+        previous live document.
+        """
         self._domain.set_doc(file_doc)
         if on_saved is not None:
             on_saved()

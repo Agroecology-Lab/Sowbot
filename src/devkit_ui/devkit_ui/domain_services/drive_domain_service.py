@@ -18,11 +18,11 @@ class DriveDomainService:
         self._estop_pub = ros.create_publisher(Bool, 'estop/soft', SAFETY_QOS)
 
     def send_speed(self, x: float, y: float) -> None:
-        """Publish a velocity command and update the stored velocity values.
+        """Publish a velocity command, propagating publisher errors.
 
         Parameters:
-            x (float): Linear velocity command.
-            y (float): Angular velocity command.
+            x (float): Forward linear velocity in meters per second.
+            y (float): Turn command in radians per second; published as angular.z = -y.
         """
         msg = Twist()
         msg.linear.x = x

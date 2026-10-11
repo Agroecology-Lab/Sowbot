@@ -19,7 +19,10 @@ class DriveApplicationService:
         self._drive = drive_service
 
     def move_joystick(self, x: float, y: float) -> None:
-        """Forward linear x and turn y commands to the drive domain service."""
+        """Publish forward speed x (m/s) and negated turn y (rad/s).
+
+        Publisher errors propagate to the caller.
+        """
         self._drive.send_speed(x, y)
 
     def toggle_estop(self, current: bool) -> bool:

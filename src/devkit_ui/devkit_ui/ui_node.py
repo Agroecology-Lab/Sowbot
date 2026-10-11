@@ -542,7 +542,10 @@ class NiceGuiNode(Node):
 
     @property
     def latest_gps(self) -> NavSatFix | None:
-        """Return the latest usable GNSS fix, or None before any has arrived."""
+        """Return the cached GNSS message, including invalid fixes, or None before reception.
+
+        In simulation this may be a fallback fix when no valid real fix is recent.
+        """
         return self._telemetry_app_service.latest_gps
 
     # ── nav actions ───────────────────────────────────────────────────────────
@@ -2454,6 +2457,7 @@ class NiceGuiNode(Node):
                         ui.label(label).classes('text-sm')
                     def _mk(d=dot, a=attr):
                         def _u():
+                            """Refresh the bumper indicator from its current telemetry flag."""
                             d.set_content(
                                 f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "ok"}"></span>')
                         return _u
@@ -2465,6 +2469,7 @@ class NiceGuiNode(Node):
                         ui.label(label).classes('text-sm')
                     def _mk2(d=dot, a=attr):
                         def _u():
+                            """Refresh the hardware e-stop indicator from its current telemetry flag."""
                             d.set_content(
                                 f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "off"}"></span>')
                         return _u
@@ -2497,6 +2502,7 @@ class NiceGuiNode(Node):
             _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',
                             2: 'DGNSS', 4: 'RTK FLOAT', 5: 'RTK FIXED'}
             def update_gps_ui():
+                """Refresh the map marker and GPS details, keeping the display when no message exists."""
                 gps = self._telemetry_vm.gps
                 if gps is not None:
                     lat, lon = gps.latitude, gps.longitude
@@ -3470,12 +3476,11 @@ class NiceGuiNode(Node):
         self._global_vm.toggle_estop()
 
     def send_speed(self, x: float, y: float) -> None:
-        """
-        Publish a velocity command.
+        """Publish a velocity command, propagating publisher errors.
 
         Parameters:
-            x (float): Linear velocity command.
-            y (float): Angular velocity command.
+            x (float): Forward linear velocity in meters per second.
+            y (float): Turn command in radians per second; published as angular.z = -y.
         """
         self._run_vm.move_joystick(x, y)
 

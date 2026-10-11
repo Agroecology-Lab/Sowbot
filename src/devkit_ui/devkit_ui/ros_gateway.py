@@ -69,7 +69,7 @@ class RosGateway:
         return self._wall_clock
 
     def wall_time_sec(self) -> float:
-        """Return real elapsed time in seconds, independent of simulated time."""
+        """Return system-clock seconds since the Unix epoch, independent of simulated time."""
         return self.wall_clock().now().nanoseconds * 1e-9
 
     def create_timer(self, period_sec: float, callback, clock: Clock | None = None):
@@ -91,7 +91,7 @@ class RosGateway:
         TransformListener(self._tf_buffer, self._node)
 
     def lookup_transform(self, target_frame: str, source_frame: str):
-        """Return the latest transform between two frames.
+        """Return the latest transform from source_frame into target_frame.
 
         Raises TransformUnavailable when the transform is missing, disconnected or out of range.
         """

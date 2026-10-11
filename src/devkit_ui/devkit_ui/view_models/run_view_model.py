@@ -77,7 +77,10 @@ class RunViewModel:
             discovery_app_service.register_status_callback(self._on_discovery_status)
 
     def move_joystick(self, x: float, y: float) -> None:
-        """Forward linear x and turn y commands to the drive application service."""
+        """Publish forward speed x (m/s) and negated turn y (rad/s).
+
+        Publisher errors propagate to the caller.
+        """
         self._joystick_held = True
         self._drive_app_service.move_joystick(x, y)
 
@@ -152,7 +155,12 @@ class RunViewModel:
 
     def navigate_and_wait(self, target: str, timeout_sec: float,
                           should_abort: Callable[[], bool]) -> bool:
-        """Navigate to a topology node and block until it ends. Use from a worker thread."""
+        """Navigate to a topology node and block until it ends. Use from a worker thread.
+
+        Return True only for arrival; return False for an unavailable service or an
+        unsuccessful navigation outcome. See NavigationApplicationService.navigate_and_wait
+        for timeout_sec and should_abort behavior. Service errors propagate.
+        """
         if self._navigation_app_service is None:
             return False
         return self._navigation_app_service.navigate_and_wait(

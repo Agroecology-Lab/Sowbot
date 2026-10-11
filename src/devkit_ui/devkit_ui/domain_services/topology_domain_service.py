@@ -87,9 +87,12 @@ class TopologyDomainService:
         self._topo_map_pub.publish(msg)
 
     def switch_map(self, path: str, timeout: float = 5.0) -> SwitchResult:
-        """Ask the map manager to load the map file at path. Blocks up to timeout seconds.
+        """Ask the map manager to load the map file at path, waiting up to timeout seconds.
 
-        Call from a worker thread, never from the ROS executor or UI loop.
+        Call from a worker thread, never from the ROS executor or UI loop. Return an
+        unavailable result without sending if the client or server is unavailable.
+        Response exceptions and timeouts become unsuccessful results; a timeout does
+        not cancel the request. Errors while submitting the request propagate.
         """
         if self._switch_cli is None or not self._switch_cli.service_is_ready():
             return SwitchResult(available=False)
@@ -138,11 +141,15 @@ class TopologyDomainService:
     def add_node(self, node: TopoNode) -> None:
         """Add a node to the topology document.
 
+        Reverse edges are added to the referenced nodes before publishing. Mutations
+        are not rolled back if adding edges or publishing fails; publisher errors propagate.
+
         Parameters:
-            node: TopoNode to add.
+            node: Node to add; all outgoing edge targets must already exist.
 
         Raises:
             ValueError: If no document is loaded or node already exists.
+            KeyError: If an outgoing edge refers to a missing node.
         """
         if self._doc is None:
             raise ValueError('No topology document loaded')

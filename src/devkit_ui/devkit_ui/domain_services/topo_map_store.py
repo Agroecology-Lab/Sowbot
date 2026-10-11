@@ -28,11 +28,15 @@ class TopoMapStore:
         return os.path.exists(self.path(name))
 
     def load(self, name: str) -> TopoDoc:
-        """Parse the named map file, propagating file and YAML parsing errors."""
+        """Parse the named map file, propagating file, YAML, and map-data conversion errors."""
         return parse_topo_yaml(self.path(name))
 
     def save(self, doc: TopoDoc, name: str | None = None) -> None:
-        """Write doc to <maps_dir>/<name>, creating the directory if needed."""
+        """Write doc to <maps_dir>/<name>, creating the directory if needed.
+
+        Use doc.name when name is omitted or empty, overwriting any existing file.
+        Filesystem and serialization errors propagate; a failed write may leave a partial file.
+        """
         os.makedirs(self._dir, exist_ok=True)
         dump_topo_yaml(doc, self.path(name or doc.name))
 
