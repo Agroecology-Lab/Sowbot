@@ -29,7 +29,13 @@ except ImportError:  # ROS message packages not installed (e.g. plain unit-test 
 # pylint: disable=wrong-import-position
 from devkit_ui.domain_services import mission_domain_service as mds
 from devkit_ui.domain_services.mission_domain_service import (
-    ERROR, OK, WARN, MissionDomainService, MissionError, resolve_steps)
+    ERROR,
+    OK,
+    WARN,
+    MissionDomainService,
+    MissionError,
+    resolve_steps,
+)
 
 
 def node(name, row_id, role):
