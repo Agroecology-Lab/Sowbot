@@ -62,8 +62,15 @@ class TopologyViewModel:
     def add_node(self, node: TopoNode) -> None:
         """Add a node to the topology via the application service.
 
+        Reverse edges are added to the referenced nodes before publishing. Mutations
+        are not rolled back if adding edges or publishing fails; publisher errors propagate.
+
         Parameters:
-            node: TopoNode to add.
+            node: Node to add; all outgoing edge targets must already exist.
+
+        Raises:
+            ValueError: If no document is loaded or node already exists.
+            KeyError: If an outgoing edge refers to a missing node.
         """
         self._app_service.add_node(node)
 

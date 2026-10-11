@@ -44,8 +44,13 @@ class NavigationDomainService:
         """Send a goal to the node named target.
 
         Blocks up to server_timeout seconds waiting for the action server, so call
-        it from a worker thread. Returns False if no goal was sent because another
-        goal is already running; every other outcome is reported through on_update.
+        it from a worker thread. Returns False without a callback if another goal is
+        already running. True means the request was handled, including unavailability,
+        not that the goal was accepted or reached.
+
+        Initial status and unavailability are reported through on_update on the calling
+        thread; goal feedback and results arrive through action callbacks. Client and
+        callback errors are not caught.
         """
         if self._client is None:
             on_update(NavUpdate('action unavailable (import failed)', False, 'unavailable'))

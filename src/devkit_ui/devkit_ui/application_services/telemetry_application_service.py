@@ -27,7 +27,10 @@ class TelemetryApplicationService:
 
     @property
     def latest_gps(self) -> NavSatFix | None:
-        """Return the latest usable GNSS fix, or None before any has arrived."""
+        """Return the cached GNSS message, including invalid fixes, or None before reception.
+
+        In simulation this may be a fallback fix when no valid real fix is recent.
+        """
         return self._telemetry.latest_gps
 
     @property
@@ -61,7 +64,7 @@ class TelemetryApplicationService:
         return self._telemetry.estop_back_active
 
     def measured_velocity(self) -> tuple[float, float] | None:
-        """Return (linear, angular) velocity from the latest odometry, or None without any."""
+        """Return forward (m/s) and yaw (rad/s) velocity, or None without odometry."""
         odom = self._telemetry.latest_odom
         if odom is None:
             return None

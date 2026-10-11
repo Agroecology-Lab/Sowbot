@@ -42,6 +42,11 @@ class NavigationApplicationService:
         rejected or cancelled, the action server was unavailable, another goal was
         already running, timeout_sec ran out, or should_abort() became true (which
         cancels the goal).
+
+        The timeout budget starts after sending the goal, excluding the up-to-10-second
+        server wait. Timeout and abort checks run after each 0.25-second wait without a
+        terminal update. Both request cancellation; abort allows up to 2 more seconds
+        for a terminal update. Synchronous service and should_abort errors propagate.
         """
         done = threading.Event()
         outcome: list[str | None] = [None]
