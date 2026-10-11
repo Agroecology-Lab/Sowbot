@@ -259,8 +259,8 @@ class TestDirectContourPlanning(unittest.IsolatedAsyncioTestCase):
             [(51.003, -1.999), (51.0, -1.999)],
         ]
         node = make_node([])
-        node._obstacle_mgr = Mock()
-        node._obstacle_mgr.rings_ll.return_value = []
+        node._obstacle_vm = Mock()
+        node._obstacle_vm.rings_ll.return_value = []
 
         def plan_contours(*_args, break_after):
             break_after.add(0)
