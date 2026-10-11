@@ -302,7 +302,7 @@ class NiceGuiNode(Node):
             depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
-        self.create_subscription(
+        self._ros.create_subscription(
             String,
             '/current_node',
             lambda m: self._topo_vm.set_current_node(m.data),
@@ -598,7 +598,7 @@ class NiceGuiNode(Node):
             self._run_vm.track.status = f'recording  {node_name}  (#{self._track_counter})'
 
         _drop()
-        self._track_timer = self.create_timer(interval, _drop)
+        self._track_timer = self._ros.create_timer(interval, _drop)
 
     def stop_track(self) -> None:
         """Stop tracking and mark the last tracked node as the row exit when applicable."""
@@ -1796,9 +1796,9 @@ class NiceGuiNode(Node):
         key = (topic, is_float)
         if key not in self._tool_publishers:
             if is_float:
-                self._tool_publishers[key] = self.create_publisher(Float64, topic, 1)
+                self._tool_publishers[key] = self._ros.create_publisher(Float64, topic, 1)
             else:
-                self._tool_publishers[key] = self.create_publisher(Bool, topic, 1)
+                self._tool_publishers[key] = self._ros.create_publisher(Bool, topic, 1)
         return self._tool_publishers[key]
 
     def _publish_tool_msgs(self, action_key: str,
