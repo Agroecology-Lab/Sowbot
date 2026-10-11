@@ -147,9 +147,12 @@ class TestMapArchiveCard(unittest.TestCase):
     def setUp(self):
         """Build the card with recording callbacks."""
         fake_ui.reset()
-        self.on_save = Mock(return_value='saved north_field')
-        self.on_archive = Mock(return_value='archived as field_1')
-        self.card = MapArchiveCard(lambda: 'field', self.on_save, self.on_archive)
+        self.topo_vm = Mock(map_name='field')
+        self.on_save = self.topo_vm.save_map_as
+        self.on_save.return_value = 'saved north_field'
+        self.on_archive = self.topo_vm.archive_and_clear_map
+        self.on_archive.return_value = 'archived as field_1'
+        self.card = MapArchiveCard(self.topo_vm)
         self.status = next(e for e in fake_ui.elements if e.kind == 'label' and e.text == '')
         self.name = fake_ui.find('input')
 

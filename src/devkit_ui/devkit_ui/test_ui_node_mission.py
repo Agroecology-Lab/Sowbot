@@ -15,7 +15,7 @@ def load_mission_harness():
     tree = ast.parse(source.read_text(encoding='utf-8'))
     node_class = next(n for n in tree.body
                       if isinstance(n, ast.ClassDef) and n.name == 'NiceGuiNode')
-    names = {'__init__', '_run_mission', '_send_goal_sync', 'cancel_mission'}
+    names = {'__init__', '_on_map_archived', '_run_mission', '_send_goal_sync', 'cancel_mission'}
     members = [n for n in node_class.body if isinstance(n, ast.FunctionDef) and n.name in names]
     harness = ast.ClassDef(name='Harness', bases=[ast.Name(id='Node', ctx=ast.Load())],
                           keywords=[], body=members, decorator_list=[])

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -7,6 +9,9 @@ if TYPE_CHECKING:
         TopologyApplicationService,
     )
     from devkit_ui.models import TopoDoc, TopoNode
+
+
+_LOG = logging.getLogger(__name__)
 
 
 class TopologyViewModel:
@@ -20,6 +25,7 @@ class TopologyViewModel:
         self.topo_doc: TopoDoc | None = None
         self.selected_node: str | None = None
         self.current_node: str = '—'
+        self._map_archived_callbacks: list[Callable[[], None]] = []
 
         # Register this view model's callback with the domain via app service
         # This ensures doc changes sync automatically to the UI state
@@ -103,3 +109,34 @@ class TopologyViewModel:
             TopoNode if found, None otherwise.
         """
         return self._app_service.get_node(name)
+
+    @property
+    def map_name(self) -> str:
+        """Return the live map's name, or '?' when no map is loaded."""
+        return self.topo_doc.name if self.topo_doc else '?'
+
+    def register_map_archived_callback(self, callback: Callable[[], None]) -> None:
+        """Call callback after the live map has been archived and cleared successfully."""
+        self._map_archived_callbacks.append(callback)
+
+    def save_map_as(self, name: str) -> str:
+        """Save a named copy of the live map. See TopologyApplicationService.save_map_as."""
+        return self._app_service.save_map_as(name)
+
+    def archive_and_clear_map(self) -> str:
+        """Archive the saved map as <name>_<N> and replace it with an empty default map.
+
+        Registered map-archived callbacks run on success only. Return an archive status, or an
+        'ERROR:' status for a missing map or a read/write failure; callbacks do not run then.
+        """
+        if not self.topo_doc:
+            return 'ERROR: no map loaded'
+        try:
+            archive = self._app_service.archive_and_clear()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            _LOG.error('archive_and_clear_map failed: %s', exc)
+            return f'ERROR: {exc}'
+        for callback in self._map_archived_callbacks:
+            callback()
+        _LOG.info('archive_and_clear_map: archived to %s', archive)
+        return f'archived → {archive}'

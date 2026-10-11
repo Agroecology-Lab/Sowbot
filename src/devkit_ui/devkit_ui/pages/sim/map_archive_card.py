@@ -1,28 +1,25 @@
-from collections.abc import Callable
-
 from nicegui import ui
+
+from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 
 class MapArchiveCard(ui.card):
-    """Save a named copy of the topology map, or archive it and clear the live map."""
+    """Save a named copy of the topology map, or archive it and clear the live map.
 
-    def __init__(self,
-                 map_name: Callable[[], str],
-                 on_save: Callable[[str], str],
-                 on_archive: Callable[[], str]) -> None:
+    Archive & Clear acts on the live map file, the one worldgen.sh builds the simulated world
+    from and the one the real robot loads, so it is destructive outside the sim too. It sits on
+    the Sim tab because Rebuild World reads that map; the dialog states what it will wipe.
+    """
+
+    def __init__(self, topo_vm: TopologyViewModel) -> None:
         """Build the save and archive controls.
 
         Parameters:
-            map_name (Callable[[], str]): Returns the live map's name for the confirmation text.
-            on_save (Callable[[str], str]): Saves a copy under the given name and returns a status
-                message; a message starting with ERROR is shown as a failure.
-            on_archive (Callable[[], str]): Archives and clears the live map and returns a status
-                message, with the same ERROR convention.
+            topo_vm (TopologyViewModel): Saves copies of the live map and archives and clears it.
+                Both return a status message; one starting with ERROR is shown as a failure.
         """
         super().__init__()
-        self._map_name = map_name
-        self._on_save = on_save
-        self._on_archive = on_archive
+        self._topo_vm = topo_vm
         with self:
             ui.label('Map Archive').classes('font-semibold mb-2')
             self._status = ui.label('').classes('text-xs font-mono mt-1').style('color:#57606a')
@@ -41,14 +38,14 @@ class MapArchiveCard(ui.card):
 
     def _save(self) -> None:
         """Save a named map copy, show its status, and clear the name on success."""
-        status = self._on_save(self._save_name.value)
+        status = self._topo_vm.save_map_as(self._save_name.value)
         self._show(status)
         if not status.startswith('ERROR'):
             self._save_name.set_value('')
 
     async def _archive(self) -> None:
         """Confirm, then archive the live map and clear it."""
-        map_name = self._map_name()
+        map_name = self._topo_vm.map_name
         with ui.dialog() as dlg, ui.card():
             ui.label('Archive and clear map').classes('font-semibold')
             ui.label(
@@ -61,4 +58,4 @@ class MapArchiveCard(ui.card):
                           on_click=lambda: dlg.submit('ok')).props('no-caps')
         if await dlg != 'ok':
             return
-        self._show(self._on_archive())
+        self._show(self._topo_vm.archive_and_clear_map())

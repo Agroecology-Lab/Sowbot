@@ -174,6 +174,7 @@ class NiceGuiNode(Node):
         self._run_vm = RunViewModel(
             self._drive_app_service, self._row_discovery_app_service, self._nav_app_service)
         self._topo_vm = TopologyViewModel(self._topo_app_service)
+        self._topo_vm.register_map_archived_callback(self._on_map_archived)
         self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
         self._robot_brain_vm = RobotBrainViewModel(self._robot_brain_app_service)
         sim_assets = SimAssetService()
@@ -673,12 +674,7 @@ class NiceGuiNode(Node):
             with ui.tab_panel(tab_plan):
                 self._plan_content()
             with ui.tab_panel(tab_sim):
-                SimPage(
-                    self._sim_vm,
-                    map_name=lambda: self._topo_doc.name if self._topo_doc else '?',
-                    on_save_map=self.save_map_as,
-                    on_archive_map=self.archive_and_clear_map,
-                )
+                SimPage(self._sim_vm, self._topo_vm)
             with ui.tab_panel(tab_system):
                 SystemPage(
                     telemetry_vm=self._telemetry_vm,
@@ -1538,28 +1534,10 @@ class NiceGuiNode(Node):
             _modify, self._run_vm.drop_node, 'status',
             f'row action: {action}, {n_edges} row edges updated')
 
-    def save_map_as(self, name: str) -> str:
-        """Save a named copy of the current map. See TopologyApplicationService.save_map_as."""
-        return self._topo_app_service.save_map_as(name)
-
-    def archive_and_clear_map(self) -> str:
-        """Archive the saved map as <name>_<N> and replace it with an empty default map.
-
-        Reset row driving to geometry mode on success. Return an archive status, or an
-        'ERROR:' status for a missing map or a read/write failure; the row mode is left
-        alone in that case.
-        """
-        if not self._topo_doc:
-            return 'ERROR: no map loaded'
-        try:
-            archive = self._topo_app_service.archive_and_clear()
-        except Exception as e:
-            self.get_logger().error(f'archive_and_clear_map failed: {e}')
-            return f'ERROR: {e}'
+    def _on_map_archived(self) -> None:
+        """Return row driving to geometry mode after the map was archived and cleared."""
         self._row_action = ROW_ACTION
         self._run_vm.drop_node.row_action = ROW_ACTION
-        self.get_logger().info(f'archive_and_clear_map: archived to {archive}')
-        return f'archived → {archive}'
 
     def toggle_estop(self) -> None:
         """
