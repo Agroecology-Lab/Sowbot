@@ -4,7 +4,7 @@ Use this skill whenever you write or modify Python code in this repository.
 
 ## Environment setup
 
-1. Run `source skills/python-coding/activate-venv.sh` before running Python commands.
+1. Run `source skills/python-coding/activate_venv.sh` before running Python commands.
 2. Use the virtual environment in `.venv` for all Python tooling and tests.
 
 ## How to write Python code here
