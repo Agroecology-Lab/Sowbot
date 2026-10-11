@@ -1,6 +1,7 @@
 # Needs Python 3.11 to 3.13 (rosys does not support 3.14). 3.12 matches the ROS 2 Jazzy image.
 # python3.12 -m venv .venv && . .venv/bin/activate && pip install -r requirements-dev.txt
 -r requirements.txt
+-e ./src/devkit_f2c_planner
 scikit-image
 shapely
 deepdiff
