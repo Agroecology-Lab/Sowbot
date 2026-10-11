@@ -3,9 +3,9 @@
 Mission storage and scheduling for the Sowbot webui.
 
 Owns the mission list, its YAML persistence, and the ACTIONS registry.
-Designed to be attached to a NiceGuiNode (see MissionStore.attach) so the
-node exposes a read-only snapshot and a version counter that the UI timer
-polls to decide when to rebuild. Does not inherit from rclpy.node.Node.
+Exposes a read-only snapshot, a version counter and a last-action status that
+a ViewModel polls to decide when to rebuild. It holds no UI or node state and
+does not inherit from rclpy.node.Node; attach() takes only a logger source.
 
 Unlike obstacles, missions are not broadcast on a ROS topic — they exist
 to drive the executor in ui_node.py, which dispatches `sowbot_row_follow`
@@ -128,11 +128,11 @@ def validate_mission(name: str,
 class MissionStore:
     """Owns the mission list and its YAML persistence.
 
-    After attach(node), the node exposes:
+    Readers poll these properties:
 
-        node.missions          : tuple[dict, ...]   read-only snapshot
-        node.missions_version  : int                bumps on every change
-        node.mission_status    : str                last-action status
+        missions : tuple[dict, ...]   read-only snapshot
+        version  : int                bumps on every change
+        status   : str                last-action status (last writer wins)
 
     Mission record schema:
 
@@ -153,14 +153,14 @@ class MissionStore:
 
     def __init__(self, path: str = MISSIONS_FILE) -> None:
         if path.endswith('.yaml'):
-            self._store = MissionYamlStore(path, on_write_done=self._set_status)
+            self._store = MissionYamlStore(path, on_write_done=self.set_status)
         elif path.endswith('.sqlite') or path.endswith('.db'):
-            self._store = MissionSqliteStore(path, on_write_done=self._set_status)
+            self._store = MissionSqliteStore(path, on_write_done=self.set_status)
         else:
             raise ValueError(f'Unsupported file extension: {path}')
 
-        self._node = None
         self._version = 0
+        self._status = ''
         self._lock     = threading.Lock()
 
     # ── lifecycle ─────────────────────────────────────────────────────────
@@ -170,17 +170,26 @@ class MissionStore:
         if isinstance(self._store, MissionSqliteStore):
             self._store.close()
 
-    def attach(self, node) -> None:
-        """Wire into a NiceGuiNode. Kicks off a background load."""
-        self._node = node
-        node.missions          = ()
-        node.missions_version  = 0
-        node.mission_status    = ''
-
+    def attach(self, ros) -> None:
+        """Load saved missions. ros supplies get_logger() for load and write results."""
         with self._lock:
-            self._store.attach(node)
+            self._store.attach(ros)
             self._version += 1
-            self._sync_node()
+
+    @property
+    def missions(self) -> tuple[dict, ...]:
+        """Return the current mission snapshot."""
+        return self._store.missions
+
+    @property
+    def version(self) -> int:
+        """Return a counter that increases on every change to the missions."""
+        return self._version
+
+    @property
+    def status(self) -> str:
+        """Return the last action's status text; an error starts with 'ERROR'."""
+        return self._status
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -198,15 +207,14 @@ class MissionStore:
 
         err = validate_mission(name, rows, action, repeat_every_hours)
         if err:
-            self._set_status(err)
+            self.set_status(err)
             return None
 
         with self._lock:
-            self._set_status(f'creating {name} — writing…')
+            self.set_status(f'creating {name} — writing…')
             mid = self._store.add(rows, action, action_params, name, repeat_every_hours, active)
 
             self._version += 1
-            self._sync_node()
 
         return mid
 
@@ -214,19 +222,18 @@ class MissionStore:
         with self._lock:
             mission = self.find(mid)
             if mission is None:
-                self._set_status(f'ERROR: {mid!r} not found')
+                self.set_status(f'ERROR: {mid!r} not found')
                 return False
 
-            self._set_status(f'deleting {mid} — writing…')
+            self.set_status(f'deleting {mid} — writing…')
             result = self._store.delete(mid)
             self._version += 1
-            self._sync_node()
         return result
 
     def update(self, mid: str, **fields) -> bool:
         bad = set(fields) - _MUTABLE_FIELDS
         if bad:
-            self._set_status(f'ERROR: cannot update field(s) {sorted(bad)}')
+            self.set_status(f'ERROR: cannot update field(s) {sorted(bad)}')
             return False
 
         # Clean name before merging so validate_mission sees the final form.
@@ -239,7 +246,7 @@ class MissionStore:
         with self._lock:
             target = self.find(mid)
             if target is None:
-                self._set_status(f'ERROR: {mid!r} not found')
+                self.set_status(f'ERROR: {mid!r} not found')
                 return False
 
             merged = {**target, **fields}
@@ -250,18 +257,17 @@ class MissionStore:
                 merged.get('repeat_every_hours'),
             )
             if err:
-                self._set_status(err)
+                self.set_status(err)
                 return False
 
             # Empty name after cleaning → fall back to id.
             if 'name' in fields and not fields['name']:
                 fields['name'] = mid
 
-            self._set_status(f'{mid} updated — writing…')
+            self.set_status(f'{mid} updated — writing…')
             result = self._store.update(mid, **fields)
 
             self._version += 1
-            self._sync_node()
 
         return result
 
@@ -282,9 +288,9 @@ class MissionStore:
         """
         with self._lock:
             if self.find(mid) is None:
-                self._set_status(f'ERROR: {mid!r} not found')
+                self.set_status(f'ERROR: {mid!r} not found')
                 return False
-            self._set_status(f'{mid} re-armed — writing…')
+            self.set_status(f'{mid} re-armed — writing…')
             return self._write_run_state(mid, last_run_at=None, last_run_success=None, active=True)
 
     def record_run(self, mid: str, success: bool) -> bool:
@@ -301,7 +307,7 @@ class MissionStore:
         with self._lock:
             target = self.find(mid)
             if target is None:
-                self._set_status(f'ERROR: {mid!r} not found')
+                self.set_status(f'ERROR: {mid!r} not found')
                 return False
 
             patch: dict = {
@@ -311,7 +317,7 @@ class MissionStore:
             if target.get('repeat_every_hours') is None and success:
                 patch['active'] = False
 
-            self._set_status(f'{mid} run recorded — writing…')
+            self.set_status(f'{mid} run recorded — writing…')
             return self._write_run_state(mid, **patch)
 
     # ── derived views (lock-free snapshots) ──────────────────────────────
@@ -390,21 +396,11 @@ class MissionStore:
         """
         result = self._store.update(mid, **fields)
         self._version += 1
-        self._sync_node()
         return result
 
-    def _sync_node(self) -> None:
-        """Mirror internal state onto the node. Always called inside the lock."""
-        if self._node is None:
-            return
-        self._node.missions         = self._store.missions
-        self._node.missions_version = self._version
-
-    def _set_status(self, s: str) -> None:
-        """Status setter — last-writer-wins race accepted (see module docs)."""
-        if self._node is not None:
-            self._node.mission_status = s
-
+    def set_status(self, s: str) -> None:
+        """Set the status text. Last writer wins; the race is accepted (see module docs)."""
+        self._status = s
 
     def _is_due(self, mission: dict, now: datetime) -> bool:
         """Whether the mission belongs in today_queue at `now`.

@@ -62,11 +62,7 @@ def _coerce_record(raw: object, path: str) -> dict | None:
 class MissionYamlStore:
     """Owns the mission list and its YAML persistence.
 
-    After attach(node), the node exposes:
-
-        node.missions          : tuple[dict, ...]   read-only snapshot
-        node.missions_version  : int                bumps on every change
-        node.mission_status    : str                last-action status
+    Holds the mission snapshot; MissionStore adds the version and status counters.
 
     Mission record schema:
 

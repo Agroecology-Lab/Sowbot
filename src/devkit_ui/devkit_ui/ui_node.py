@@ -44,6 +44,7 @@ from devkit_ui import plan_import
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
+from devkit_ui.application_services.mission_application_service import MissionApplicationService
 from devkit_ui.application_services.navigation_application_service import (
     NavigationApplicationService,
 )
@@ -109,6 +110,7 @@ from devkit_ui.topo_row_builder import (
     plan_row_repair,
 )
 from devkit_ui.view_models.global_view_model import GlobalViewModel
+from devkit_ui.view_models.mission_view_model import MissionViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
@@ -347,11 +349,12 @@ class NiceGuiNode(Node):
         self._obstacle_mgr.attach(self)
 
         # MISSION: store owns missions.yaml, scheduling, and run recording.
-        # Attach after obstacle manager so node attributes are all present.
         self._mission_store = MissionStore()
-        self._mission_store.attach(self)
+        self._mission_store.attach(self._ros)
 
         self._mission_service = MissionDomainService(self._ros)
+        self._mission_vm = MissionViewModel(MissionApplicationService(
+            self._mission_store, self._mission_service, self._topo_app_service.get_doc))
 
         @ui.page('/')
         def page():
@@ -1693,36 +1696,9 @@ class NiceGuiNode(Node):
                     'Leave blank for one-shot')
 
                 def _save_mission():
-                    if not mission_queue:
-                        # This is a protected method, we should probably find a better way
-                        # of bubbling up the error.
-                        self._mission_store._set_status('ERROR: queue is empty')  # pylint: disable=protected-access
-                        return
-                    topo_doc = self._topo_doc
-                    topo_nodes = topo_doc.nodes if topo_doc is not None else []
-                    rows_for_store = [
-                        next(
-                            (nd.name for nd in topo_nodes
-                             if nd.meta.get('row_id') == rid
-                             and nd.meta.get('row_role') == 'entry'),
-                            f'ROW_{rid}_IN',
-                        )
-                        for rid, _, _ in mission_queue
-                    ]
-                    # All steps in the queue share the action+params of the
-                    # first entry.  Mixed-action missions aren't supported in
-                    # the store yet — first step wins.
-                    first_act    = mission_queue[0][1]
-                    first_params = mission_queue[0][2]
                     rpt = int(save_repeat.value) if save_repeat.value else None
-                    self._mission_store.add(
-                        rows=rows_for_store,
-                        action=first_act,
-                        action_params=first_params,
-                        name=save_name_input.value or '',
-                        repeat_every_hours=rpt,
-                        active=True,
-                    )
+                    self._mission_vm.save_queue(
+                        mission_queue, save_name_input.value or '', rpt)
 
                 ui.button('Save', on_click=_save_mission).props(
                     'color=primary no-caps dense')
@@ -1733,21 +1709,21 @@ class NiceGuiNode(Node):
             _mstore_prev = [-1]
             def _refresh_missions():
                 # Store status line
-                cur_status = self.mission_status
+                cur_status = self._mission_vm.status
                 mission_store_status.set_text(cur_status)
                 mission_store_status.style(
                     'color:#cf222e' if cur_status.startswith('ERROR') else
                     'color:#1a7f37' if cur_status else 'color:#57606a')
 
-                v = self.missions_version
+                v = self._mission_vm.version
                 if v == _mstore_prev[0]:
                     return
                 _mstore_prev[0] = v
 
-                snap = self.missions
+                snap = self._mission_vm.missions
                 missions_col.clear()
                 missions_empty_lbl.set_visibility(not snap)
-                run_btn.set_enabled(not self._mission_service.running)
+                run_btn.set_enabled(not self._mission_vm.running)
 
                 if not snap:
                     return
@@ -1760,7 +1736,7 @@ class NiceGuiNode(Node):
                         icon  = adef.icon if adef else '?'
                         rows  = m.get('rows', [])
                         active = m.get('active', False)
-                        due_h = self._mission_store.next_due_in_hours(mid)
+                        due_h = self._mission_vm.next_due_in_hours(mid)
                         if due_h is None:
                             due_str, due_col = 'done', 'color:#8c959f'
                         elif due_h == 0.0:
@@ -1782,10 +1758,10 @@ class NiceGuiNode(Node):
                             act_toggle = ui.checkbox('', value=active).props('dense')
                             act_toggle.tooltip('Active — included in today_queue()')
                             act_toggle.on_value_change(
-                                lambda e, m=mid: self._mission_store.set_active(m, e.value))
+                                lambda e, m=mid: self._mission_vm.set_active(m, e.value))
                             ui.button(
                                 '✕',
-                                on_click=lambda _, m=mid: self._mission_store.delete(m),
+                                on_click=lambda _, m=mid: self._mission_vm.delete(m),
                             ).props('flat dense').classes('text-xs').style('color:#cf222e')
 
             ui.timer(0.5, _refresh_missions)

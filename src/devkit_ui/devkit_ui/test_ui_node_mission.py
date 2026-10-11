@@ -37,7 +37,8 @@ def load_mission_harness():
         'RowDiscoveryApplicationService', 'NavigationApplicationService',
         'TelemetryApplicationService',
         'GlobalViewModel', 'RunViewModel', 'TopologyViewModel', 'TelemetryViewModel',
-        'ObstacleManager', 'MissionStore', 'MissionDomainService', 'ui', 'String',
+        'ObstacleManager', 'MissionStore', 'MissionDomainService', 'MissionApplicationService',
+        'MissionViewModel', 'ui', 'String',
     )}
     namespace.update({name: getattr(mds, name) for name in (
         'INFO', 'PROGRESS', 'WARN', 'ERROR', 'OK', 'NAV_TIMEOUT_SEC',
