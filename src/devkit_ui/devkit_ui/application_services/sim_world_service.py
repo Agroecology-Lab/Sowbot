@@ -49,8 +49,20 @@ class SimWorldService:
         Blocking: call off the UI loop. Gazebo reads the world only at launch, so the caller
         must make sure the sim is stopped first.
 
+        Parameters:
+            spacing_m: Distance between plants along a row, in meters.
+            row_width_m: Fallback crop row width, in meters.
+            scale: Uniform model scale factor; 1.0 keeps the original size.
+            category: Category to scale: all, crop, weed, or irrigation.
+            model: Crop model folder name.
+            weed_density: Percentage of the generator's maximum weeds per crop; 0 disables weeds.
+
+        The script may reuse a cached world, in which case no weed count is reported.
+        Numeric values and category are forwarded without validation here.
+
         Raises:
             WorldRebuildError: No saved map, unknown crop model, worldgen failed or timed out.
+            OSError: The worldgen process could not be started.
         """
         if not os.path.exists(self._map_file):
             raise WorldRebuildError(f'no saved map at {self._map_file} — drop/save nodes first')

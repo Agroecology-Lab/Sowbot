@@ -120,14 +120,20 @@ class TopologyViewModel:
         self._map_archived_callbacks.append(callback)
 
     def save_map_as(self, name: str) -> str:
-        """Save a named copy of the live map. See TopologyApplicationService.save_map_as."""
+        """Save a named copy, preferring the saved map over the in-memory map.
+
+        Return 'saved → <name>' or an 'ERROR: ...' status without replacing the live map.
+        See TopologyApplicationService.save_map_as for name validation and overwrite rules.
+        """
         return self._app_service.save_map_as(name)
 
     def archive_and_clear_map(self) -> str:
         """Archive the saved map as <name>_<N> and replace it with an empty default map.
 
-        Registered map-archived callbacks run on success only. Return an archive status, or an
-        'ERROR:' status for a missing map or a read/write failure; callbacks do not run then.
+        Return an archive status, or an 'ERROR:' status for a missing map or service exception.
+        Completed writes and live-map changes are not rolled back on failure.
+        Registered map-archived callbacks run only after the service returns successfully.
+        Their exceptions propagate and prevent later callbacks from running.
         """
         if not self.topo_doc:
             return 'ERROR: no map loaded'

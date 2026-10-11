@@ -16,6 +16,7 @@ def restore_label(lbl, proc) -> None:
 def report_if_exited(proc, lbl, log: str) -> None:
     """Two seconds after start, say so if the process already died."""
     def check() -> None:
+        """Show the exit code and log path if the process has exited; otherwise keep the label."""
         if proc.poll() is not None:
             lbl.set_text(f'exited ({proc.returncode}) - see {log}')
             lbl.style('color:#cf222e')
@@ -31,7 +32,10 @@ def request_host() -> str:
 
 
 def link_button(url: str, label: str) -> None:
-    """Render an outlined external link styled like the tool buttons."""
+    """Render an outlined external link styled like the tool buttons.
+
+    url and label are inserted as HTML; callers must escape any untrusted values.
+    """
     ui.html(
         f'<a href="{url}" target="_blank" '
         'style="font-size:13px;color:var(--blue);text-decoration:none;'
@@ -41,7 +45,10 @@ def link_button(url: str, label: str) -> None:
 
 
 def doc_link(url: str, label: str = '📄 Documentation') -> None:
-    """Render a small muted documentation link."""
+    """Render a small muted documentation link.
+
+    url and label are inserted as HTML; callers must escape any untrusted values.
+    """
     ui.html(
         f'<a href="{url}" target="_blank" '
         'style="font-size:11px;color:var(--txt-muted);text-decoration:none;'

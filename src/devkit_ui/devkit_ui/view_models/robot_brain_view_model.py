@@ -32,5 +32,5 @@ class RobotBrainViewModel:
         self._app_service.restart()
 
     def configure(self) -> None:
-        """Send the configuration to the robot brain."""
+        """Publish the configure command to the robot brain."""
         self._app_service.configure()

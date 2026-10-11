@@ -14,7 +14,10 @@ _TOOLS: dict = {}
 
 
 def shared(name: str, factory: Callable):
-    """Return the shared tool entry, storing the factory result if absent."""
+    """Return the shared tool entry, storing the factory result if absent.
+
+    The factory is called on every lookup, even when an entry already exists.
+    """
     return _TOOLS.setdefault(name, factory())
 
 
@@ -24,14 +27,25 @@ def alive(proc) -> bool:
 
 
 def spawn_logged(cmd: list, log: str, **kwargs):
-    """Start cmd in its own session with output going to a log file."""
+    """Start cmd in its own session and return its process handle.
+
+    Truncate log and redirect both output streams there.
+    Forward kwargs to Popen; file-opening and process-creation errors propagate.
+    """
     with open(log, 'w', encoding='utf-8') as fh:
         return subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,  # pylint: disable=consider-using-with
                                 start_new_session=True, **kwargs)
 
 
 def kill_group(proc, grace: float = 5.0) -> None:
-    """SIGTERM then SIGKILL a process group. Blocking: call off the UI loop."""
+    """Request process-group termination, escalating if the leader outlives grace seconds.
+
+    Do nothing for a missing or already-exited process handle.
+    Send SIGTERM, then SIGKILL if waiting for the leader times out.
+    Ignore a vanished group and a timeout in the final two-second wait;
+    other OS errors propagate, and descendant exit is not verified.
+    Blocking: call off the UI loop.
+    """
     if proc is None or proc.poll() is not None:
         return
     try:

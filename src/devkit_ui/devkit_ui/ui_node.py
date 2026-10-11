@@ -608,6 +608,11 @@ class NiceGuiNode(Node):
     # ── Confirmation dialogs ─────────────────────────────────────────────────
 
     async def confirm_delete_node(self, name: str | None) -> None:
+        """Ask for confirmation before deleting and persisting a topology node.
+
+        With a loaded map, ignore an empty name or a node absent from that map.
+        Canceling the dialog leaves the node unchanged.
+        """
         if not name or not self._topo_doc.has_node(name):
             return
         nd = self._topo_doc.get_node(name)
@@ -661,6 +666,7 @@ class NiceGuiNode(Node):
     # ── UI shell ──────────────────────────────────────────────────────────────
 
     def content(self) -> None:
+        """Build the Run, Plan, Sim, and System tabs, initially selecting Run."""
         if _APP_CSS:
             ui.add_head_html(f'<style>{_APP_CSS}</style>')
         with ui.tabs().classes('w-full') as tabs:

@@ -43,6 +43,7 @@ def _graph_explorer(host: str) -> None:
     restore_label(lbl, proc[0])
 
     def start() -> None:
+        """Start Graph Explorer unless already running, displaying launch errors in the UI."""
         if alive(proc[0]):
             lbl.set_text('already running')
             return
@@ -58,6 +59,7 @@ def _graph_explorer(host: str) -> None:
             lbl.style(_ERROR)
 
     async def stop() -> None:
+        """Stop the shared Graph Explorer process group and release its handle."""
         await ng_run.io_bound(kill_group, proc[0])
         proc[0] = None
         lbl.set_text('stopped')
@@ -76,6 +78,7 @@ def _grapher(host: str) -> None:
     restore_label(lbl, proc[0])
 
     def start() -> None:
+        """Start ros2grapher unless already running, displaying launch errors in the UI."""
         if alive(proc[0]):
             lbl.set_text('already running')
             return
@@ -96,6 +99,7 @@ def _grapher(host: str) -> None:
             lbl.style(_ERROR)
 
     async def stop() -> None:
+        """Stop the shared ros2grapher process group and release its handle."""
         await ng_run.io_bound(kill_group, proc[0])
         proc[0] = None
         lbl.set_text('stopped')
@@ -115,6 +119,11 @@ def _rviz(host: str) -> None:
     restore_label(lbl, proc[0])
 
     async def start() -> None:
+        """Start RViz with noVNC unless running, displaying launch errors in the UI.
+
+        Use the topology RViz configuration when its ROS package is available;
+        otherwise launch without an explicit configuration.
+        """
         if alive(proc[0]):
             lbl.set_text('already running')
             return
@@ -142,6 +151,7 @@ def _rviz(host: str) -> None:
             lbl.style(_ERROR)
 
     async def stop() -> None:
+        """Stop the shared RViz process group and display daemons, releasing their handles."""
         await ng_run.io_bound(kill_group, proc[0])
         proc[0] = None
         await ng_run.io_bound(stop_all, daemons)
@@ -203,7 +213,11 @@ def _medkit_controls() -> None:
             _medkit_stopping = False
 
     def _shutdown_medkit(proc):
-        """Allow ROS launch to stop its children before escalating on timeout."""
+        """Allow ROS launch to stop its children before escalating on timeout.
+
+        Wait up to 15 seconds after SIGINT, then five after terminate and five after kill.
+        OS errors and a timeout after kill propagate to the caller.
+        """
         proc.send_signal(signal.SIGINT)
         try:
             proc.wait(timeout=15)

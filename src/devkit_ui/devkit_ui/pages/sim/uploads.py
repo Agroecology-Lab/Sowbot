@@ -3,6 +3,8 @@ async def read_upload(event, default_name: str) -> tuple[bytes, str]:
 
     NiceGUI changed the upload event shape across versions: newer ones expose event.file (a
     FileUpload with an async read()), older ones event.content (a synchronous file-like object).
+    Use default_name only when the corresponding name attribute is absent.
+    Read errors propagate to the caller.
     """
     if hasattr(event, 'file'):
         data = await event.file.read()

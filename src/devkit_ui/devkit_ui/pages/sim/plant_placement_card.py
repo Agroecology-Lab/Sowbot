@@ -40,7 +40,11 @@ class PlantPlacementCard(ui.card):
             self._build_upload()
 
     def settings(self) -> PlantSettings:
-        """Return the current inputs, falling back to the defaults for cleared fields."""
+        """Return placement values with distances in meters and scale as a factor.
+
+        Cleared fields use defaults; zero spacing, width, or scale also uses its default.
+        Weed density stays a percentage, and an explicit zero is preserved.
+        """
         return PlantSettings(
             spacing_m=float(self._spacing.value or 100) / 100.0,
             row_width_m=float(self._row_width.value or 80) / 100.0,
