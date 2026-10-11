@@ -3,21 +3,17 @@
 ui_node.py — Sowbot web cockpit on :80
 """
 
-import io
 import math
 import os
 import re
-import shutil
 import signal
 import subprocess
 import threading
 import time
 import traceback
-import zipfile
 from collections.abc import Callable
 from html import escape
 from importlib import resources
-from pathlib import Path
 
 # The following imports get generated in the Dockerfile, they aren't available to pylint
 # pylint: disable=import-error
@@ -51,6 +47,7 @@ from devkit_ui.application_services.robot_brain_application_service import Robot
 from devkit_ui.application_services.row_discovery_application_service import (
     RowDiscoveryApplicationService,
 )
+from devkit_ui.application_services.sim_asset_service import SimAssetError, SimAssetService
 from devkit_ui.application_services.telemetry_application_service import (
     TelemetryApplicationService,
 )
@@ -290,6 +287,7 @@ class NiceGuiNode(Node):
             self._topo_domain_service
         )
         self._topo_edit_service = TopologyEditService(self._topo_app_service)
+        self._sim_assets = SimAssetService()
         self._robot_brain_app_service = RobotBrainApplicationService(self._robot_brain_domain_service)
         self._row_discovery_app_service = RowDiscoveryApplicationService(
             self._row_discovery_domain_service)
@@ -2170,8 +2168,7 @@ class NiceGuiNode(Node):
                             int(weed_density_scale.value)
                             if weed_density_scale.value is not None else 10)
                         # Validate selected model exists on disk
-                        model_dir = _CROP_MODELS_DIR / model
-                        if not model_dir.is_dir() or not (model_dir / 'model.sdf').is_file():
+                        if not self._sim_assets.has_crop_model(model):
                             _gazebo_lbl.set_text(
                                 f'model "{model}" not found — upload it first')
                             _gazebo_lbl.style('color:#cf222e')
@@ -2252,17 +2249,6 @@ class NiceGuiNode(Node):
                 # rebuilding. Values are stored locally; --plant-spacing and
                 # --row-width are passed to topo_to_forest3d.py on rebuild.
                 # Passed as --plant-scale, --weed-density --scale-category, and --crop-model.
-                _CROP_MODELS_DIR = Path('/workspace/models/crop')
-
-                def _refresh_crop_models():
-                    """List valid crop model subfolders (must have model.sdf)."""
-                    models = []
-                    if _CROP_MODELS_DIR.exists():
-                        for d in sorted(_CROP_MODELS_DIR.iterdir()):
-                            if d.is_dir() and (d / 'model.sdf').exists():
-                                models.append(d.name)
-                    return models if models else ['plant']
-
                 ui.separator().classes('w-full my-2')
                 ui.html('<span class="sec-label">Plant Placement</span>')
 
@@ -2311,8 +2297,8 @@ class NiceGuiNode(Node):
                     with ui.column().classes('flex-1 gap-0'):
                         ui.html('<div class="sec-label">Model</div>')
                         plant_model = ui.select(
-                            options=_refresh_crop_models(),
-                            value=_refresh_crop_models()[0] if _refresh_crop_models() else None
+                            options=self._sim_assets.list_crop_models(),
+                            value=self._sim_assets.list_crop_models()[0] if self._sim_assets.list_crop_models() else None
                         ).classes('w-full')
 
                 # Row 3: weed_density + category (coming)
@@ -2338,14 +2324,6 @@ class NiceGuiNode(Node):
                     placeholder='my_plant',
                 ).classes('w-40')
 
-                def _is_valid_gltf(data, fname):
-                    ext = fname.lower().rsplit('.', 1)[-1] if '.' in fname else ''
-                    if ext == 'glb':
-                        return data[:4] == b'glTF'
-                    if ext == 'gltf':
-                        return data.strip()[:1] in (b'{', b'[')
-                    return False
-
                 async def _handle_visual_upload(e):
                     try:
                         if hasattr(e, 'file'):
@@ -2358,19 +2336,10 @@ class NiceGuiNode(Node):
                         _plant_upload_lbl.set_text(f'upload failed: {exc}')
                         _plant_upload_lbl.style('color:#cf222e')
                         return
-                    # Validate extension
-                    if not fname.lower().endswith(('.glb', '.gltf')):
-                        _plant_upload_lbl.set_text('only .glb/.gltf files accepted')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    # Validate magic bytes
-                    if not _is_valid_gltf(data, fname):
-                        _plant_upload_lbl.set_text('invalid glTF file')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    # Validate size (50MB cap)
-                    if len(data) > 50 * 1024 * 1024:
-                        _plant_upload_lbl.set_text('file too large (max 50MB)')
+                    try:
+                        self._sim_assets.validate_mesh(data, fname)
+                    except SimAssetError as exc:
+                        _plant_upload_lbl.set_text(str(exc))
                         _plant_upload_lbl.style('color:#cf222e')
                         return
                     _visual_mesh_data['name'] = fname
@@ -2390,16 +2359,10 @@ class NiceGuiNode(Node):
                         _plant_upload_lbl.set_text(f'collision upload failed: {exc}')
                         _plant_upload_lbl.style('color:#cf222e')
                         return
-                    if not fname.lower().endswith(('.glb', '.gltf')):
-                        _plant_upload_lbl.set_text('only .glb/.gltf files accepted')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    if not _is_valid_gltf(data, fname):
-                        _plant_upload_lbl.set_text('invalid glTF file')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    if len(data) > 50 * 1024 * 1024:
-                        _plant_upload_lbl.set_text('collision file too large (max 50MB)')
+                    try:
+                        self._sim_assets.validate_mesh(data, fname, collision=True)
+                    except SimAssetError as exc:
+                        _plant_upload_lbl.set_text(str(exc))
                         _plant_upload_lbl.style('color:#cf222e')
                         return
                     _collision_mesh_data['name'] = fname
@@ -2410,89 +2373,27 @@ class NiceGuiNode(Node):
                     _plant_upload_lbl.style('color:#1a7f37')
 
                 async def _create_plant_model():
-                    name = (model_name_input.value or '').strip()
-                    if not name:
-                        _plant_upload_lbl.set_text('enter a model name')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    if not re.match(r'^[a-zA-Z0-9_]+$', name):
-                        _plant_upload_lbl.set_text('name must be alphanumeric + underscore')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    model_dir = _CROP_MODELS_DIR / name
-                    if model_dir.exists():
-                        _plant_upload_lbl.set_text(f'model "{name}" already exists')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
-                    if _visual_mesh_data['data'] is None:
-                        _plant_upload_lbl.set_text('upload a visual mesh first')
-                        _plant_upload_lbl.style('color:#cf222e')
-                        return
                     try:
-                        mesh_dir = model_dir / 'mesh'
-                        mesh_dir.mkdir(parents=True, exist_ok=True)
-                        # Write visual mesh
-                        visual_fname = f'{name}.glb'
-                        with open(mesh_dir / visual_fname, 'wb') as f:
-                            f.write(_visual_mesh_data['data'])
-                        # Write collision mesh (or reuse visual)
-                        if _collision_mesh_data['data'] is not None:
-                            collision_fname = f'{name}_collision.glb'
-                            with open(mesh_dir / collision_fname, 'wb') as f:
-                                f.write(_collision_mesh_data['data'])
-                        else:
-                            collision_fname = visual_fname
-                        # Write model.config
-                        model_config = f'''<?xml version="1.0"?>
-<model>
-    <name>{name}</name>
-    <version>1.0</version>
-    <sdf version="1.8">model.sdf</sdf>
-    <author>
-        <name>User Upload</name>
-    </author>
-    <description>{name} plant model</description>
-</model>
-'''
-                        with open(model_dir / 'model.config', 'w', encoding='utf-8') as f:
-                            f.write(model_config)
-                        # Write model.sdf
-                        model_sdf = f'''<?xml version="1.0" ?>
-<sdf version="1.8">
-    <model name="{name}">
-        <static>true</static>
-        <link name="link">
-            <collision name="collision">
-                <geometry>
-                    <mesh><uri>mesh/{collision_fname}</uri><scale>1 1 1</scale></mesh>
-                </geometry>
-            </collision>
-            <visual name="visual">
-                <geometry>
-                    <mesh><uri>mesh/{visual_fname}</uri><scale>1 1 1</scale></mesh>
-                </geometry>
-            </visual>
-        </link>
-    </model>
-</sdf>
-'''
-                        with open(model_dir / 'model.sdf', 'w', encoding='utf-8') as f:
-                            f.write(model_sdf)
-                        # Refresh dropdown
-                        new_models = _refresh_crop_models()
-                        plant_model.options = new_models
-                        plant_model.value = name
-                        # Clear upload state
-                        _visual_mesh_data['name'] = None
-                        _visual_mesh_data['data'] = None
-                        _collision_mesh_data['name'] = None
-                        _collision_mesh_data['data'] = None
-                        model_name_input.value = ''
-                        _plant_upload_lbl.set_text(f'model "{name}" created')
-                        _plant_upload_lbl.style('color:#1a7f37')
+                        name = self._sim_assets.create_crop_model(
+                            model_name_input.value, _visual_mesh_data['data'],
+                            _collision_mesh_data['data'])
+                    except SimAssetError as exc:
+                        _plant_upload_lbl.set_text(str(exc))
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
                     except Exception as exc:
                         _plant_upload_lbl.set_text(f'failed: {exc}')
                         _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    plant_model.options = self._sim_assets.list_crop_models()
+                    plant_model.value = name
+                    _visual_mesh_data['name'] = None
+                    _visual_mesh_data['data'] = None
+                    _collision_mesh_data['name'] = None
+                    _collision_mesh_data['data'] = None
+                    model_name_input.value = ''
+                    _plant_upload_lbl.set_text(f'model "{name}" created')
+                    _plant_upload_lbl.style('color:#1a7f37')
 
                 with ui.row().classes('items-center gap-2 flex-wrap'):
                     ui.upload(
@@ -2586,46 +2487,7 @@ class NiceGuiNode(Node):
                 # harvested into /workspace/uploads (persisted across image
                 # rebuilds) and staged into the ground model on the next world
                 # rebuild, where Forest3D turns them into a PBR material.
-                _SOIL_TEX_DIR = Path('/workspace/uploads/soil_custom/textures')
                 _soil_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-
-                def _classify_map(name):
-                    # Mirror Forest3D's filename-keyword classification so the
-                    # label previews what the PBR material will use.
-                    nl = name.lower()
-                    if any(k in nl for k in ('diff', 'albedo', 'base', 'color')):
-                        return 'albedo'
-                    if any(k in nl for k in ('normal', 'nor', 'nrm')):
-                        return 'normal'
-                    if 'rough' in nl:
-                        return 'roughness'
-                    return 'other'
-
-                def _harvest_soil_zip(data):
-                    # Sync worker (runs off the event loop via io_bound): extract
-                    # gz-loadable image maps from the zip bytes into _SOIL_TEX_DIR.
-                    # Returns the staged basenames; raises BadZipFile / ValueError.
-                    zf = zipfile.ZipFile(io.BytesIO(data))
-                    # Forest3D skips .exr, so only harvest gz-loadable images.
-                    members = [m for m in zf.namelist()
-                               if not m.endswith('/')
-                               and Path(m).suffix.lower() in ('.jpg', '.jpeg', '.png')]
-                    if not members:
-                        raise ValueError(
-                            'no .jpg/.png maps found in the zip '
-                            '(textures may be .exr — convert first)')
-                    # Replace any previous import so exactly one soil set is
-                    # active; flatten folder structure to basenames.
-                    if _SOIL_TEX_DIR.exists():
-                        shutil.rmtree(_SOIL_TEX_DIR)
-                    _SOIL_TEX_DIR.mkdir(parents=True, exist_ok=True)
-                    names = []
-                    for m in members:
-                        out = _SOIL_TEX_DIR / Path(m).name
-                        with zf.open(m) as src, open(out, 'wb') as fh:
-                            shutil.copyfileobj(src, fh)
-                        names.append(out.name)
-                    return names
 
                 async def _import_soil_zip(e):
                     # NiceGUI changed the upload event shape across versions:
@@ -2641,12 +2503,8 @@ class NiceGuiNode(Node):
                         _soil_lbl.style('color:#cf222e')
                         return
                     try:
-                        names = await ng_run.io_bound(_harvest_soil_zip, data)
-                    except zipfile.BadZipFile:
-                        _soil_lbl.set_text('not a valid .zip file')
-                        _soil_lbl.style('color:#cf222e')
-                        return
-                    except ValueError as exc:
+                        names = await ng_run.io_bound(self._sim_assets.import_soil_zip, data)
+                    except SimAssetError as exc:
                         _soil_lbl.set_text(str(exc))
                         _soil_lbl.style('color:#cf222e')
                         return
@@ -2658,7 +2516,7 @@ class NiceGuiNode(Node):
                         _soil_lbl.set_text('import cancelled')
                         _soil_lbl.style('color:#cf222e')
                         return
-                    summary = ', '.join(f'{_classify_map(n)}={n}' for n in names)
+                    summary = ', '.join(f'{self._sim_assets.classify_map(n)}={n}' for n in names)
                     _soil_lbl.set_text(
                         f'imported {len(names)} map(s) — {summary}. '
                         'Rebuild World to apply.')
