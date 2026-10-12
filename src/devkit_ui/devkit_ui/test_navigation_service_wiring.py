@@ -23,18 +23,53 @@ def load_navigation_service_harness():
     tree = ast.parse(source.read_text(encoding='utf-8'))
     node_class = next(node for node in tree.body
                       if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode')
-    names = {'_nav_content', '_topo_doc', 'send_speed', 'toggle_estop'}
+    names = {'content', '_run_content', '_topo_doc', 'send_speed', 'toggle_estop'}
     members = [node for node in node_class.body
                if isinstance(node, ast.FunctionDef) and node.name in names]
     harness = ast.ClassDef(name='Harness', bases=[], keywords=[], body=members, decorator_list=[])
     namespace = {name: Mock() for name in (
         'JoystickControlCard', 'NodeMapCard', 'TrackCard', 'DropNodeCard',
-        'RowDiscoveryCard', 'NavigationSidebar', 'attach_nav_card',
+        'RowDiscoveryCard', 'NavigationSidebar', 'attach_nav_card', 'SimPage', 'SystemPage',
     )}
-    namespace.update(ui=fake_ui, TopoDoc=TopoDoc)
+    namespace.update(ui=fake_ui, TopoDoc=TopoDoc, _APP_CSS='')
     module = ast.fix_missing_locations(ast.Module(body=[harness], type_ignores=[]))
     exec(compile(module, source, 'exec'), namespace)
     return namespace['Harness'](), namespace
+
+
+class TestUiTabs(unittest.TestCase):
+    def setUp(self):
+        fake_ui.reset()
+        self.addCleanup(fake_ui.reset)
+        for kind in ('tabs', 'tab', 'tab_panels', 'tab_panel'):
+            self.enterContext(patch.object(
+                fake_ui, kind,
+                side_effect=lambda *args, _kind=kind, **kwargs: fake_ui._element(
+                    _kind, *args, **kwargs), create=True))
+        self.head = self.enterContext(patch.object(fake_ui, 'add_head_html', create=True))
+        self.node, self.namespace = load_navigation_service_harness()
+        for name in ('_run_content', '_plan_content', '_sim_vm', '_topo_vm',
+                     '_telemetry_vm', '_robot_brain_vm'):
+            setattr(self.node, name, Mock())
+
+    def test_tabs_start_on_run_and_pass_correct_view_models_to_new_pages(self):
+        self.node.content()
+        tabs = [element for element in fake_ui.elements if element.kind == 'tab']
+        self.assertEqual([tab.text for tab in tabs], ['Run', 'Plan', 'Sim', 'System'])
+        self.assertIs(fake_ui.find('tab_panels').value, tabs[0])
+        panels = [element for element in fake_ui.elements if element.kind == 'tab_panel']
+        self.assertEqual([panel.text for panel in panels], tabs)
+        self.node._run_content.assert_called_once_with()
+        self.node._plan_content.assert_called_once_with()
+        self.namespace['SimPage'].assert_called_once_with(self.node._sim_vm, self.node._topo_vm)
+        self.namespace['SystemPage'].assert_called_once_with(
+            telemetry_vm=self.node._telemetry_vm, robot_brain_vm=self.node._robot_brain_vm)
+        self.head.assert_not_called()
+
+    def test_app_styles_are_included_when_available(self):
+        self.namespace['_APP_CSS'] = '.test { color: green; }'
+        self.node.content()
+        self.head.assert_called_once_with('<style>.test { color: green; }</style>')
 
 
 class TestNavigationServiceWiring(unittest.TestCase):
@@ -52,7 +87,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
         ]))
         for name in ('start_track', 'stop_track', 'drop_topo_node', 'set_row_action',
                      'start_discovery', 'stop_discovery', 'send_nav_goal',
-                     'cancel_nav_goal', 'confirm_delete_node', '_obstacle_mgr'):
+                     'cancel_nav_goal', 'confirm_delete_node', '_obstacle_vm'):
             setattr(self.node, name, Mock())
         self.telemetry = SimpleNamespace(
             latest_gps=None,
@@ -65,7 +100,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
             robot_pose=Mock(return_value=(1.0, 2.0, 0.5)),
         )
         self.node._telemetry_vm = TelemetryViewModel(TelemetryApplicationService(self.telemetry))
-        self.node._nav_content()
+        self.node._run_content()
         self.refresh = fake_ui.timers[0].callback
         self.sidebar = self.namespace['NavigationSidebar'].return_value
 

@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock, patch
 
@@ -45,10 +44,10 @@ class TestValidateMission(unittest.TestCase):
 class TestMissionStoreEditing(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
-        self.node = SimpleNamespace()
+        self.ros = Mock()
         self.store = MissionStore(str(Path(self.tmp) / 'missions.db'))
         self.addCleanup(self.store.close)
-        self.store.attach(self.node)
+        self.store.attach(self.ros)
 
     def test_unsupported_file_extension_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -63,12 +62,12 @@ class TestMissionStoreEditing(unittest.TestCase):
     def test_close_is_a_no_op_for_the_yaml_backend(self) -> None:
         MissionStore(str(Path(self.tmp) / 'missions.yaml')).close()
 
-    def test_attach_initialises_node_state(self) -> None:
-        self.assertEqual(self.node.missions, ())
-        self.assertEqual(self.node.missions_version, 1)
-        self.assertEqual(self.node.mission_status, '')
+    def test_attach_initialises_state(self) -> None:
+        self.assertEqual(self.store.missions, ())
+        self.assertEqual(self.store.version, 1)
+        self.assertEqual(self.store.status, '')
 
-    def test_add_cleans_the_name_and_mirrors_state_onto_the_node(self) -> None:
+    def test_add_cleans_the_name_and_updates_state(self) -> None:
         mission_id = self.store.add(rows=['R1', 'R2'], action='drive', name=' north field! ')
 
         self.assertEqual(mission_id, 'MISSION_1')
@@ -76,15 +75,15 @@ class TestMissionStoreEditing(unittest.TestCase):
         assert mission is not None
         self.assertEqual(mission['id'], 'MISSION_1')
         self.assertEqual(mission['rows'], ['R1', 'R2'])
-        self.assertEqual([m['id'] for m in self.node.missions], ['MISSION_1'])
-        self.assertEqual(self.node.missions_version, 2)
+        self.assertEqual([m['id'] for m in self.store.missions], ['MISSION_1'])
+        self.assertEqual(self.store.version, 2)
 
     def test_add_rejects_invalid_mission_and_reports_why(self) -> None:
         self.assertIsNone(self.store.add(rows=[], action='drive'))
 
-        self.assertEqual(self.node.mission_status, 'ERROR: no rows selected')
-        self.assertEqual(self.node.missions, ())
-        self.assertEqual(self.node.missions_version, 1)
+        self.assertEqual(self.store.status, 'ERROR: no rows selected')
+        self.assertEqual(self.store.missions, ())
+        self.assertEqual(self.store.version, 1)
 
     def test_delete_removes_the_mission(self) -> None:
         mission_id = cast(str, self.store.add(rows=['R1'], action='drive'))
@@ -92,12 +91,12 @@ class TestMissionStoreEditing(unittest.TestCase):
         self.assertTrue(self.store.delete(mission_id))
 
         self.assertIsNone(self.store.find(mission_id))
-        self.assertEqual(self.node.missions, ())
+        self.assertEqual(self.store.missions, ())
 
     def test_delete_unknown_mission_reports_not_found(self) -> None:
         self.assertFalse(self.store.delete('MISSION_42'))
 
-        self.assertIn('not found', self.node.mission_status)
+        self.assertIn('not found', self.store.status)
 
     def test_update_changes_mutable_fields(self) -> None:
         mission_id = cast(str, self.store.add(rows=['R1'], action='drive', name='OLD'))
@@ -125,19 +124,19 @@ class TestMissionStoreEditing(unittest.TestCase):
 
         self.assertFalse(self.store.update(mission_id, created_at='2020-01-01T00:00:00Z'))
 
-        self.assertIn('cannot update', self.node.mission_status)
+        self.assertIn('cannot update', self.store.status)
 
     def test_update_unknown_mission_reports_not_found(self) -> None:
         self.assertFalse(self.store.update('MISSION_42', name='X'))
 
-        self.assertIn('not found', self.node.mission_status)
+        self.assertIn('not found', self.store.status)
 
     def test_update_that_fails_validation_is_rejected(self) -> None:
         mission_id = cast(str, self.store.add(rows=['R1'], action='drive'))
 
         self.assertFalse(self.store.update(mission_id, rows=[]))
 
-        self.assertEqual(self.node.mission_status, 'ERROR: no rows selected')
+        self.assertEqual(self.store.status, 'ERROR: no rows selected')
         mission = self.store.find(mission_id)
         assert mission is not None
         self.assertEqual(mission['rows'], ['R1'])
@@ -163,10 +162,10 @@ class TestMissionStoreRunHistory(unittest.TestCase):
     def setUp(self) -> None:
         tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
         self.path = Path(tmp) / 'missions.db'
-        self.node = SimpleNamespace()
+        self.ros = Mock()
         self.store = MissionStore(str(self.path))
         self.addCleanup(self.store.close)
-        self.store.attach(self.node)
+        self.store.attach(self.ros)
 
     def test_successful_one_shot_run_is_recorded_and_deactivates_the_mission(self) -> None:
         mission_id = cast(str, self.store.add(rows=['R1'], action='drive'))
@@ -201,24 +200,24 @@ class TestMissionStoreRunHistory(unittest.TestCase):
         self.assertEqual(self.store.today_queue(), [])
         self.assertAlmostEqual(cast(float, self.store.next_due_in_hours(mission_id)), 6.0, places=1)
 
-    def test_record_run_mirrors_state_onto_the_node(self) -> None:
+    def test_record_run_updates_state(self) -> None:
         mission_id = cast(str, self.store.add(rows=['R1'], action='drive'))
-        version = self.node.missions_version
+        version = self.store.version
 
         self.store.record_run(mission_id, True)
 
-        self.assertEqual(self.node.missions_version, version + 1)
-        self.assertIs(self.node.missions[0]['last_run_success'], True)
+        self.assertEqual(self.store.version, version + 1)
+        self.assertIs(self.store.missions[0]['last_run_success'], True)
 
     def test_record_run_for_unknown_mission_reports_not_found(self) -> None:
         self.assertFalse(self.store.record_run('MISSION_42', True))
 
-        self.assertIn('not found', self.node.mission_status)
+        self.assertIn('not found', self.store.status)
 
     def test_reset_rearms_a_completed_mission(self) -> None:
         mission_id = cast(str, self.store.add(rows=['R1'], action='drive'))
         self.store.record_run(mission_id, True)
-        version = self.node.missions_version
+        version = self.store.version
 
         self.assertTrue(self.store.reset(mission_id))
 
@@ -227,7 +226,7 @@ class TestMissionStoreRunHistory(unittest.TestCase):
         self.assertIsNone(mission['last_run_at'])
         self.assertIsNone(mission['last_run_success'])
         self.assertEqual(self.store.next_due_in_hours(mission_id), DUE_NOW)
-        self.assertEqual(self.node.missions_version, version + 1)
+        self.assertEqual(self.store.version, version + 1)
 
     def test_recorded_run_is_restored_after_reopening_the_store(self) -> None:
         mission_id = cast(str, self.store.add(rows=['R1'], action='drive'))
@@ -268,7 +267,7 @@ class TestMissionStoreRunHistory(unittest.TestCase):
     def test_reset_for_unknown_mission_reports_not_found(self) -> None:
         self.assertFalse(self.store.reset('MISSION_42'))
 
-        self.assertIn('not found', self.node.mission_status)
+        self.assertIn('not found', self.store.status)
 
 
 class TestMissionStoreScheduling(unittest.TestCase):
@@ -296,7 +295,7 @@ class TestMissionStoreScheduling(unittest.TestCase):
         ]}), encoding='utf-8')
         self.store = MissionStore(str(path))
         self.addCleanup(self.store.close)
-        self.store.attach(Mock())  # the YAML store logs load results through node.get_logger()
+        self.store.attach(Mock())  # the YAML store logs load results through ros.get_logger()
         patcher = patch('devkit_ui.missions.store.now_utc', return_value=NOW)
         patcher.start()
         self.addCleanup(patcher.stop)

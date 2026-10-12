@@ -27,7 +27,7 @@ class TestMapFailures(unittest.TestCase):
         """Verify archive read errors preserve the live map, saved file, and row mode."""
         self.namespace['parse_topo_yaml'].side_effect = ValueError('invalid map')
 
-        self.assertEqual(self.node.archive_and_clear_map(), 'ERROR: invalid map')
+        self.assertEqual(self.node._topo_vm.archive_and_clear_map(), 'ERROR: invalid map')
 
         self.namespace['dump_topo_yaml'].assert_not_called()
         self.assertIs(self.node._topo_doc, self.live)
@@ -49,7 +49,7 @@ class TestMapFailures(unittest.TestCase):
 
         write.side_effect = fail_live_write
 
-        self.assertEqual(self.node.archive_and_clear_map(), 'ERROR: read only')
+        self.assertEqual(self.node._topo_vm.archive_and_clear_map(), 'ERROR: read only')
 
         self.assertEqual(write.call_count, 2)
         archived = parse_topo_yaml(self.directory / 'live_1').to_dict()
@@ -68,7 +68,7 @@ class TestMapFailures(unittest.TestCase):
         """Verify a publish error leaves a successful archive and map reset intact."""
         self.node._topo_map_pub.publish.side_effect = RuntimeError('publisher unavailable')
 
-        self.assertEqual(self.node.archive_and_clear_map(), 'archived → live_1')
+        self.assertEqual(self.node._topo_vm.archive_and_clear_map(), 'archived → live_1')
 
         cleared = parse_topo_yaml(self.directory / 'live')
         self.assertEqual(list(cleared.nodes), [])
@@ -83,7 +83,7 @@ class TestMapFailures(unittest.TestCase):
         """Verify directory creation errors leave the live map and selected mode intact."""
         self.namespace['os'].makedirs.side_effect = OSError('permission denied')
 
-        self.assertEqual(self.node.save_map_as('copy'), 'ERROR: permission denied')
+        self.assertEqual(self.node._topo_vm.save_map_as('copy'), 'ERROR: permission denied')
 
         self.assertFalse((self.directory / 'copy').exists())
         self.assertEqual((self.directory / 'live').read_bytes(), self.original_bytes)

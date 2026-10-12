@@ -3,9 +3,9 @@
 Mission storage and scheduling for the Sowbot webui.
 
 Owns the mission list, its YAML persistence, and the ACTIONS registry.
-Designed to be attached to a NiceGuiNode (see MissionStore.attach) so the
-node exposes a read-only snapshot and a version counter that the UI timer
-polls to decide when to rebuild. Does not inherit from rclpy.node.Node.
+Exposes a read-only snapshot, a version counter and a last-action status that
+a ViewModel polls to decide when to rebuild. It holds no UI or node state and
+does not inherit from rclpy.node.Node; attach() takes only a logger source.
 
 Unlike obstacles, missions are not broadcast on a ROS topic — they exist
 to drive the executor in ui_node.py, which dispatches `sowbot_row_follow`
@@ -128,11 +128,11 @@ def validate_mission(name: str,
 class MissionStore:
     """Owns the mission list and its YAML persistence.
 
-    After attach(node), the node exposes:
+    Readers poll these properties:
 
-        node.missions          : tuple[dict, ...]   read-only snapshot
-        node.missions_version  : int                bumps on every change
-        node.mission_status    : str                last-action status
+        missions : tuple[dict, ...]   read-only snapshot
+        version  : int                bumps on every change
+        status   : str                last-action status (last writer wins)
 
     Mission record schema:
 
@@ -152,15 +152,20 @@ class MissionStore:
         {'name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active'})
 
     def __init__(self, path: str = MISSIONS_FILE) -> None:
+        """Select YAML storage for .yaml or open SQLite storage for .sqlite and .db.
+
+        YAML records are loaded by attach(); SQLite opens and creates its schema here.
+        Raises ValueError for other suffixes; SQLite initialization errors propagate.
+        """
         if path.endswith('.yaml'):
-            self._store = MissionYamlStore(path, on_write_done=self._set_status)
+            self._store = MissionYamlStore(path, on_write_done=self.set_status)
         elif path.endswith('.sqlite') or path.endswith('.db'):
-            self._store = MissionSqliteStore(path, on_write_done=self._set_status)
+            self._store = MissionSqliteStore(path, on_write_done=self.set_status)
         else:
             raise ValueError(f'Unsupported file extension: {path}')
 
-        self._node = None
         self._version = 0
+        self._status = ''
         self._lock     = threading.Lock()
 
     # ── lifecycle ─────────────────────────────────────────────────────────
@@ -170,17 +175,31 @@ class MissionStore:
         if isinstance(self._store, MissionSqliteStore):
             self._store.close()
 
-    def attach(self, node) -> None:
-        """Wire into a NiceGuiNode. Kicks off a background load."""
-        self._node = node
-        node.missions          = ()
-        node.missions_version  = 0
-        node.mission_status    = ''
+    def attach(self, ros) -> None:
+        """Load YAML missions synchronously and increment the version for either backend.
 
+        ros supplies get_logger() for YAML load and write results.
+        Missing YAML files leave the snapshot unchanged; YAML load errors are caught.
+        SQLite needs no additional loading here.
+        """
         with self._lock:
-            self._store.attach(node)
+            self._store.attach(ros)
             self._version += 1
-            self._sync_node()
+
+    @property
+    def missions(self) -> tuple[dict, ...]:
+        """Return the current mission snapshot."""
+        return self._store.missions
+
+    @property
+    def version(self) -> int:
+        """Return a counter that increases on every change to the missions."""
+        return self._version
+
+    @property
+    def status(self) -> str:
+        """Return the last action's status text; an error starts with 'ERROR'."""
+        return self._status
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -191,42 +210,63 @@ class MissionStore:
             name: str = '',
             repeat_every_hours: int | None = None,
             active: bool = True) -> str | None:
-        """Add a mission. Returns its allocated id, or None on failure.
-        Status carries the reason either way."""
+        """Add a mission and return its allocated ID, or None for a validation error.
+
+        rows contains topology entry-node names.
+        Clean name to uppercase letters, digits, and underscores, using the ID if empty.
+        repeat_every_hours is a positive interval after a successful run, or None for
+        a one-shot mission; active controls inclusion in scheduling.
+        Validation errors are reported in status.
+        YAML writes are queued and report failures in status; SQLite database and JSON
+        serialization errors propagate to the caller.
+        """
 
         name = _NAME_CLEAN.sub('', (name or '').strip().upper().replace(' ', '_'))
 
         err = validate_mission(name, rows, action, repeat_every_hours)
         if err:
-            self._set_status(err)
+            self.set_status(err)
             return None
 
         with self._lock:
-            self._set_status(f'creating {name} — writing…')
+            self.set_status(f'creating {name} — writing…')
             mid = self._store.add(rows, action, action_params, name, repeat_every_hours, active)
 
             self._version += 1
-            self._sync_node()
 
         return mid
 
     def delete(self, mid: str) -> bool:
+        """Delete a saved mission and increment the version.
+
+        Return False and set status for an unknown ID; otherwise return the backend result.
+        YAML persistence is asynchronous; SQLite lookup and write errors propagate,
+        including ValueError for an ID that cannot be converted to a database integer.
+        """
         with self._lock:
             mission = self.find(mid)
             if mission is None:
-                self._set_status(f'ERROR: {mid!r} not found')
+                self.set_status(f'ERROR: {mid!r} not found')
                 return False
 
-            self._set_status(f'deleting {mid} — writing…')
+            self.set_status(f'deleting {mid} — writing…')
             result = self._store.delete(mid)
             self._version += 1
-            self._sync_node()
         return result
 
     def update(self, mid: str, **fields) -> bool:
+        """Validate and persist edits to a saved mission, incrementing the version.
+
+        Accept name, rows, action, action_params, repeat_every_hours, and active.
+        Clean names as in add(), falling back to mid when the cleaned name is empty.
+        Return False and set status for unsupported fields, an unknown ID, or invalid
+        mission values; otherwise return the backend result.
+        YAML persistence is asynchronous; SQLite lookup, write, and JSON serialization
+        errors propagate, including ValueError for malformed database IDs.
+        """
         bad = set(fields) - _MUTABLE_FIELDS
         if bad:
-            self._set_status(f'ERROR: cannot update field(s) {sorted(bad)}')
+            self.set_status(f'ERROR: cannot update field(s) {sorted(bad)}')
             return False
 
         # Clean name before merging so validate_mission sees the final form.
@@ -239,7 +279,7 @@ class MissionStore:
         with self._lock:
             target = self.find(mid)
             if target is None:
-                self._set_status(f'ERROR: {mid!r} not found')
+                self.set_status(f'ERROR: {mid!r} not found')
                 return False
 
             merged = {**target, **fields}
@@ -250,18 +290,17 @@ class MissionStore:
                 merged.get('repeat_every_hours'),
             )
             if err:
-                self._set_status(err)
+                self.set_status(err)
                 return False
 
             # Empty name after cleaning → fall back to id.
             if 'name' in fields and not fields['name']:
                 fields['name'] = mid
 
-            self._set_status(f'{mid} updated — writing…')
+            self.set_status(f'{mid} updated — writing…')
             result = self._store.update(mid, **fields)
 
             self._version += 1
-            self._sync_node()
 
         return result
 
@@ -282,9 +321,9 @@ class MissionStore:
         """
         with self._lock:
             if self.find(mid) is None:
-                self._set_status(f'ERROR: {mid!r} not found')
+                self.set_status(f'ERROR: {mid!r} not found')
                 return False
-            self._set_status(f'{mid} re-armed — writing…')
+            self.set_status(f'{mid} re-armed — writing…')
             return self._write_run_state(mid, last_run_at=None, last_run_success=None, active=True)
 
     def record_run(self, mid: str, success: bool) -> bool:
@@ -301,7 +340,7 @@ class MissionStore:
         with self._lock:
             target = self.find(mid)
             if target is None:
-                self._set_status(f'ERROR: {mid!r} not found')
+                self.set_status(f'ERROR: {mid!r} not found')
                 return False
 
             patch: dict = {
@@ -311,7 +350,7 @@ class MissionStore:
             if target.get('repeat_every_hours') is None and success:
                 patch['active'] = False
 
-            self._set_status(f'{mid} run recorded — writing…')
+            self.set_status(f'{mid} run recorded — writing…')
             return self._write_run_state(mid, **patch)
 
     # ── derived views (lock-free snapshots) ──────────────────────────────
@@ -384,27 +423,17 @@ class MissionStore:
     # ── internals ────────────────────────────────────────────────────────
 
     def _write_run_state(self, mid: str, **fields) -> bool:
-        """Persist run state, increment the version, and refresh attached node state.
+        """Persist run state, increment the version, and return the backend update result.
 
         The caller must hold self._lock.
         """
         result = self._store.update(mid, **fields)
         self._version += 1
-        self._sync_node()
         return result
 
-    def _sync_node(self) -> None:
-        """Mirror internal state onto the node. Always called inside the lock."""
-        if self._node is None:
-            return
-        self._node.missions         = self._store.missions
-        self._node.missions_version = self._version
-
-    def _set_status(self, s: str) -> None:
-        """Status setter — last-writer-wins race accepted (see module docs)."""
-        if self._node is not None:
-            self._node.mission_status = s
-
+    def set_status(self, s: str) -> None:
+        """Set the status text. Last writer wins; the race is accepted (see module docs)."""
+        self._status = s
 
     def _is_due(self, mission: dict, now: datetime) -> bool:
         """Whether the mission belongs in today_queue at `now`.

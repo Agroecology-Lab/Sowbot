@@ -1,7 +1,7 @@
 """
 sowbot_sim.launch.py
 ====================
-Gazebo sim layer for the Sowbot — launched from the UI System tab.
+Gazebo sim layer for the Sowbot — launched from the UI Sim tab.
 
 Starts: Gazebo (gz sim), robot_state_publisher, spawn agro_robot,
         ros_gz_bridge, Nav2.

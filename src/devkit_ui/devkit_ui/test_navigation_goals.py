@@ -370,9 +370,9 @@ class TestRunViewModelNavigation(unittest.TestCase):
         self.assertEqual(vm.topo.nav_status, 'connecting → ROW_2_OUT…')
         self.assertTrue(vm.topo.navigating)
         nav.navigate.assert_called_once()
-        self.assertEqual(nav.navigate.call_args.args[0], 'ROW_2_OUT')
-        callback = nav.navigate.call_args.args[1]
-        callback(SimpleNamespace(status='arrived', navigating=False))
+        target, on_update = nav.navigate.call_args.args
+        self.assertEqual(target, 'ROW_2_OUT')
+        on_update(SimpleNamespace(status='arrived', navigating=False))
         self.assertEqual(vm.topo.nav_status, 'arrived')
         self.assertFalse(vm.topo.navigating)
 
@@ -412,9 +412,9 @@ class TestRunViewModelNavigation(unittest.TestCase):
     def test_updates_drive_status_and_flag(self):
         """Verify a progress callback updates both navigation status and the running flag."""
         vm, nav = self.make_vm()
-        vm.navigate_to('A')
         update = SimpleNamespace(status='arrived', navigating=False)
 
+        vm.navigate_to('A')
         nav.navigate.call_args.args[1](update)
 
         self.assertEqual(vm.topo.nav_status, 'arrived')
@@ -431,8 +431,7 @@ class TestRunViewModelNavigation(unittest.TestCase):
         nav.cancel.assert_called_once_with()
         self.assertTrue(result)
         self.assertEqual(nav.navigate_and_wait.call_args.args[:2], ('A', 9.0))
-        callback = nav.navigate_and_wait.call_args.args[3]
-        callback(SimpleNamespace(status='arrived', navigating=False))
+        nav.navigate_and_wait.call_args.args[3](SimpleNamespace(status='arrived', navigating=False))
         self.assertEqual(vm.topo.nav_status, 'arrived')
         self.assertFalse(vm.topo.navigating)
 

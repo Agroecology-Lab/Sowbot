@@ -237,29 +237,9 @@ with patch.dict(sys.modules, {'nicegui': nicegui}):
     from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 
-geometry_msgs = ModuleType('geometry_msgs')
-geometry_msgs_msg = ModuleType('geometry_msgs.msg')
-geometry_msgs_msg.Point32 = type('Point32', (), {})
-geometry_msgs_msg.PolygonStamped = type('PolygonStamped', (), {})
-rclpy = ModuleType('rclpy')
-rclpy_qos = ModuleType('rclpy.qos')
-rclpy_qos.DurabilityPolicy = SimpleNamespace(TRANSIENT_LOCAL='transient_local')
-rclpy_qos.HistoryPolicy = SimpleNamespace(KEEP_LAST='keep_last')
-rclpy_qos.ReliabilityPolicy = SimpleNamespace(RELIABLE='reliable')
-rclpy_qos.QoSProfile = lambda **_kwargs: object()
-yaml = ModuleType('yaml')
-yaml.safe_load = Mock()
-yaml.dump = Mock()
-
-with patch.dict(sys.modules, {
-    'geometry_msgs': geometry_msgs,
-    'geometry_msgs.msg': geometry_msgs_msg,
-    'nicegui': nicegui,
-    'rclpy': rclpy,
-    'rclpy.qos': rclpy_qos,
-    'yaml': yaml,
-}):
-    from devkit_ui.obstacles import attach_nav_card
+with patch.dict(sys.modules, {'nicegui': nicegui}):
+    from devkit_ui.pages.obstacle_cards import attach_nav_card
+    from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
 
 
 @dataclass
@@ -512,15 +492,13 @@ class TestRowDiscoveryCard(unittest.IsolatedAsyncioTestCase):
 class TestObstacleUndo(unittest.TestCase):
     def setUp(self) -> None:
         fake_ui.reset()
-        self.node = SimpleNamespace(
-            latest_gps=SimpleNamespace(latitude=51.45, longitude=-2.58),
-            obstacle_status='',
-        )
+        self.gps = SimpleNamespace(latitude=51.45, longitude=-2.58)
         self.manager = Mock()
+        self.vm = ObstacleViewModel(self.manager, lambda: self.gps)
 
     def test_marked_obstacle_can_be_undone(self) -> None:
         self.manager.add.return_value = 'OBS_1'
-        attach_nav_card(self.node, self.manager)
+        attach_nav_card(self.vm)
         fake_ui.find('input').value = 'gate post'
 
         fake_ui.find('button', 'Mark here').on_click()
@@ -544,7 +522,7 @@ class TestObstacleUndo(unittest.TestCase):
 
     def test_undo_prompt_times_out_once_but_ignores_deleted_dialog(self) -> None:
         self.manager.add.return_value = 'OBS_2'
-        attach_nav_card(self.node, self.manager)
+        attach_nav_card(self.vm)
         fake_ui.find('button', 'Mark here').on_click()
         dialog = fake_ui.find('dialog')
         timeout = next(timer for timer in fake_ui.timers if timer.once)
@@ -559,12 +537,12 @@ class TestObstacleUndo(unittest.TestCase):
         self.assertTrue(dialog.is_open)
 
     def test_missing_gps_reports_error_without_creating_undo_prompt(self) -> None:
-        self.node.latest_gps = None
-        attach_nav_card(self.node, self.manager)
+        self.gps = None
+        attach_nav_card(self.vm)
 
         fake_ui.find('button', 'Mark here').on_click()
 
-        self.assertEqual(self.node.obstacle_status, 'ERROR: no GPS message yet')
+        self.manager.set_status.assert_called_once_with('ERROR: no GPS message yet')
         self.manager.add.assert_not_called()
         self.assertFalse(any(element.kind == 'dialog' for element in fake_ui.elements))
 

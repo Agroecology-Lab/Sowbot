@@ -20,10 +20,10 @@ that looks small and isn't.
    git clone https://github.com/henki-robotics/henki_ros2_best_practices /tmp/henki_ros2_best_practices
    ```
    Read the relevant sections before writing code, not after. If Henki's conventions and the official ROS 2 style guide ever conflict on something the style guide covers (formatting, naming), the official style guide wins; Henki wins on everything else (architecture, testing, package conventions).
-3. **`skills/ros2-engineering/SKILL.md`** ([source](https://github.com/dbwls99706/ros2-engineering-skills)) — engineering-practice guidance neither of the above covers: QoS compatibility, executors, lifecycle contracts, ros2_control, Nav2, MoveIt 2, safety, and deployment. It is model-agnostic and already installed as a project skill (see Skills Directory below) — **read its task router and the relevant reference before implementing**, and run its validators before claiming a ROS 2 task complete:
+3. **`skills/ros2-engineering-skills/SKILL.md`** ([source](https://github.com/dbwls99706/ros2-engineering-skills)) — engineering-practice guidance neither of the above covers: QoS compatibility, executors, lifecycle contracts, ros2_control, Nav2, MoveIt 2, safety, and deployment. It is model-agnostic and already installed as a project skill (see Skills Directory below) — **read its task router and the relevant reference before implementing**, and run its validators before claiming a ROS 2 task complete:
    ```
-   python3 skills/ros2-engineering/scripts/qos_checker.py        # before/after any QoS change
-   python3 skills/ros2-engineering/scripts/launch_validator.py   # before/after any launch file change
+   python3 skills/ros2-engineering-skills/scripts/qos_checker.py        # before/after any QoS change
+   python3 skills/ros2-engineering-skills/scripts/launch_validator.py   # before/after any launch file change
    ```
    These validators are static checks — passing them is necessary, not sufficient. They do not replace inspecting the live ROS graph (`ros2 topic info -v`, `ros2 node list`) or running the actual test suite.
 
@@ -33,7 +33,7 @@ git clone https://github.com/dbwls99706/ros2-engineering-skills /tmp/ros2-engine
 cd /tmp/ros2-engineering-skills && python3 -m pip install -r requirements.txt
 python3 scripts/install_skill.py --client codex --project /path/to/this/repo
 # swap --client for cursor / gemini as needed; there is no GitHub Copilot target,
-# so for Copilot, point it at skills/ros2-engineering/SKILL.md manually as context.
+# so for Copilot, point it at skills/ros2-engineering-skills/SKILL.md manually as context.
 ```
 This is a knowledge-only install (references + validators), not the Claude Code
 plugin variant — it does not register hooks or grant tool permissions on its own.
@@ -45,7 +45,7 @@ plugin variant — it does not register hooks or grant tool permissions on its o
 - Each skill should be stored as `skills/<skill-name>/SKILL.md`.
 - When a task matches a skill, read and follow that skill before implementing changes.
 - **Installed skills**:
-  - `skills/ros2-engineering/SKILL.md` — ROS 2 engineering guidance (workspace/package design, executors, QoS, lifecycle, tf2, ros2_control, Nav2, MoveIt 2, safety, testing, deployment). Mandatory for ROS 2 tasks — see [ROS 2 Development](#ros-2-development) above.
+  - `skills/ros2-engineering-skills/SKILL.md` — ROS 2 engineering guidance (workspace/package design, executors, QoS, lifecycle, tf2, ros2_control, Nav2, MoveIt 2, safety, testing, deployment). Mandatory for ROS 2 tasks — see [ROS 2 Development](#ros-2-development) above.
 
 ## Core Principles
 

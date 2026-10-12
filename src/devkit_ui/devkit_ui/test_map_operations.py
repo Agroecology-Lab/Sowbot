@@ -23,7 +23,7 @@ def load_map_harness(directory, case):
     tree = ast.parse(source_path.read_text(encoding='utf-8'))
     node_class = next(node for node in tree.body
                       if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode')
-    names = {'save_map_as', 'archive_and_clear_map', '_persist_and_reload', 'set_row_action'}
+    names = {'_on_map_archived', '_persist_and_reload', 'set_row_action'}
     members = [node for node in node_class.body
                if (isinstance(node, ast.FunctionDef) and node.name in names)
                or (isinstance(node, ast.Assign)
@@ -46,6 +46,8 @@ def load_map_harness(directory, case):
     node._run_vm = RunViewModel(Mock())
     node._row_action = ROW_ACTION
     attach_topology(node, directory)
+    node._topo_vm.update_doc(node._topo_doc)
+    node._topo_vm.register_map_archived_callback(node._on_map_archived)
     node.get_logger = Mock(return_value=Mock())
     return node, boundaries
 
@@ -66,7 +68,7 @@ class TestMapOperations(unittest.TestCase):
         live = self.node._topo_doc
         original = copy.deepcopy(live.to_dict())
 
-        self.assertEqual(self.node.save_map_as('  north_field-2026  '),
+        self.assertEqual(self.node._topo_vm.save_map_as('  north_field-2026  '),
                          'saved → north_field-2026')
 
         saved = parse_topo_yaml(self.directory / 'north_field-2026')
@@ -83,7 +85,7 @@ class TestMapOperations(unittest.TestCase):
         """Verify one-character and 64-character names work when copying an in-memory map."""
         for name in ('7', 'a' * 64):
             with self.subTest(name=name):
-                self.assertEqual(self.node.save_map_as(name), f'saved → {name}')
+                self.assertEqual(self.node._topo_vm.save_map_as(name), f'saved → {name}')
                 saved = parse_topo_yaml(self.directory / name)
                 self.assertTrue(saved.has_node('A'))
                 self.assertEqual(saved.name, name)
@@ -95,7 +97,7 @@ class TestMapOperations(unittest.TestCase):
         for name in (None, '', ' ', '../escape', '/absolute', 'a/b', 'a\\b', '.hidden',
                      '_field', '-field', 'two words', 'field.yaml', 'é', 'a' * 65, 'a\nb'):
             with self.subTest(name=name):
-                self.assertTrue(self.node.save_map_as(name).startswith('ERROR: use letters'))
+                self.assertTrue(self.node._topo_vm.save_map_as(name).startswith('ERROR: use letters'))
         self.namespace['parse_topo_yaml'].assert_not_called()
         self.namespace['dump_topo_yaml'].assert_not_called()
         self.namespace['os'].makedirs.assert_not_called()
@@ -105,20 +107,20 @@ class TestMapOperations(unittest.TestCase):
         """Verify saving refuses the live map name and preserves an existing target file."""
         target = self.directory / 'existing'
         target.write_text('keep me', encoding='utf-8')
-        self.assertEqual(self.node.save_map_as(' live '), 'ERROR: that is the live map name')
-        self.assertEqual(self.node.save_map_as('existing'), 'ERROR: existing already exists')
+        self.assertEqual(self.node._topo_vm.save_map_as(' live '), 'ERROR: that is the live map name')
+        self.assertEqual(self.node._topo_vm.save_map_as('existing'), 'ERROR: existing already exists')
         self.assertEqual(target.read_text(encoding='utf-8'), 'keep me')
         self.namespace['dump_topo_yaml'].assert_not_called()
 
     def test_save_rejects_unloaded_and_empty_maps(self) -> None:
         """Verify saving rejects missing maps and empty maps in memory or on disk."""
         self.node._topo_doc = None
-        self.assertEqual(self.node.save_map_as('copy'), 'ERROR: map not loaded')
+        self.assertEqual(self.node._topo_vm.save_map_as('copy'), 'ERROR: map not loaded')
         self.node._topo_doc = TopoDoc(name='live')
-        self.assertEqual(self.node.save_map_as('copy'), 'ERROR: map has no nodes')
+        self.assertEqual(self.node._topo_vm.save_map_as('copy'), 'ERROR: map has no nodes')
         self.node._topo_doc.add_node(TopoNode(name='MEMORY'))
         dump_topo_yaml(TopoDoc(name='live'), self.directory / 'live')
-        self.assertEqual(self.node.save_map_as('copy'), 'ERROR: map has no nodes')
+        self.assertEqual(self.node._topo_vm.save_map_as('copy'), 'ERROR: map has no nodes')
         self.namespace['dump_topo_yaml'].assert_not_called()
 
     def test_save_reports_read_and_write_errors_without_changing_live_map(self) -> None:
@@ -131,7 +133,7 @@ class TestMapOperations(unittest.TestCase):
                 original_effect = operation.side_effect
                 operation.side_effect = OSError('disk unavailable')
                 try:
-                    self.assertEqual(self.node.save_map_as('copy'), 'ERROR: disk unavailable')
+                    self.assertEqual(self.node._topo_vm.save_map_as('copy'), 'ERROR: disk unavailable')
                     self.assertIs(self.node._topo_doc, live)
                     self.assertFalse((self.directory / 'copy').exists())
                 finally:
@@ -147,7 +149,7 @@ class TestMapOperations(unittest.TestCase):
         self.node._row_action = VISION_ROW_ACTION
         self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
 
-        self.assertEqual(self.node.archive_and_clear_map(), 'archived → live_1')
+        self.assertEqual(self.node._topo_vm.archive_and_clear_map(), 'archived → live_1')
 
         archived = parse_topo_yaml(self.directory / 'live_1')
         self.assertTrue(archived.has_node('A'))
@@ -170,7 +172,7 @@ class TestMapOperations(unittest.TestCase):
         previous = self.directory / 'live_1'
         previous.write_text('previous archive', encoding='utf-8')
 
-        self.assertEqual(self.node.archive_and_clear_map(), 'archived → live_2')
+        self.assertEqual(self.node._topo_vm.archive_and_clear_map(), 'archived → live_2')
 
         self.assertTrue(parse_topo_yaml(self.directory / 'live_2').has_node('DISK'))
         self.assertEqual(previous.read_text(encoding='utf-8'), 'previous archive')
@@ -181,7 +183,7 @@ class TestMapOperations(unittest.TestCase):
         self.node._row_action = self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
         self.namespace['dump_topo_yaml'].side_effect = OSError('read only')
 
-        self.assertEqual(self.node.archive_and_clear_map(), 'ERROR: read only')
+        self.assertEqual(self.node._topo_vm.archive_and_clear_map(), 'ERROR: read only')
 
         self.assertIs(self.node._topo_doc, live)
         self.assertEqual(self.node._row_action, VISION_ROW_ACTION)

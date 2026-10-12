@@ -1,19 +1,17 @@
 # pylint: disable=exec-used,no-member,protected-access,attribute-defined-outside-init
 import ast
-import copy
-import re
 import traceback
 import unittest
-from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from devkit_ui.constants import NAV_ACTION, ROW_ACTION, VISION_ROW_ACTION
-from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties, Vector2
+from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_defaults import default_actions, default_definitions
+from devkit_ui.topo_results import TopologyEditError
 from devkit_ui.topo_test_fakes import attach_topology, patch_store_io
 from devkit_ui.view_models.run_view_model import RunViewModel
 
@@ -31,20 +29,8 @@ def load_drop_harness():
         if isinstance(node, ast.FunctionDef) and node.name == 'drop_topo_node'
     )
     namespace = {
-        'TopoNode': TopoNode,
-        'TopoEdge': TopoEdge,
-        'TopoProperties': TopoProperties,
-        'Vector2': Vector2,
-        'NAV_ACTION': NAV_ACTION,
-        '_NAME_RE': re.compile(r'^[A-Z0-9_]+$'),
-        '_TOPO_SRV_OK': False,
-        'copy': copy,
-        're': re,
+        'TopologyEditError': TopologyEditError,
         'traceback': traceback,
-        'UTC': UTC,
-        'datetime': datetime,
-        'default_actions': default_actions,
-        'default_definitions': default_definitions,
         'threading': SimpleNamespace(
             Thread=lambda target, daemon: SimpleNamespace(start=target)),
     }

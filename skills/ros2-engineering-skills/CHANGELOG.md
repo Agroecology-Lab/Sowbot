@@ -1,0 +1,357 @@
+# Changelog
+
+All notable changes are documented here.
+
+## 1.6.2 - 2026-09-30
+
+Source bundle version 1.6.2. Release publication follows
+`docs/RELEASING.md`. Field-learned guidance corrections generalized from robot
+operation; no new tools, no site-specific values, and no measured model results.
+
+- Separate availability policy from the motion permit in
+  `references/evidence-progression.md`: a lost telemetry, dashboard, or management
+  link is evidence about that link, is classified against the documented policy,
+  and the permit-owning path is identified separately. `references/safety-estop.md`
+  points at the permit owner when a link drops.
+- Add deployment chronology to `references/runtime-provenance.md`: a commit, a
+  build artifact, a deployment event, and the bytes installed now are four claims;
+  an earlier report's hash is not evidence about the current installation, so
+  re-read and re-hash the target after deploying (checklist row 11).
+- Add a verification-ladder rule in `references/testing.md` that a harness,
+  fixture, import, or collection failure means the behavior check did not run and
+  is reported as unperformed, while a required message the system did not produce
+  remains a behavior finding.
+- Add shutdown-signal guidance and an example to `references/nodes-executors.md`:
+  handlers record a request only, the spin ends at a control-flow boundary,
+  cleanup runs once, `ExternalShutdownException` is a normal exit, and a sent
+  cleanup command is not a physical stop. Note that the default context installs
+  SIGINT/SIGTERM handlers on Humble and later and that Foxy predates
+  `SignalHandlerOptions`.
+- State in `references/debugging.md` that a bag still being written is not a
+  finalized recording artifact because rosbag2 writes `metadata.yaml` on writer
+  close; verify with `ros2 bag info` after a clean stop. Correct the MCAP default
+  to Iron onward (Humble stays sqlite3) per `default_storage_id.cpp`.
+- Add black-box controller evidence to `references/system-diagnostics.md`: obtain
+  the vendor decision or fault log and align it with recorded ROS data by
+  timestamp instead of inferring the cause from topics alone.
+- Add counterfactual replay provenance to `references/artifact-lineage.md`: compare
+  against what the executor actually received, state the replay start event, bound
+  results by sensor coverage, and check the instrument with a positive control
+  before concluding about robot behavior.
+- Add string-level regression tests for each rule and register the rclpy and
+  rosbag2 upstream sources with review dates.
+
+## 1.6.1 - 2026-09-30
+
+Source bundle version 1.6.1. Release publication follows
+`docs/RELEASING.md`. Launch best-practice correction prompted by the
+Discourse review of v1.5.0 and verified against ROS 2 documentation, the
+`ros2/launch` implementation, and `ros2_control` behavior.
+
+- Replace the absolute "always use Python launch files" rule in
+  `references/launch-system.md` with declarative-first guidance: prefer XML or
+  YAML for straightforward launch descriptions and use Python when the required
+  behavior cannot be expressed through the frontends or needs lower-level launch
+  APIs, as the ROS 2 migration guide states for typical use cases. Open with a
+  format decision table and the same minimal launch in XML, YAML, and Python;
+  state that launch stays focused on orchestration and that justified Python
+  keeps a declarative, substitution-based description.
+- Show dedicated boolean substitutions (`equals`, `and`, `or`, `not`, `any`,
+  `all`) before `PythonExpression`, note that old or pinned installations may
+  differ, and document `XMLLaunchDescriptionSource`,
+  `YAMLLaunchDescriptionSource`, and `AnyLaunchDescriptionSource` for
+  cross-format includes.
+- State that `OnProcessExit` establishes termination ordering only and does not
+  prove a controller loaded or activated. Gate the spawner chain on
+  `returncode == 0` with `LogInfo` and `Shutdown(reason=...)` on failure, and
+  limit that gate to processes with a failure contract. Show one spawner with
+  several controllers, noting that it is not atomic and that
+  `--activate-as-group` groups activation only.
+- Describe `--show-args`, `--print`, and `ament_xmllint` as load/parse smoke,
+  structural inspection, and XML markup checks; none verifies runtime
+  behavior. `scripts/launch_validator.py` remains Python-only at 0.1.0 and no
+  XML or YAML static validator is added.
+- Rewrite the ROS 1 launch conversion in `references/migration-ros1.md` as
+  ROS 1 XML to ROS 2 XML with a three-column conversion table that keeps the
+  Python API as the justified alternative.
+- Add string-level regression tests for the corrected guidance and register the
+  upstream sources with review dates. The new XML, YAML, and Python examples
+  were reviewed statically; parser smoke not run locally. CI does not execute
+  the reference examples, and no skill on/off model comparison was run.
+
+## 1.6.0 - 2026-09-28
+
+Source bundle version 1.6.0. Release publication follows
+`docs/RELEASING.md`.
+
+- Add `scripts/qos_audit.py` (0.1.0), a static audit that pairs rclpy (AST) and
+  rclcpp (lexical) publisher/subscription declarations by topic and canonical
+  `pkg/msg/Type` across a package or workspace.
+- Pair only identical absolute topics as confirmed; identical relative or private
+  literals are potential; `/scan` and `scan` are never merged. A topic whose
+  publisher and subscription types share nothing is a type conflict; extra types
+  alongside a common one are a multi-type warning.
+- Evaluate compatibility with Humble `rmw_dds_common` semantics as compatible,
+  incompatible, or indeterminate. SYSTEM_DEFAULT/UNKNOWN policies and unspecified
+  durations are preserved, never replaced with concrete values.
+- Report dynamic topics, unparsed QoS arguments, C++ QoS variables, invalid rclpy
+  profiles (KEEP_LAST without depth), and distro-sensitive policies such as
+  BEST_AVAILABLE as unresolved. A type conflict is definite only when no
+  unresolved-type or dynamic-topic endpoint could complete the type sets.
+- Report a pair as indeterminate, keeping the declared result as a baseline, when an
+  endpoint enables `qos_overriding_options` or passes C++ options the audit cannot
+  track. Message types and QoS profiles resolve only through unconditional imports
+  placed before use in the enclosing scope; the two-interface rclcpp free functions
+  are parsed, and an ambiguous overload stays unresolved.
+- List YAML `qos_overrides` as unapplied candidates. Skipped, non-UTF-8, or
+  unparsable files and unreadable directories are reported as an incomplete scan.
+  `--strict` also fails on potential, unresolved, indeterminate, or incomplete-scan
+  results.
+- Route multi-reference questions through section headings, and add a README map
+  separating guidance, tools, client integration, and repository verification.
+
+## 1.5.1 - 2026-09-16
+
+Source bundle version 1.5.1. Release publication follows
+`docs/RELEASING.md`.
+
+- Require controls for self-built diagnostics before interpreting missing evidence;
+  separate agreement with an implementation from independent physical truth and
+  check false positives when broadening a detector.
+- Record requirement-linked metrics for rejected as well as accepted gate changes,
+  including preservation constraints and the limits of the observed dataset.
+- Route offline ROS map/bag investigations to artifact-lineage guidance: distinguish
+  backend execution, caller adoption, saved output, content equality, and historical
+  ancestry; compare identities or multisets rather than only counts.
+- Qualify subset/order optimizations with whole-pipeline semantics. A set-only flag
+  alone proves neither subset dominance nor order independence; retain useful
+  prefix attribution tests and an executable synthetic counterexample.
+- Keep offline verification scoped to the actual claim, without a new readiness
+  ladder. Record retractions when needed and correct dependent conclusions while
+  preserving the original evidence and optional reporting format.
+- Add four synthetic review scenarios and structural/counterexample regressions.
+  These are evaluation inputs, not measured model improvements or a reproduction
+  of a production recording. Existing CLI, hook-report, and CI contracts remain
+  unchanged.
+
+## 1.5.0 - 2026-09-10
+
+- Correct SROS2 participant/enclave semantics, Enforce-only authorization
+  checks, certificate lifetime and staged rotation; align image stride, depth,
+  camera projection, Foxy quaternion, and Domain ID guidance with upstream.
+- Replace unsourced SROS2 and VPN latency figures with target-path measurement
+  criteria; require the threat model to permit disclosure before using `SIGN`.
+- Preserve the previous SIGINT handler atomically during launch-supervisor
+  teardown and cover a real signal arriving inside the restoration boundary.
+- Separate orderly lifecycle finalization from the active-state SIGINT probe so
+  Humble shutdown behavior cannot race lifecycle-node destruction in the fleet gate.
+- Centralize verification levels in the testing reference and keep authorization
+  details in evidence progression. Remove repository-connector incidents and the
+  unrelated Git completion benchmark from the domain skill.
+- Add simulation, real-time, SROS2, micro-ROS, and fleet routing scenarios; remove
+  rubric hints from progression questions. These are evaluation inputs, not
+  measured activation or model-quality results.
+- Repair the security threat table and multiline QoS help example; accept quoted
+  and unquoted ISO dates consistently in evaluation metadata.
+- Ship a POSIX launch supervisor that preserves ready callbacks across SIGINT
+  and records an interrupt before launch starts. Exercise real signals and real
+  ROS CLI argument parsing; preserve the fleet shutdown deadline and child checks.
+- Correct launch namespace resolution, permit-generation/reset guidance, SROS2
+  rejection outcomes, and exception-safe lifecycle teardown guidance.
+
+- Correct quaternion normalization and IMU covariance guidance against upstream
+  definitions; execute the normalization example in regression tests.
+- Label evaluation reports and history as lexical coverage with answer quality
+  unassessed; matching captured answers require review instead of receiving a
+  pass, including perfect matches and critical-criterion matches.
+- Select Stop-hook candidates from Git before scanning, handle package subdirectory
+  workspaces, and use one bounded scan when the Git change set is unavailable.
+- Align detailed reporting guidance, source-review scope, release-version policy,
+  and the README's evaluation inventory with the current contracts.
+
+- Scope verification-level reporting to ROS behavior and hardware-readiness
+  claims, and physical-test authorization tracking to physical tests. Keep
+  prose-only reports proportional without weakening required checks or stop proof.
+
+- Fail fleet verification on completed service errors, cancelled/empty/late
+  replies, and exhausted readiness budgets; retry only unanswered read requests
+  and retire their pending futures on all exit paths.
+- Keep Claude invocation/tool-approval controls separate from Codex metadata;
+  document model-upgrade comparisons without adding portable permission grants,
+  forced model choices, or unconditional skill routing.
+
+- Retire unanswered lifecycle state reads within the existing startup deadline
+  and retry only the idempotent query; activation remains one-shot. Preserve
+  lost-response and persistent-failure regression cases.
+
+- Make environment discovery, reference reading, and local validation proportional
+  to the task while retaining mandatory CI and physical-safety boundaries.
+- Add task-scope cases to the paired capture suite, expand routing
+  negatives, and document controlled model/skill-upgrade comparisons.
+- Reject FIFOs and other non-regular capture inputs without blocking; bound reads
+  and verify artifact hashes and text from one snapshot.
+- Keep missing, partial, and damaged model captures separate from scored results;
+  require valid ON/OFF pairs before reporting a parity delta. Confine evaluation
+  inputs and history to their declared directories and reject malformed manifests.
+- Scope parity history to the runner, suite, fixtures, version, and scoring rules;
+  do not count absent data or repeated captures as new deprecation evidence.
+  Add explicit capture-completeness gates and critical lexical criteria while
+  retaining the requirement for independent semantic review.
+- Bound physical-test approval by its attempt budget as well as its session and
+  envelope. Recheck readiness before execution; a failed or ambiguous command is
+  not an automatic retry, and reviewing a gate does not authorize bypassing it.
+- Align controlled-motion verification levels and clarify independent measurements;
+  fix the container CI example's shell and remove its stale ROS-prefix cache.
+
+- Add evidence-driven progression rules for acceptance gates: review threshold
+  provenance, measured quantity, uncertainty, error-budget relevance, and clearing
+  conditions instead of treating existing code as automatic authority or tuning
+  criteria merely to make a failed run pass.
+- Separate user authorization, authorization validity, execution authority,
+  supervised-test readiness, L0-L6 evidence, and operational readiness. Preserve
+  unchanged, unexpired, unrevoked approvals without turning permission into proof
+  or overriding client, product, site, or safety execution policy.
+- Give L5 and L6 distinct execution preconditions, retain operator-only execution
+  for high-risk physical fault injection, and repair stale numbered-principle links
+  so detailed references point to the engineering-principles source of truth.
+- Turn repeated blockers into concrete resolution plans with independent variables,
+  required evidence, pass/fail criteria, and stop conditions; distinguish current
+  healthy observations from latched historical failures and prevent stale-command
+  replay during recovery.
+- Add canonical progression behavior fixtures for gate-policy review, supervised
+  test authorization, latched localization recovery, and sensor-metric separation.
+  Public calibration examples are explicitly synthetic, and the structural runner
+  remains clearly separated from real model-output judging.
+- Correct perception and deployment reference guidance: qualify image transport
+  and copy-avoidance claims, check timestamp/clock evidence before queue tuning,
+  complete the health-monitor example, and distinguish real device
+  acknowledgements from fixed shutdown sleeps.
+- Stabilize generated-fleet readiness acceptance by retrying idempotent read
+  services within bounds, requiring a brief stable-active window, and keeping
+  sibling transition churn out of the transition-event-loss negative control.
+
+## 1.4.0 - 2026-09-08
+
+- Make generated lifecycle startup independent of transition-event delivery: query
+  the named node's actual state, request activation once after configuration, and
+  fail with its last observed state if startup cannot complete within the deadline.
+  Apply the same behavior to single-node and multi-robot launch files. See the
+  [startup regression](docs/LIFECYCLE_STARTUP.md).
+- Exercise real fleet startup with transition-event callbacks deliberately
+  discarded, while retaining service, parameter, sibling-isolation, and child-exit
+  assertions. Keep the original runtime checks and time limits.
+- Align skill, plugin, marketplace, eval configuration, and manual report versions
+  at 1.4.0. Standalone tool-interface versions and newly scaffolded user package
+  versions retain their separate version schemes.
+
+- Repair Python fleet launch installation, required lifecycle namespaces, scoped
+  startup transitions, and parameter-file matching after fleet remapping.
+- Declare the generated C++ configuration parameter and delegate generated
+  C++/Python lifecycle transitions to managed entities, preserving their failures.
+- Reject nonfinite/out-of-range plain-node timer rates, unsafe package symlinks,
+  and metadata newlines before they can produce invalid code or overwrite files.
+- Detect a missing literal lifecycle namespace in the launch validator without
+  guessing the contents of dynamic keyword arguments.
+- Add live three-variant fleet checks, actual managed-publisher tests, and
+  structured child start/exit evidence; a zero launcher exit alone is not a pass.
+
+- Isolate the never-activated runtime control from later active inputs so queued
+  pre-activation samples are not mistaken for inactive publication.
+
+- Execute the documented lifecycle examples against real ROS: delegate C++
+  publisher activation/deactivation to the base callbacks and unregister Python
+  lifecycle publishers on cleanup, shutdown, and transition error recovery.
+- Keep repeatable runtime regressions for actual filtered output and released
+  publisher objects; a successful lifecycle state transition alone is not a pass.
+
+- Fix generated C++ component target linkage and exercise component builds in
+  the ROS distribution matrix, alongside Python lifecycle variants.
+- Make generated lifecycle configuration repeatable, reject invalid timer rates,
+  and release ordinary timers on deactivation, cleanup, shutdown, and errors.
+- Add real generated-node lifecycle acceptance checks, including positive timer
+  controls, repeated transitions, rejected rates, and recovery after rejection.
+- Provide a transferable Humble runtime for local tests; isolate modern developer
+  pytest dependencies from the distribution's ROS testing plugins.
+
+- Preserve measured position targets on hardware-template deactivation instead
+  of confusing a zero position command with stopping an actuator.
+
+- Handle already-shut-down contexts and external shutdown in generated Python
+  entry points; clean up after constructor or node-destruction failures too.
+- Require generated smoke-test processes to exit cleanly after discovery instead
+  of accepting an exception or forced termination during shutdown.
+
+- Keep the ROS smoke observer and its executor on the same initialized context;
+  verify cleanup after initialization, discovery, and shutdown failures.
+
+- Resolve generated package manifest schemas through a pinned, hash-checked local
+  XML catalog so network-isolated ROS tests retain real xmllint validation.
+  Require positive and negative schema controls instead of disabling the linter.
+
+- Reduce eagerly selected instructions while retaining detailed principles and all
+  pitfall entries; preserve factual regressions and test every direct route.
+- Add explicit selected-body byte/line limits and named BPE-tokenizer measurements
+  that fail visibly when tokenizer data is unavailable or the budget is exceeded.
+- Add capture schema 2 to retain missed activations, failed/timed-out attempts,
+  absent responses, and actual empty outputs without inventing benchmark results.
+- Enforce hook input limits in UTF-8 bytes and reject ambiguous JSON, invalid
+  working-directory types, and non-Boolean Stop continuation flags.
+- Bound unit-test execution and retain environment, JUnit, coverage, and timeout
+  diagnostics; use concise parameter IDs for oversized-input regressions.
+
+- Separate dependency-image builds from uncached ROS test execution; use isolated
+  BuildKit and bounded, named runtime containers with retained diagnostics.
+- Replace daemon-based smoke discovery with unique graph names and owned process
+  groups; preserve all stable ROS gates and explicit Rolling runtime exclusions.
+- Require local ROS runners to execute tests, not merely build an image, and add
+  a CI summary gate that rejects failed, cancelled, skipped, or missing jobs.
+- Preserve recoverable installation backups even when both replacement and
+  rollback fail; serialize portable installers and report retained backups.
+- Align portable Agent Skills metadata with the public specification.
+- Add a standard Claude Code plugin manifest and hook location.
+- Qualify unsupported ROS 2 generalizations in the core guidance.
+- Replace the speculative README diagnosis with an evidence-first example.
+- Add contribution, security, conduct, and roadmap documents.
+- Make dependency vulnerability auditing a required CI gate.
+- Clarify validator Python coverage and refresh roadmap items.
+- Add a documented Claude hook protocol adapter with bounded execution,
+  NotebookEdit handling, warning context, and non-blocking Stop notices.
+- Add a read-only skill/package/source-date validator and Codex display metadata.
+- Add staged knowledge-only installation for Codex, Claude Code, Cursor, and Gemini.
+- Document current primary-source client rules and separate verified gates from
+  uncollected authenticated activation and model-quality evidence.
+- Preregister activation and paired quality cases; reject missing, reused, or
+  tampered capture artifacts without inventing model results.
+- Add regression tests, individual validator coverage gates, Python 3.13/3.14
+  matrix targets, portable Windows smoke checks, and a controlled QoS experiment.
+- Preserve existing ROS distro builds and explicitly retain Rolling runtime limits.
+- Add isolated live Codex/Gemini discovery probes with pinned versions, negative
+  controls, resolved installation paths, and retained CI evidence.
+
+### Known limitations
+
+- One local Cyclone DDS immediate-shutdown attempt timed out and was not
+  reproduced in subsequent diagnostic trials. This is separate from the repaired
+  startup path; its root cause remains unconfirmed. See [local evidence](docs/LOCAL_RUNTIME.md).
+- Rolling's documented runtime exclusions remain in place; successful build jobs
+  do not establish the excluded runtime behavior.
+- Client discovery and isolated ROS software tests are not authenticated
+  multi-client quality benchmarks or physical robot safety certification.
+
+## 1.3.0
+
+- Added runtime provenance and cross-layer system diagnosis references.
+- Added explicit L0-L6 verification levels.
+- Expanded end-to-end stop-path and field-diagnosis guidance.
+- Updated the documented ROS 2 distribution matrix.
+
+## 1.2.0
+
+- Corrected Nav2 distribution naming and recovery-safety guidance.
+- Added manual validation modes and factual regression tests.
+- Reduced duplicated always-loaded eval metadata.
+
+## 1.1.0
+
+- Hardened path handling and clarified validation boundaries.
+- Added dependency vulnerability awareness in CI.

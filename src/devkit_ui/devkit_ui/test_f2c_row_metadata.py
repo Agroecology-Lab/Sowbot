@@ -2,18 +2,17 @@
 # make_node supplies the attributes normally initialized by the ROS node.
 # pylint: disable=attribute-defined-outside-init,exec-used,no-member,protected-access
 import ast
-import math
-import re
 import unittest
-from datetime import UTC, datetime
-from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
-from devkit_ui.models import NodeID, TopoDoc, TopoEdge, TopoNode, TopoPose, TopoProperties, Vector2
+from devkit_ui import row_planning, topo_row_builder
+from devkit_ui.application_services.topology_edit_service import TopologyEditService
+from devkit_ui.constants import NAV_ACTION
+from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
+from devkit_ui.topo_results import TopologyEditError
 
-NAV_ACTION = 'nav_to_pose'
 ROW_ACTION = 'row_follow'
 
 
@@ -31,6 +30,16 @@ def resample_row_xy(_points, _anchor_lat, _anchor_lon, _interval):
     return [(1.0, 1.5)]
 
 
+def patch_row_geometry(test: unittest.TestCase) -> None:
+    """Replace projection and resampling with simple stand-ins so expected poses stay readable."""
+    test.enterContext(patch.multiple(
+        topo_row_builder,
+        _f2c_latlon_to_xy=latlon_to_xy,
+        _f2c_xy_to_latlon=xy_to_latlon,
+        resample_row_xy=resample_row_xy,
+    ))
+
+
 def load_f2c_save_harness():
     """Load only the F2C save method, avoiding ui_node's ROS and web-server imports."""
     source_path = Path(__file__).with_name('ui_node.py')
@@ -42,31 +51,10 @@ def load_f2c_save_harness():
     methods = [
         node for node in node_class.body
         if isinstance(node, ast.FunctionDef)
-        and node.name in ('save_f2c_rows_to_topo', 'repair_row_connectivity')
+        and node.name in ('save_f2c_rows_to_topo', 'repair_row_connectivity', '_log_edit_lines')
     ]
-    helpers = [node for node in tree.body
-               if isinstance(node, ast.FunctionDef) and node.name == '_headland_neighbour_pairs']
-    namespace = {
-        'NodeID': NodeID,
-        'TopoDoc': TopoDoc,
-        'TopoEdge': TopoEdge,
-        'TopoNode': TopoNode,
-        'TopoPose': TopoPose,
-        'TopoProperties': TopoProperties,
-        'Vector2': Vector2,
-        'NAV_ACTION': NAV_ACTION,
-        'ROW_ACTION': ROW_ACTION,
-        '_CONTOUR_WAYPOINT_INTERVAL_M': 1.0,
-        '_f2c_latlon_to_xy': latlon_to_xy,
-        '_f2c_xy_to_latlon': xy_to_latlon,
-        '_resample_row_xy': resample_row_xy,
-        'UTC': UTC,
-        'datetime': datetime,
-        'math': math,
-        'pairwise': pairwise,
-        're': re,
-    }
-    module = ast.Module(body=[*helpers, *methods], type_ignores=[])
+    namespace = {'TopologyEditError': TopologyEditError}
+    module = ast.Module(body=methods, type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), source_path, 'exec'), namespace)
     return type('F2CSaveHarness', (), {method.name: namespace[method.name] for method in methods})
 
@@ -90,6 +78,8 @@ def make_node(swaths, *, contour_used=False):
         status=SimpleNamespace(status=0),
     )
     node._topo_doc = TopoDoc(name='field')
+    node._topo_edit_service = TopologyEditService(
+        SimpleNamespace(get_doc=lambda: node._topo_doc))
     node._topo_vm = SimpleNamespace(current_node=None, selected_node=None)
     node.f2c_save_status = ''
     node.get_logger = Mock(return_value=Mock())
@@ -103,6 +93,9 @@ def make_node(swaths, *, contour_used=False):
 
 
 class TestF2CRowMetadata(unittest.TestCase):
+    def setUp(self) -> None:
+        patch_row_geometry(self)
+
     def test_repair_preserves_existing_modes_and_is_idempotent_after_mode_change(self) -> None:
         """Verify repair preserves existing actions and skips saving fully connected rows."""
         node = make_node([])
@@ -227,6 +220,9 @@ class TestF2CRowMetadata(unittest.TestCase):
 
 
 class TestDirectContourPlanning(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        patch_row_geometry(self)
+
     async def test_fragment_breaks_reach_topo_and_reset_for_straight_plans(self):
         swaths = [
             [(51.0, -2.0), (51.001, -2.0)],
@@ -234,30 +230,36 @@ class TestDirectContourPlanning(unittest.IsolatedAsyncioTestCase):
             [(51.003, -1.999), (51.0, -1.999)],
         ]
         node = make_node([])
-        node._obstacle_mgr = Mock()
-        node._obstacle_mgr.rings_ll.return_value = []
+        node._obstacle_vm = Mock()
+        node._obstacle_vm.rings_ll.return_value = []
 
         def plan_contours(*_args, break_after):
             break_after.add(0)
             return swaths
 
+        select_contour = Mock(return_value=swaths[0])
+        self.enterContext(patch.multiple(
+            row_planning,
+            _run_contour_f2c=plan_contours,
+            load_recon_points=Mock(return_value=([], [], [])),
+            build_elevation_grid=Mock(return_value=([], (0, 0), 0)),
+            field_centroid_xy=Mock(return_value=(0, 0)),
+            select_reference_contour_latlon=select_contour,
+            np=Mock(),
+        ))
+
         source_path = Path(__file__).with_name('ui_node.py')
         tree = ast.parse(source_path.read_text(encoding='utf-8'))
         methods = [method for method in ast.walk(tree)
-                   if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef)
-                   and method.name in ('_plan_contour_rows', 'do_plan')]
+                   if isinstance(method, ast.AsyncFunctionDef) and method.name == 'do_plan']
         namespace = {
             'self': node, 'corners_ll': [(51.0, -2.0), (51.003, -2.0), (51.0, -1.999)],
             'swath_layers': [], 'mission_map': Mock(),
             'plan_btn': Mock(), 'save_btn': Mock(), 'f2c_status': Mock(),
             'ng_run': SimpleNamespace(
                 io_bound=AsyncMock(side_effect=lambda fn, *a, **kw: fn(*a, **kw))),
-            '_run_contour_f2c': plan_contours, '_run_f2c': Mock(return_value=swaths),
-            'load_recon_points': Mock(return_value=([], [], [])),
-            'build_elevation_grid': Mock(return_value=([], (0, 0), 0)),
-            'field_centroid_xy': Mock(return_value=(0, 0)),
-            'select_reference_contour_latlon': Mock(return_value=swaths[0]),
-            'np': Mock(),
+            'plan_contour_rows': row_planning.plan_contour_rows,
+            '_run_f2c': Mock(return_value=swaths),
         }
         values = {'f2c_width': 4, 'f2c_angle': 0, 'f2c_row_id_start': 7,
                   'f2c_headland': 0, 'f2c_snake': True, 'f2c_contour': True,
@@ -275,7 +277,7 @@ class TestDirectContourPlanning(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('CURVE_R7_OUT', [e.node for e in nodes.get_node('CURVE_R8_IN').edges])
         self.assertIn('CURVE_R9_IN', [e.node for e in nodes.get_node('CURVE_R8_OUT').edges])
 
-        namespace['select_reference_contour_latlon'].return_value = None
+        select_contour.return_value = None
         await namespace['do_plan']()
         self.assertEqual(node._f2c_break_after, set())
         self.assertFalse(node._f2c_contour_used)
