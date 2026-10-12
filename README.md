@@ -29,6 +29,9 @@ We have a [Online version of swath planner](https://agroecology-lab.github.io/fe
 
 (click image to play video)
 
+
+[![Architecture diagram of agroecology-lab/feldfreund_devkit_ros](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros/diagram.png)](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros?utm_source=readme&utm_medium=picture)
+
 ## Sowbot Roadmap
 
 Related [Safety Roadmap](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/caatinga-dev/safety_roadmap.md)
