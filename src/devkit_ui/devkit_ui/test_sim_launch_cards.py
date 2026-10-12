@@ -16,7 +16,6 @@ with (
 ):
     from devkit_ui.pages.sim import gazebo_card, row_follow_card
     from devkit_ui.pages.sim.plant_placement_card import PlantSettings
-from devkit_ui.view_models.sim_view_model import WorldRebuildError
 
 
 class TestGazeboCard(unittest.IsolatedAsyncioTestCase):
@@ -179,7 +178,7 @@ class TestGazeboCard(unittest.IsolatedAsyncioTestCase):
     async def test_rebuild_cancellation_and_errors_are_not_reported_as_success(self):
         for error, text in (
             (None, 'rebuild cancelled'),
-            (WorldRebuildError('no map'), 'no map'),
+            (gazebo_card.WorldRebuildError('no map'), 'no map'),
             (OSError('cannot spawn'), 'ERROR: cannot spawn'),
         ):
             with self.subTest(error=error):
