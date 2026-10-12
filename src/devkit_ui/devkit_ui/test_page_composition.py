@@ -91,7 +91,10 @@ class TestSimPage(unittest.TestCase):
 
     def test_page_is_a_full_width_column(self):
         """Verify the page itself is styled as a full-width column."""
-        self.assertEqual(SimPage(self.sim_vm, self.topo_vm).class_names, 'w-full gap-3')
+        # NOTE: The patched ui.column supplies FakeElement.class_names at runtime.
+        self.assertEqual(
+            SimPage(self.sim_vm, self.topo_vm).class_names,  # pylint: disable=no-member
+            'w-full gap-3')
 
     def test_cards_get_the_view_models_and_live_plant_settings_they_need(self):
         """Verify each card is built on the right view model and every card is full width."""
@@ -131,10 +134,12 @@ class TestSystemPage(unittest.TestCase):
     def test_health_cards_share_one_stretched_row(self):
         """Verify odometry, battery and safety are built inside the same full-width row."""
         page = SystemPage(self.telemetry, self.brain)
-        rows = [child for child in page.children if child.kind == 'row']
+        # NOTE: The patched ui.column supplies FakeElement.children at runtime.
+        rows = [child for child in page.children if child.kind == 'row']  # pylint: disable=no-member
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].class_names, 'items-stretch w-full gap-3')
-        self.assertEqual(page.class_names, 'w-full gap-3')
+        # NOTE: The patched ui.column supplies FakeElement.class_names at runtime.
+        self.assertEqual(page.class_names, 'w-full gap-3')  # pylint: disable=no-member
 
     def test_cards_get_the_view_models_they_need_and_the_right_widths(self):
         """Verify telemetry and brain view models reach their cards and widths are set."""
@@ -171,7 +176,8 @@ class TestToolsCardLayout(unittest.TestCase):
 
     def test_title_is_the_first_child_and_controls_share_one_wrapping_row(self):
         """Verify the card title precedes a single wrapping row holding every control."""
-        title, row = self.card.children
+        # NOTE: The patched ui.card supplies FakeElement.children at runtime.
+        title, row = self.card.children  # pylint: disable=no-member
         self.assertEqual((title.text, row.kind), ('Tools', 'row'))
         self.assertIn('flex-wrap', row.class_names)
 
