@@ -12,9 +12,11 @@ from devkit_ui import process_registry as registry
 
 class TestProcessRegistry(unittest.TestCase):
     def setUp(self):
+        """Isolate shared process entries and restore the registry after each test."""
         self.enterContext(patch.dict(registry._TOOLS, clear=True))
 
     def test_shared_handles_survive_second_session_and_keep_names_separate(self):
+        """Verify sessions share handles by tool name without mixing different tools."""
         gazebo = registry.shared('gazebo', lambda: [None])
         process = Mock()
         gazebo[0] = process
@@ -23,12 +25,14 @@ class TestProcessRegistry(unittest.TestCase):
         self.assertEqual(registry.shared('rviz', list), [])
 
     def test_alive_distinguishes_missing_running_and_exited_handles(self):
+        """Verify only a handle whose process has not exited is considered alive."""
         self.assertFalse(registry.alive(None))
         for code in (None, 0, 1, -15):
             with self.subTest(returncode=code):
                 self.assertEqual(registry.alive(Mock(poll=Mock(return_value=code))), code is None)
 
     def test_spawn_truncates_log_redirects_streams_and_closes_parent_handle(self):
+        """Verify spawning replaces the log and redirects both streams in a new session."""
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / 'tool.log'
             log.write_text('stale output', encoding='utf-8')
@@ -50,6 +54,7 @@ class TestProcessRegistry(unittest.TestCase):
             self.assertEqual(log.read_text(encoding='utf-8'), '')
 
     def test_spawn_failure_propagates_and_closes_log(self):
+        """Verify a spawn error propagates while the parent's log handle is closed."""
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(
                 registry.subprocess, 'Popen', side_effect=OSError('cannot start')
@@ -59,6 +64,7 @@ class TestProcessRegistry(unittest.TestCase):
             self.assertTrue(popen.call_args.kwargs['stdout'].closed)
 
     def test_unwritable_log_prevents_process_creation(self):
+        """Verify failure to open the log prevents starting the subprocess."""
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(registry.subprocess, 'Popen') as popen:
                 with self.assertRaises(IsADirectoryError):
@@ -66,6 +72,7 @@ class TestProcessRegistry(unittest.TestCase):
             popen.assert_not_called()
 
     def test_stop_all_stops_every_handle_and_clears_list_in_place(self):
+        """Verify every handle is stopped and existing aliases see the emptied list."""
         first, second = Mock(), Mock()
         handles = [first, None, second]
         alias = handles
@@ -78,6 +85,7 @@ class TestProcessRegistry(unittest.TestCase):
         self.assertEqual(alias, [])
 
     def test_shutdown_handles_scalar_and_list_entries_and_ignores_nonprocesses(self):
+        """Verify shutdown stops process entries, including those stored in lists."""
         first, second = Mock(spec=subprocess.Popen), Mock(spec=subprocess.Popen)
         registry._TOOLS.update(
             single=first, grouped=[None, second, 'metadata'], empty=[], other=None
@@ -87,6 +95,7 @@ class TestProcessRegistry(unittest.TestCase):
         self.assertEqual(kill.call_args_list, [call(first, grace=3.0), call(second, grace=3.0)])
 
     def test_permission_error_terminating_group_is_not_hidden(self):
+        """Verify denied process-group access propagates before waiting for exit."""
         proc = Mock(poll=Mock(return_value=None))
         with patch.object(registry.os, 'getpgid', side_effect=PermissionError('denied')):
             with self.assertRaisesRegex(PermissionError, 'denied'):
@@ -96,6 +105,7 @@ class TestProcessRegistry(unittest.TestCase):
 
 class TestDisplayProcesses(unittest.TestCase):
     def setUp(self):
+        """Replace display, process, and timing operations with isolated test doubles."""
         self.exists = self.enterContext(
             patch.object(registry.os.path, 'exists', return_value=False)
         )
@@ -106,6 +116,7 @@ class TestDisplayProcesses(unittest.TestCase):
         self.daemons = []
 
     def test_new_display_tracks_xvfb_without_probing_or_removing_locks(self):
+        """Verify an unused display starts Xvfb and records its process handle."""
         registry.ensure_xvfb(':99', self.daemons)
         self.spawn.assert_called_once_with(
             ['Xvfb', ':99', '-screen', '0', '1920x1080x24', '-nolisten', 'tcp'], '/tmp/xvfb99.log'
@@ -115,6 +126,7 @@ class TestDisplayProcesses(unittest.TestCase):
         self.remove.assert_not_called()
 
     def test_live_display_is_reused_without_claiming_ownership(self):
+        """Verify a running Xvfb is reused without recording it for later cleanup."""
         self.exists.return_value = True
         self.run.return_value.returncode = 0
         registry.ensure_xvfb(':98', self.daemons)
@@ -127,6 +139,7 @@ class TestDisplayProcesses(unittest.TestCase):
         self.assertEqual(self.daemons, [])
 
     def test_stale_display_removes_both_locks_even_if_one_removal_fails(self):
+        """Verify stale locks are both cleaned up before starting a replacement Xvfb."""
         self.exists.return_value = True
         self.run.return_value.returncode = 1
         self.remove.side_effect = [FileNotFoundError(), None]
@@ -138,6 +151,7 @@ class TestDisplayProcesses(unittest.TestCase):
         self.assertEqual(self.daemons, [self.spawn.return_value])
 
     def test_failed_xvfb_start_does_not_register_a_handle(self):
+        """Verify an Xvfb spawn error leaves the owned daemon list empty."""
         self.spawn.side_effect = OSError('Xvfb missing')
         with self.assertRaisesRegex(OSError, 'Xvfb missing'):
             registry.ensure_xvfb(':99', self.daemons)
@@ -145,6 +159,7 @@ class TestDisplayProcesses(unittest.TestCase):
         self.sleep.assert_not_called()
 
     def test_vnc_stack_reaps_old_handles_and_uses_requested_ports(self):
+        """Verify VNC startup replaces old daemons and uses the requested display and ports."""
         old, xvfb, vnc, web = Mock(), Mock(), Mock(), Mock()
         self.daemons.append(old)
         self.spawn.side_effect = [xvfb, vnc, web]

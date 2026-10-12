@@ -48,11 +48,13 @@ class TestMapArchive(unittest.TestCase):
         self.app.save_map_as.assert_called_once_with('copy')
 
     def test_callbacks_observe_updated_map_in_registration_order(self):
+        """Verify archive callbacks run in registration order after the map is updated."""
         events = []
         self.vm.register_map_archived_callback(lambda: events.append(('first', self.vm.map_name)))
         self.vm.register_map_archived_callback(lambda: events.append(('second', self.vm.map_name)))
 
         def archive():
+            """Record the old map and simulate the service publishing its replacement."""
             events.append(('archive', self.vm.map_name))
             on_changed = self.app.register_doc_changed_callback.call_args.args[0]
             on_changed(TopoDoc(name='default'))
@@ -64,6 +66,7 @@ class TestMapArchive(unittest.TestCase):
         self.app.archive_and_clear.assert_called_once_with()
 
     def test_failed_callback_propagates_and_does_not_run_later_callbacks(self):
+        """Verify a callback error propagates and prevents subsequent callbacks from running."""
         error = RuntimeError('refresh failed')
         self.archived.side_effect = error
         later = Mock()
@@ -75,6 +78,7 @@ class TestMapArchive(unittest.TestCase):
         later.assert_not_called()
 
     def test_saving_copy_keeps_live_map_and_does_not_notify_archive_callbacks(self):
+        """Verify a failed copy request preserves the live map without archive notifications."""
         self.app.save_map_as.return_value = 'ERROR: name exists'
         document = self.vm.topo_doc
         self.assertEqual(self.vm.save_map_as('existing'), 'ERROR: name exists')
