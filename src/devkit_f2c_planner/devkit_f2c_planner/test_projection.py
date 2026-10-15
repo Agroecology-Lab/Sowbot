@@ -21,11 +21,13 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float, radius: floa
 class ProjectionTest(unittest.TestCase):
 
     def test_anchor_maps_to_origin(self):
+        """Verify each projection anchor maps to the local origin."""
         for lat0, lon0 in ANCHORS:
             with self.subTest(anchor=(lat0, lon0)):
                 self.assertEqual(planner.f2c_latlon_to_xy(lat0, lon0, lat0, lon0), (0.0, 0.0))
 
     def test_one_degree_north_is_one_degree_of_arc_at_any_latitude(self):
+        """Verify a degree north has the same projected length at every anchor latitude."""
         for lat0, lon0 in ANCHORS:
             with self.subTest(anchor=(lat0, lon0)):
                 x, y = planner.f2c_latlon_to_xy(lat0 + 1, lon0, lat0, lon0)
@@ -33,6 +35,7 @@ class ProjectionTest(unittest.TestCase):
                 self.assertAlmostEqual(y, METRES_PER_DEGREE, delta=0.01)
 
     def test_east_is_scaled_by_cosine_of_anchor_latitude(self):
+        """Verify eastward projection scales longitude by the cosine of the anchor latitude."""
         for lat0, cos_lat0 in [(0.0, 1.0), (60.0, 0.5), (-60.0, 0.5)]:
             with self.subTest(lat0=lat0):
                 x, y = planner.f2c_latlon_to_xy(lat0, 1.0, lat0, 0.0)
@@ -40,6 +43,7 @@ class ProjectionTest(unittest.TestCase):
                 self.assertAlmostEqual(x, METRES_PER_DEGREE * cos_lat0, delta=0.01)
 
     def test_axes_point_east_and_north(self):
+        """Verify positive axes point east and north, and negative axes west and south."""
         lat0, lon0 = 55.0, -1.5
         x, y = planner.f2c_latlon_to_xy(lat0 + 0.001, lon0 + 0.001, lat0, lon0)
         self.assertGreater(x, 0)
@@ -49,6 +53,7 @@ class ProjectionTest(unittest.TestCase):
         self.assertLess(y, 0)
 
     def test_roundtrip_latlon_xy_latlon(self):
+        """Verify geographic coordinates survive projection to local metres and back."""
         for lat0, lon0 in ANCHORS:
             for dlat, dlon in [(0.01, 0.01), (-0.01, 0.02), (0.005, -0.015), (-0.02, -0.02)]:
                 with self.subTest(anchor=(lat0, lon0), offset=(dlat, dlon)):
@@ -58,6 +63,7 @@ class ProjectionTest(unittest.TestCase):
                     self.assertAlmostEqual(lon, lon0 + dlon, places=9)
 
     def test_roundtrip_xy_latlon_xy(self):
+        """Verify local coordinates survive conversion to latitude and longitude and back."""
         for lat0, lon0 in ANCHORS:
             for x, y in [(0.0, 0.0), (1500.0, 0.0), (0.0, -1500.0), (-800.0, 1200.0), (250.5, 250.5)]:
                 with self.subTest(anchor=(lat0, lon0), xy=(x, y)):

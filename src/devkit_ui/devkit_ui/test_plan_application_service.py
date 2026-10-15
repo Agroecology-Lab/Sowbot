@@ -18,6 +18,7 @@ SWATHS = [[(51.0, -2.0), (51.001, -2.0)], [(51.001, -1.999), (51.0, -1.999)]]
 
 class TestPlan(unittest.TestCase):
     def setUp(self) -> None:
+        """Create an empty plan harness with straight and contour planner mocks."""
         self.node = make_node([])
         self.run_f2c = self.enterContext(
             patch.object(plan_module, 'run_f2c', Mock(return_value=SWATHS)))
@@ -25,6 +26,7 @@ class TestPlan(unittest.TestCase):
             patch.object(plan_module, 'plan_contour_rows', Mock(return_value=None)))
 
     def test_fewer_than_three_corners_plan_nothing(self) -> None:
+        """Verify incomplete boundaries are rejected before calling the planner."""
         for corners in ([], CORNERS[:2]):
             with self.subTest(corners=len(corners)):
                 outcome = self.node.vm.plan(PlanRequest(corners_ll=corners))
@@ -35,6 +37,7 @@ class TestPlan(unittest.TestCase):
         self.assertEqual(self.node.vm.swaths, [])
 
     def test_straight_plan_runs_planner_and_keeps_swaths_anchored_at_first_corner(self) -> None:
+        """Verify straight planning forwards parameters and retains swaths with their origin."""
         request = PlanRequest(
             corners_ll=CORNERS, obstacle_rings=[[(1.0, 2.0)]], tool_width=2.5, angle_deg=30,
             headland_m=1.5, snake=False, obstacle_pad_m=0.4)
@@ -54,12 +57,15 @@ class TestPlan(unittest.TestCase):
         self.assertEqual(planned.break_after, frozenset())
 
     def test_snake_is_reported_and_angle_is_rounded(self) -> None:
+        """Verify the status includes snake ordering and the angle rounded to whole degrees."""
         outcome = self.node.vm.plan(PlanRequest(corners_ll=CORNERS, angle_deg=12.6))
 
         self.assertEqual(outcome.status, '2 rows · 1.2m wide · 13° · snake')
 
     def test_contour_plan_keeps_fragment_breaks_and_ignores_angle(self) -> None:
+        """Verify contour planning retains obstacle splits and omits the straight-row angle."""
         def contour_rows(*_args, break_after):
+            """Return canned contour swaths and mark the break after their first fragment."""
             break_after.add(0)
             return SWATHS
 
@@ -76,11 +82,13 @@ class TestPlan(unittest.TestCase):
         self.assertEqual(planned.break_after, {0})
 
     def test_blank_recon_path_uses_the_default_log(self) -> None:
+        """Verify a blank reconstruction path selects the default contour elevation log."""
         self.node.vm.plan(PlanRequest(corners_ll=CORNERS, contour=True, recon_path='  '))
 
         self.assertEqual(self.contour.call_args.args[6], plan_module.DEFAULT_RECON_PATH)
 
     def test_flat_field_falls_back_to_straight_rows(self) -> None:
+        """Verify absent contour swaths trigger straight planning and a fallback status."""
         outcome = self.node.vm.plan(PlanRequest(corners_ll=CORNERS, contour=True))
 
         self.run_f2c.assert_called_once()
@@ -90,6 +98,7 @@ class TestPlan(unittest.TestCase):
         self.assertFalse(self.node.service._planned.contour_used)
 
     def test_expected_failures_report_the_stage_and_keep_the_previous_plan(self) -> None:
+        """Verify expected planner errors identify the failing stage and preserve prior swaths."""
         self.node.vm.plan(PlanRequest(corners_ll=CORNERS))
         cases = (
             (False, self.run_f2c, ValueError('bad field'), 'Planning failed: bad field'),
@@ -105,6 +114,7 @@ class TestPlan(unittest.TestCase):
                 self.assertEqual(self.node.vm.swaths, SWATHS)
 
     def test_unexpected_failure_is_logged_and_reported(self) -> None:
+        """Verify unexpected planner exceptions are logged and returned as failed outcomes."""
         self.run_f2c.side_effect = RuntimeError('boom')
 
         with self.assertLogs(SERVICE_LOGGER, level='ERROR'):
@@ -116,6 +126,7 @@ class TestPlan(unittest.TestCase):
 
 class TestSaveWithoutRows(unittest.TestCase):
     def test_saving_before_planning_reports_and_writes_nothing(self) -> None:
+        """Verify saving without planned rows reports an error and skips persistence."""
         node = make_node([])
         node.service._planned = None
 
@@ -125,6 +136,7 @@ class TestSaveWithoutRows(unittest.TestCase):
         node.topology.persist_and_reload.assert_not_called()
 
     def test_planned_rows_can_be_saved_straight_after_planning(self) -> None:
+        """Verify a successful plan can immediately be saved as topology entry and exit nodes."""
         patch_row_geometry(self)
         node = make_node([])
         node.service._planned = None
@@ -139,10 +151,12 @@ class TestSaveWithoutRows(unittest.TestCase):
 
 class TestImportPlan(unittest.TestCase):
     def setUp(self) -> None:
+        """Create an empty plan harness and an import containing an obstacle-split row."""
         self.node = make_node([])
         self.text = _plan([_feat(ROW0, 0, 0), _feat(ROW0, 0, 1), _feat(ROW1, 1)])
 
     def test_simulation_imports_without_a_gps_check(self) -> None:
+        """Verify simulation imports preserve origin and split metadata without a GPS fix."""
         self.node.latest_gps = None
 
         status = self.node.vm.import_plan(self.text)
@@ -156,11 +170,13 @@ class TestImportPlan(unittest.TestCase):
         self.assertFalse(planned.contour_used)
 
     def test_contour_flag_is_kept(self) -> None:
+        """Verify importing a contour plan retains its contour flag for saving."""
         self.node.vm.import_plan(_plan([_feat(ROW0, 0)], contour=True))
 
         self.assertTrue(self.node.service._planned.contour_used)
 
     def test_hardware_needs_a_usable_fix(self) -> None:
+        """Verify hardware imports reject missing, zero, and nonfinite GPS coordinates."""
         self.node.is_sim = False
         for gps in (None, SimpleNamespace(latitude=0.0, longitude=0.0),
                     SimpleNamespace(latitude=float('nan'), longitude=-2.6)):
@@ -174,6 +190,7 @@ class TestImportPlan(unittest.TestCase):
                 self.assertEqual(self.node.vm.swaths, [])
 
     def test_hardware_refuses_a_plan_far_from_the_robot(self) -> None:
+        """Verify hardware imports reject plans outside the robot's allowed proximity."""
         self.node.is_sim = False
         self.node.latest_gps = SimpleNamespace(latitude=40.0, longitude=10.0)
 
@@ -183,12 +200,14 @@ class TestImportPlan(unittest.TestCase):
         self.assertEqual(self.node.vm.swaths, [])
 
     def test_hardware_accepts_a_plan_near_the_robot(self) -> None:
+        """Verify hardware imports accept a valid plan near the current GPS fix."""
         self.node.is_sim = False
         self.node.latest_gps = SimpleNamespace(latitude=51.45, longitude=-2.6)
 
         self.assertTrue(self.node.vm.import_plan(self.text).startswith('imported 3 rows'))
 
     def test_malformed_plan_reports_an_error_and_keeps_the_previous_plan(self) -> None:
+        """Verify invalid plan JSON reports an error and preserves the last imported swaths."""
         self.node.vm.import_plan(self.text)
 
         status = self.node.vm.import_plan('not json')
@@ -199,10 +218,12 @@ class TestImportPlan(unittest.TestCase):
 
 class TestWrites(unittest.TestCase):
     def setUp(self) -> None:
+        """Create a plan harness with one swath and deterministic row geometry."""
         patch_row_geometry(self)
         self.node = make_node([[(51.0, -2.0), (51.5, -1.5)]])
 
     def test_failed_write_reports_the_error_and_is_logged(self) -> None:
+        """Verify persistence failures are logged and exposed through the save status."""
         self.node.topology.persist_and_reload.side_effect = OSError('disk full')
 
         with self.assertLogs(SERVICE_LOGGER, level='ERROR'):
@@ -211,6 +232,7 @@ class TestWrites(unittest.TestCase):
         self.assertEqual(self.node.save_status, 'ERROR: disk full')
 
     def test_status_shows_how_the_map_went_live(self) -> None:
+        """Verify the save status uses the persistence result's description of map activation."""
         result = Mock()
         result.describe.return_value = 'saved 1 rows · CROP · standalone — live'
         self.node.topology.persist_and_reload.side_effect = None
@@ -222,10 +244,12 @@ class TestWrites(unittest.TestCase):
         self.assertEqual(self.node.save_status, 'saved 1 rows · CROP · standalone — live')
 
     def test_default_background_runs_the_write_on_another_thread(self) -> None:
+        """Verify the default background runner executes work on a separate daemon thread."""
         done = threading.Event()
         threads = []
 
         def work() -> None:
+            """Record the worker thread and signal that it ran."""
             threads.append(threading.current_thread())
             done.set()
 
@@ -238,6 +262,7 @@ class TestWrites(unittest.TestCase):
 
 class TestViewModel(unittest.TestCase):
     def test_repair_rejects_an_unknown_base_node_without_repairing(self) -> None:
+        """Verify an unknown base node sets an error before the repair service is called."""
         node = make_node([])
         node.service.repair_connectivity = Mock()
 
@@ -247,6 +272,7 @@ class TestViewModel(unittest.TestCase):
         node.service.repair_connectivity.assert_not_called()
 
     def test_repair_passes_the_row_action_and_base_node_on(self) -> None:
+        """Verify repair forwards the selected row action and optional base node."""
         node = make_node([])
         node.row_action = 'limbic_row_follow'
         node.doc = TopoDoc(name='field')
@@ -257,6 +283,7 @@ class TestViewModel(unittest.TestCase):
         node.service.repair_connectivity.assert_called_once_with('limbic_row_follow', None)
 
     def test_save_uses_the_current_row_action_and_selection(self) -> None:
+        """Verify saving forwards row options, the selected action, and both candidate nodes."""
         node = make_node([])
         node.service.save_rows = Mock()
         node.row_action = 'row_traversal'
