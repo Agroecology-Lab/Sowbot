@@ -34,7 +34,7 @@ class PlanViewModel:
 
     @property
     def save_status(self) -> str:
-        """Return the last save or repair status; an error starts with 'ERROR'."""
+        """Return the last save or repair status, including validation and write results."""
         return self._app_service.save_status
 
     def plan(self, request: PlanRequest) -> PlanOutcome:

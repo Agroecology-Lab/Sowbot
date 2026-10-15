@@ -29,6 +29,8 @@ class _RosLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         """Log the formatted record at the matching ROS severity.
 
+        ERROR and CRITICAL records use ROS error; levels below INFO use ROS debug.
+        Formatting or ROS logging failures are passed to logging.Handler.handleError.
         Each severity has its own call site because rclpy refuses a call site that changes
         severity between calls.
         """
@@ -85,9 +87,10 @@ class RosGateway:
     def forward_python_logging(self, name: str) -> None:
         """Route records from the Python logger called name, and its children, to the ROS log.
 
-        Services that stay free of ROS log through the logging module; without this their
-        warnings go to stderr and their info lines are dropped. Calling it again replaces the
-        earlier forwarding instead of doubling every line.
+        Set the named logger's level to INFO. Child records reach the handler through
+        normal logging propagation and remain subject to each child's level and filters.
+        Calling again replaces existing ROS forwarding handlers; other handlers and
+        propagation settings are preserved.
         """
         python_logger = logging.getLogger(name)
         for handler in list(python_logger.handlers):

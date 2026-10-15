@@ -31,8 +31,11 @@ class PlanRequest:
                   headland_m, snake, obstacle_pad_m, contour, recon_path, dem_res) -> PlanRequest:
         """Build a request from the raw Plan form values.
 
-        An empty or zero number takes its default, as the form always has: a 0 tool width
-        plans with 1.2 m and a 0 grid resolution with 1 m.
+        None, empty strings and numeric zero values use the defaults: 1.2 meters for
+        tool width, 1 meter for grid resolution, and zero for angle, headland and padding.
+        Numeric strings are converted with float; invalid strings raise ValueError and
+        unsupported values raise TypeError. Checkbox values use their truthiness.
+        Copy the boundary list; retain the supplied obstacle rings by reference.
         """
         return cls(
             corners_ll=list(corners_ll),

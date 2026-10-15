@@ -41,7 +41,10 @@ _SHAPELY_OFFSET_CURVE_MIN_VERSION = '2.0'
 
 def f2c_latlon_to_xy(lat: float, lon: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
-    """Project lat/lon to a local equirectangular xy frame anchored at (lat0, lon0)."""
+    """Project latitude/longitude degrees to (east, north) meters about (lat0, lon0).
+
+    The anchor is also in degrees; the projection uses a local equirectangular approximation.
+    """
     R = 6_378_137.0
     x = math.radians(lon - lon0) * R * math.cos(math.radians(lat0))
     y = math.radians(lat - lat0) * R
@@ -50,7 +53,10 @@ def f2c_latlon_to_xy(lat: float, lon: float,
 
 def f2c_xy_to_latlon(x: float, y: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
-    """Inverse of f2c_latlon_to_xy: convert local xy back to lat/lon."""
+    """Return (latitude, longitude) degrees from local (east, north) meters.
+
+    Use the same anchor (lat0, lon0), in degrees, as f2c_latlon_to_xy.
+    """
     R   = 6_378_137.0
     lat = lat0 + math.degrees(y / R)
     lon = lon0 + math.degrees(x / (R * math.cos(math.radians(lat0))))
@@ -110,8 +116,24 @@ def run_f2c(corners_ll: list,
             backend: str = 'auto') -> list:
     """Generate straight-swath field rows for the boundary, clipped around obstacles.
 
+    corners_ll and obstacle_rings contain (latitude, longitude) points in degrees.
+    The first boundary corner anchors the local projection. tool_width is positive
+    row spacing in meters; angle_deg is counterclockwise from east, modulo 180.
+    Positive obstacle_pad_m expands obstacles and positive headland_width_m insets
+    the field, both in meters. An empty inset, or failed F2C headland generation,
+    falls back to the full boundary. snake_order reverses alternate swaths before
+    obstacle clipping; clipped fragments at most half a tool width long are dropped.
+
     backend: 'f2c' (Fields2Cover), 'shapely' (pure Python, runs in Pyodide)
     or 'auto' (f2c if importable, else shapely).
+
+    Returns lists of (latitude, longitude) points in traversal order, or an empty
+    list when no swaths survive. Uncaught geometry and swath-generation errors propagate.
+
+    Raises:
+        ValueError: backend is unknown.
+        ImportError: backend='f2c' is requested but Fields2Cover is unavailable.
+        IndexError: corners_ll is empty.
     """
     if backend == 'auto':
         backend = 'f2c' if f2c is not None else 'shapely'
@@ -472,7 +494,29 @@ def run_contour_f2c(corners_ll: list,
                       max_rows_each_side: int = 500,
                       extend_reference: bool = True,
                       *, break_after: set[int] | None = None) -> list:
-    """Generate contour rows; fill break_after with indices of gaps between fragments."""
+    """Generate rows at constant offsets from a reference curve, clipped to the field.
+
+    corners_ll, obstacle_rings and reference_line_ll contain (latitude, longitude)
+    points in degrees, projected about corners_ll[0]. tool_width is positive row
+    spacing in meters. Positive obstacle_pad_m expands obstacles; positive
+    headland_width_m insets the field, falling back to the full boundary if the
+    inset is empty or is not a single polygon.
+
+    extend_reference extends both ends along their end directions when the result
+    does not cross itself. Try up to max_rows_each_side offsets on each side, stopping
+    each side at its first unusable offset. Offset-curve errors are caught and stop
+    that side; other geometry errors propagate. These offsets approximate terrain
+    contours away from the reference line.
+
+    Return swaths as lists of (latitude, longitude) points, ordered by signed offset.
+    snake_order reverses alternate rows, including fragment order. With obstacles,
+    fragments at most half a tool width long are dropped. Return an empty list for
+    fewer than two reference points or when no rows survive. Empty corners_ll
+    raises IndexError.
+
+    If supplied, break_after is cleared and filled with zero-based output indices
+    after which links must be skipped because of field or obstacle gaps.
+    """
 
     if break_after is None:
         break_after = set()

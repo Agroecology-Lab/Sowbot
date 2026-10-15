@@ -947,6 +947,7 @@ class NiceGuiNode(Node):
         plan_btn.on_click(do_plan)
 
         def do_save():
+            """Save planned rows using the current prefix, first row ID and overwrite option."""
             self._plan_vm.save_rows(
                 f2c_prefix.value or 'F2C',
                 int(f2c_row_id_start.value or 1),
@@ -955,8 +956,10 @@ class NiceGuiNode(Node):
         save_btn.on_click(do_save)
 
         async def do_repair():
-            """Open a dialog to repair row connectivity and optionally connect the repaired chain to
-            a base node.
+            """Ask for confirmation, then repair missing row edges in the loaded map.
+
+            The optional base node is validated and named in the status; repair does not
+            add splice edges to it. Return without opening a dialog if no map is loaded.
             """
             topo_doc = self._topo_doc
             if topo_doc is None:
@@ -1009,6 +1012,7 @@ class NiceGuiNode(Node):
 
         _save_prev = ['']
         def _refresh_save_status():
+            """Update the save label and its color when the plan service status changes."""
             cur = self._plan_vm.save_status
             if cur == _save_prev[0]:
                 return

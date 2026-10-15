@@ -63,7 +63,7 @@ class PlanApplicationService:
 
     @property
     def save_status(self) -> str:
-        """Return the last save or repair status; an error starts with 'ERROR'."""
+        """Return the last save or repair status, including validation and write results."""
         return self._save_status
 
     def set_status(self, text: str) -> None:
@@ -74,8 +74,10 @@ class PlanApplicationService:
         """Plan straight or contour rows for the boundary and keep them for saving.
 
         Blocks on terrain and planner work, so call it from a worker thread. Contour mode
-        falls back to straight rows when the field is flat. A failed run reports why in the
-        outcome and keeps the previously planned rows.
+        falls back to straight rows when no usable reference contour exists, using the
+        requested angle. With fewer than three corners or a caught planner exception, return
+        a failed outcome and keep the previous plan. A successful run replaces it,
+        even when no rows survive.
         """
         if len(request.corners_ll) < MIN_CORNERS:
             return PlanOutcome(False, f'Need at least {MIN_CORNERS} corners')
@@ -124,8 +126,11 @@ class PlanApplicationService:
     def import_plan(self, text: str) -> str:
         """Load a web-planner plan as the planned rows so they can be saved.
 
-        Returns a status string; does not touch the topology map. Hardware refuses a plan
-        with no GPS fix to check it against, or one far from the robot.
+        Returns a status string; does not touch the topology map. Hardware requires finite
+        GPS coordinates with at least one absolute value above 1e-9 degrees, and rejects
+        a plan whose row-endpoint center is more than 2,000 meters from the robot.
+        Simulation skips these GPS checks. PlanError becomes an 'ERROR:' status and leaves
+        the previous plan intact; other parser errors propagate.
         """
         robot_ll = None
         gps = self._telemetry.latest_gps

@@ -14,6 +14,17 @@ from devkit_ui.dem import build_elevation_grid, load_recon_points, select_refere
 
 def plan_contour(corners_ll, obstacle_rings, csv_text, tool_width, pad_m, headland_m,
                  snake, resolution_m=1.0):
+    """Plan contour rows from recon CSV text for a boundary in latitude/longitude degrees.
+
+    tool_width is row spacing, pad_m expands obstacles, headland_m insets the field,
+    and resolution_m is the elevation grid cell size, all in meters. snake reverses
+    alternate rows. Return lists of (latitude, longitude) points, an empty list if
+    no rows survive, or None if no usable reference contour exists.
+
+    The temporary CSV is removed after loading, including on a load failure.
+    CSV I/O, column and numeric errors, interpolation errors, and uncaught planner
+    errors propagate; see load_recon_points, build_elevation_grid and run_contour_f2c.
+    """
     with tempfile.NamedTemporaryFile('w', suffix='.csv', delete=False, newline='') as f:
         f.write(csv_text)
         path = f.name
