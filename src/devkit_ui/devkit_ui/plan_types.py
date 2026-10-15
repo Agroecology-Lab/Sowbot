@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 MIN_CORNERS = 3
 
 

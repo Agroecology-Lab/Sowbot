@@ -12,8 +12,8 @@ import numpy as np
 
 from devkit_f2c_planner.f2c_planner import (
     f2c_latlon_to_xy,
-    run_contour_f2c,
     field_centroid_xy,
+    run_contour_f2c,
 )
 from devkit_ui.dem import (
     build_elevation_grid,
