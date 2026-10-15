@@ -1,4 +1,4 @@
-"""Unit tests for _run_contour_f2c() (shapely offset rows; no fields2cover involved)."""
+"""Unit tests for run_contour_f2c() (shapely offset rows; no fields2cover involved)."""
 # pylint: disable=protected-access
 import unittest
 
@@ -13,8 +13,8 @@ TOLERANCE_M = 1e-3
 
 
 def contour_rows(reference_xy: list | None = None, obstacles_xy: list | None = None, **kwargs) -> list:
-    """Run _run_contour_f2c() on the fixture field; returns rows in local xy metres."""
-    rows_ll = planner._run_contour_f2c(
+    """Run run_contour_f2c() on the fixture field; returns rows in local xy metres."""
+    rows_ll = planner.run_contour_f2c(
         to_ll(FIELD_XY), [to_ll(ring) for ring in obstacles_xy or []],
         to_ll(reference_xy or REFERENCE_XY), TOOL_WIDTH, **kwargs)
     return [to_xy(row) for row in rows_ll]
@@ -127,7 +127,7 @@ class ContourRowsTest(unittest.TestCase):
             for obstacles in ([], [to_ll(obstacle)]):
                 with self.subTest(snake=snake, obstacles=bool(obstacles)):
                     breaks = {999}
-                    rows = planner._run_contour_f2c(
+                    rows = planner.run_contour_f2c(
                         to_ll(field), obstacles, to_ll([(0, 30), (100, 30)]),
                         TOOL_WIDTH, snake_order=snake, break_after=breaks)
                     rows = [to_xy(row) for row in rows]
@@ -139,7 +139,7 @@ class ContourRowsTest(unittest.TestCase):
     def test_row_that_reenters_the_field_keeps_all_its_pieces(self):
         """A concave field splits a row in two; the old code dropped it and stopped planning."""
         field_xy = [(0, 0), (100, 0), (100, 50), (60, 50), (60, 20), (40, 20), (40, 50), (0, 50)]
-        rows_ll = planner._run_contour_f2c(
+        rows_ll = planner.run_contour_f2c(
             to_ll(field_xy), [], to_ll([(0, 30), (100, 30)]), TOOL_WIDTH, snake_order=False)
         rows = [to_xy(row) for row in rows_ll]
         top = [row for row in rows if row_y(row) > 21]

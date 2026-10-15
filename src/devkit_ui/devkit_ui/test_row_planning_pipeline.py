@@ -5,7 +5,7 @@ from unittest import mock
 
 import numpy as np
 
-from devkit_f2c_planner.f2c_planner import _f2c_xy_to_latlon
+from devkit_f2c_planner.f2c_planner import f2c_xy_to_latlon
 from devkit_ui import row_planning
 
 
@@ -17,7 +17,7 @@ class TestContourPipeline(unittest.TestCase):
         self.obstacles = [[(48.0047, 3.6645), (48.0048, 3.6645), (48.0047, 3.6646)]]
         self.xy = np.array([[25.0, -10.0], [-15.0, 20.0], [0.0, 0.0]])
         self.native_xy = self.xy + np.array([8000.0, -3000.0])
-        self.latlon = np.array([_f2c_xy_to_latlon(x, y, *self.anchor) for x, y in self.xy])
+        self.latlon = np.array([f2c_xy_to_latlon(x, y, *self.anchor) for x, y in self.xy])
         self.elevation = np.array([102.5, 107.0, 104.0])
         self.grid = np.array([[102.5, 104.0], [105.0, 107.0]])
         self.origin = (-15.0, -10.0)
@@ -32,7 +32,7 @@ class TestContourPipeline(unittest.TestCase):
         self.enterContext(mock.patch.multiple(
             row_planning, load_recon_points=self.load, build_elevation_grid=self.build,
             field_centroid_xy=self.find_centroid, select_reference_contour_latlon=self.select,
-            _run_contour_f2c=self.run,
+            run_contour_f2c=self.run,
         ))
 
     def plan(self, *, snake=False, **kwargs):

@@ -38,9 +38,9 @@ def load_mission_harness():
         'SimAssetService', 'SimWorldService',
         'RobotBrainApplicationService',
         'RowDiscoveryApplicationService', 'NavigationApplicationService',
-        'TelemetryApplicationService',
+        'TelemetryApplicationService', 'PlanApplicationService',
         'GlobalViewModel', 'RunViewModel', 'TopologyViewModel', 'TelemetryViewModel',
-        'RobotBrainViewModel', 'SimViewModel',
+        'RobotBrainViewModel', 'SimViewModel', 'PlanViewModel',
         'ObstacleManager', 'ObstacleViewModel', 'MissionStore', 'MissionDomainService', 'MissionApplicationService',
         'MissionViewModel', 'ui', 'String',
     )}

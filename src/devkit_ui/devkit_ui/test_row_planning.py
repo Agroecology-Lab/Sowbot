@@ -2,7 +2,7 @@ import math
 import unittest
 from unittest.mock import Mock, patch
 
-from devkit_f2c_planner.f2c_planner import _f2c_xy_to_latlon
+from devkit_f2c_planner.f2c_planner import f2c_xy_to_latlon
 from devkit_ui import row_planning
 from devkit_ui.row_planning import (
     headland_neighbour_pairs,
@@ -15,7 +15,7 @@ ANCHOR_LAT, ANCHOR_LON = 51.0, -2.0
 
 def row_from_xy(*points_xy: tuple[float, float]) -> list[tuple[float, float]]:
     """Build a lat/lon row from local xy points anchored at the test origin."""
-    return [_f2c_xy_to_latlon(x, y, ANCHOR_LAT, ANCHOR_LON) for x, y in points_xy]
+    return [f2c_xy_to_latlon(x, y, ANCHOR_LAT, ANCHOR_LON) for x, y in points_xy]
 
 
 def resample(row: list, interval_m: float) -> list[tuple[float, float]]:
@@ -77,7 +77,7 @@ class TestResampleRowXy(unittest.TestCase):
     def test_exit_clearance_boundary_keeps_exactly_thirty_percent(self) -> None:
         """Keep the last waypoint at the clearance threshold, but not just below it."""
         # NOTE: Exact local coordinates isolate the boundary from projection roundoff.
-        with patch.object(row_planning, '_f2c_latlon_to_xy', side_effect=lambda x, y, *_: (x, y)):
+        with patch.object(row_planning, 'f2c_latlon_to_xy', side_effect=lambda x, y, *_: (x, y)):
             for length, expected in (
                 (22.999, [(10.0, 0.0)]),
                 (23.0, [(10.0, 0.0), (20.0, 0.0)]),
@@ -204,7 +204,7 @@ class TestPlanContourRows(unittest.TestCase):
             build_elevation_grid=Mock(return_value=([[1.0]], (0.0, 0.0), 0.0)),
             field_centroid_xy=Mock(return_value=(0.0, 0.0)),
             select_reference_contour_latlon=Mock(return_value=reference_line),
-            _run_contour_f2c=run_contour,
+            run_contour_f2c=run_contour,
         ))
         return run_contour
 

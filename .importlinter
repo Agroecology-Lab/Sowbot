@@ -91,3 +91,16 @@ ignore_imports =
     devkit_ui.domain_services.topology_domain_service -> rclpy
     devkit_ui.obstacles -> rclpy
     devkit_ui.qos -> rclpy
+
+[importlinter:contract:planning-via-plan-service]
+name = Field planning and plan import go through the Plan service
+type = forbidden
+source_modules =
+    devkit_ui.ui_node
+    devkit_ui.pages
+    devkit_ui.view_models
+forbidden_modules =
+    devkit_f2c_planner
+    devkit_ui.row_planning
+    devkit_ui.plan_import
+allow_indirect_imports = True

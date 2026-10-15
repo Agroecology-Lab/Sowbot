@@ -3,12 +3,12 @@
 - ``planner``: f2c_planner imported even where fields2cover is not installed
   (fields2cover is built in docker/Dockerfile and is not pip-installable in CI).
   Only the shapely-based functions work without it; tests that go through
-  ``_run_f2c()`` patch ``planner.f2c`` with ``FakeF2C``.
+  ``run_f2c()`` patch ``planner.f2c`` with ``FakeF2C``.
 - ``to_ll`` / ``to_xy``: build fixtures in metres and convert them with the
   planner's own projection. The projection itself is tested independently in
   test_projection.py.
 - ``FakeF2C``: records calls and returns canned swaths. It mirrors only the
-  fields2cover calls made by ``_run_f2c()``, so it tests the planner's own
+  fields2cover calls made by ``run_f2c()``, so it tests the planner's own
   logic (ordering, clipping, projection), not fields2cover.
 """
 # pylint: disable=invalid-name,protected-access
@@ -38,12 +38,12 @@ planner = _import_planner()
 
 def to_ll(points_xy: list, lat0: float = LAT0, lon0: float = LON0) -> list:
     """Local xy metres -> lat/lon, anchored at (lat0, lon0) == xy (0, 0)."""
-    return [planner._f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in points_xy]
+    return [planner.f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in points_xy]
 
 
 def to_xy(points_ll: list, lat0: float = LAT0, lon0: float = LON0) -> list:
     """lat/lon -> local xy metres, anchored at (lat0, lon0)."""
-    return [planner._f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in points_ll]
+    return [planner.f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in points_ll]
 
 
 def silence_planner_log(test: unittest.TestCase) -> None:
@@ -118,7 +118,7 @@ class _FakeSwaths:
 
 
 class FakeF2C:
-    """Canned stand-in for the ``fields2cover`` module, as used by ``_run_f2c()``.
+    """Canned stand-in for the ``fields2cover`` module, as used by ``run_f2c()``.
 
     swaths_xy       swaths (lists of local-xy points) returned by SG_BruteForce
     headland_cells  cells returned by the headland generator (default: one inset cell)

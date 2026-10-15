@@ -26,7 +26,7 @@ insertion = (
     "\n\n"
     "def field_centroid_xy(corners_ll: list) -> tuple[float, float]:\n"
     "    \"\"\"Field boundary's spatial centroid, in the same local-xy frame\n"
-    "    _run_f2c()/_run_contour_f2c() use (anchored at corners_ll[0]).\n"
+    "    run_f2c()/_run_contour_f2c() use (anchored at corners_ll[0]).\n"
     "\n"
     "    Callers pass this straight through as dem.select_reference_contour_xy()'s\n"
     "    centroid_xy argument, to get a reference contour centred on the field —\n"

@@ -78,7 +78,7 @@ flowchart TB
     subgraph PURE["Pure modules and packages (no ROS, no UI)"]
       RowBuilder["topo_row_builder<br/>(build and repair row nodes)"]
       RowPlanning["row_planning, plan_import"]
-      F2CPkg["devkit_f2c_planner<br/>(separate package, _run_f2c)"]
+      F2CPkg["devkit_f2c_planner<br/>(separate package, run_f2c)"]
     end
 
     subgraph INFRA["Infrastructure"]

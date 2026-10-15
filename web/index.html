@@ -177,7 +177,7 @@ with contextlib.redirect_stderr(io.StringIO()):
         rows=contour_web.plan_contour(r['field'],r['obs'],recon_csv,r['w'],r['p'],r['h'],r['s'],r['dr'])
     used=rows is not None
     if rows is None:
-        rows=P._run_f2c(r['field'],r['obs'],r['w'],r['a'],r['p'],r['h'],r['s'],backend='shapely')
+        rows=P.run_f2c(r['field'],r['obs'],r['w'],r['a'],r['p'],r['h'],r['s'],backend='shapely')
 rows=[[list(q) for q in row] for row in rows]
 tags=[[i,0] for i in range(len(rows))] if used else P.tag_rows(rows,r['field'],r['a'])
 o={'rows':rows,'tags':tags,'contour':used,'asked':r['c']}

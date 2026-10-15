@@ -68,3 +68,7 @@ docs/xml/
 # coverage.py output
 .coverage
 coverage.xml
+
+# Copied from src/ by .github/workflows/pages.yml at deploy time
+web/f2c_planner.py
+web/devkit_ui/

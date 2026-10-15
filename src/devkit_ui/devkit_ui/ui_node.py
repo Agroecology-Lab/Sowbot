@@ -3,7 +3,6 @@
 ui_node.py — Sowbot web cockpit on :80
 """
 
-import math
 import re
 import threading
 import traceback
@@ -22,11 +21,6 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import String
 
-# F2C: lat/lon<->XY projection + swath generator, now a standalone package
-# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
-from devkit_f2c_planner.f2c_planner import _run_f2c
-from devkit_ui import plan_import
-
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
@@ -34,6 +28,7 @@ from devkit_ui.application_services.mission_application_service import MissionAp
 from devkit_ui.application_services.navigation_application_service import (
     NavigationApplicationService,
 )
+from devkit_ui.application_services.plan_application_service import PlanApplicationService
 from devkit_ui.application_services.robot_brain_application_service import RobotBrainApplicationService
 from devkit_ui.application_services.row_discovery_application_service import (
     RowDiscoveryApplicationService,
@@ -87,13 +82,14 @@ from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.pages.sim.sim_page import SimPage
 from devkit_ui.pages.system.system_page import SystemPage
+from devkit_ui.plan_types import MIN_CORNERS, PlanRequest
 from devkit_ui.process_registry import shutdown_tools
 from devkit_ui.ros_gateway import RosGateway
-from devkit_ui.row_planning import plan_contour_rows
 from devkit_ui.topo_results import TopologyEditError
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.mission_view_model import MissionViewModel
 from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
+from devkit_ui.view_models.plan_view_model import PlanViewModel
 from devkit_ui.view_models.robot_brain_view_model import RobotBrainViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.sim_view_model import SimViewModel
@@ -138,6 +134,7 @@ class NiceGuiNode(Node):
 
         # Instantiate the temporary ROS gateway bridge to abstract underlying ROS nodes
         self._ros = RosGateway(self)
+        self._ros.forward_python_logging('devkit_ui')
 
         # The sim flag is the authoritative signal, plumbed from manage.py's is_sim through
         # devkit.launch.py -> ui.launch.py.
@@ -168,6 +165,9 @@ class NiceGuiNode(Node):
         self._nav_app_service = NavigationApplicationService(self._nav_domain_service)
         self._telemetry_app_service = TelemetryApplicationService(
             self._telemetry_domain_service)
+        self._plan_app_service = PlanApplicationService(
+            self._topo_app_service, self._topo_edit_service, self._telemetry_app_service,
+            is_sim=self._is_sim)
 
         # Initialize view models
         self._global_vm = GlobalViewModel(self._drive_app_service)
@@ -175,6 +175,7 @@ class NiceGuiNode(Node):
             self._drive_app_service, self._row_discovery_app_service, self._nav_app_service)
         self._topo_vm = TopologyViewModel(self._topo_app_service)
         self._topo_vm.register_map_archived_callback(self._on_map_archived)
+        self._plan_vm = PlanViewModel(self._plan_app_service, self._topo_vm, self._run_vm)
         self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
         self._robot_brain_vm = RobotBrainViewModel(self._robot_brain_app_service)
         sim_assets = SimAssetService()
@@ -200,15 +201,6 @@ class NiceGuiNode(Node):
         self._track_timer:   object  | None   = None
         self._track_counter: int              = 0
         self._track_first:   bool             = True
-
-        self._f2c_swaths:     list  = []
-        self._f2c_row_start:  int   = 1
-        self._f2c_tool_width: float = 1.2
-        self._f2c_angle_deg:  float = 0.0
-        self._f2c_contour_used: bool = False
-        self._f2c_origin_ll = None
-        self._f2c_break_after: set = set()
-        self.f2c_save_status: str   = ''
 
         # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher; the view model is what
         # the cards bind to. Start after the telemetry service exists so the getters resolve.
@@ -467,100 +459,6 @@ class NiceGuiNode(Node):
         threading.Thread(target=_work, daemon=True).start()
 
     # ── F2C → topo rows ──────────────────────────────────────────────────────
-
-    def import_plan_geojson(self, text: str) -> str:
-        """Load a web-planner plan into the F2C state so 'Save as Topo Rows' can build nodes.
-
-        Returns a status string; does not touch the topo map itself.
-        """
-        robot_ll = None
-        if self.latest_gps is not None:
-            lat, lon = self.latest_gps.latitude, self.latest_gps.longitude
-            if math.isfinite(lat) and math.isfinite(lon) and (abs(lat) > 1e-9 or abs(lon) > 1e-9):
-                robot_ll = (lat, lon)
-        if robot_ll is None and not self._is_sim:
-            return 'ERROR: no GPS fix; cannot check the plan is near the robot'
-        try:
-            plan = plan_import.parse_plan(text, robot_ll=None if self._is_sim else robot_ll)
-        except plan_import.PlanError as e:
-            return f'ERROR: {e}'
-        self._f2c_swaths = plan.swaths
-        self._f2c_origin_ll = plan.origin_ll
-        self._f2c_contour_used = bool(plan.params.get('contour'))
-        self._f2c_break_after = plan.break_after
-        if plan.params.get('tool_width'):
-            self._f2c_tool_width = float(plan.params['tool_width'])
-        split = (
-            f' · {len(plan.break_after)} obstacle splits (not linked)' if plan.break_after else '')
-        return f'imported {len(plan.swaths)} rows{split}; review, then Save as Topo Rows'
-
-    def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int,
-                              overwrite: bool = False) -> None:
-        """Save the most recently planned F2C swaths as rows in the loaded topology map.
-
-        In-row edges use the selected row action and headland edges use point-to-point
-        navigation. Validation failures (no prefix, planned swaths, GPS fix, map or
-        odometry, or unusable GPS coordinates) are reported in ``f2c_save_status`` and
-        write nothing. Persistence runs in the background, and worker errors are also
-        reported in ``f2c_save_status``. Errors from ``build_row_nodes`` propagate
-        synchronously before persistence is scheduled. The rules live in
-        TopologyEditService.stage_f2c_save.
-
-        Args:
-            prefix: Prefix for the generated node names. Surrounding whitespace is
-                stripped, letters are uppercased, spaces become underscores, and
-                characters outside ``A-Z``, ``0-9`` and ``_`` are removed.
-            row_id_start: Row id given to the first planned swath.
-            overwrite: Replace existing ``<prefix>_R*`` nodes instead of skipping
-                names that are already taken.
-        """
-        odom = self.latest_odom
-        try:
-            edit = self._topo_edit_service.stage_f2c_save(
-                prefix, row_id_start, overwrite,
-                swaths=self._f2c_swaths, origin_ll=self._f2c_origin_ll,
-                contour_used=self._f2c_contour_used, break_after=self._f2c_break_after,
-                is_sim=self._is_sim,
-                odom_xy=(odom.pose.pose.position.x, odom.pose.pose.position.y)
-                if odom else None,
-                gps=self.latest_gps, row_action=self._row_action,
-                current_node=self._topo_vm.current_node,
-                selected_node=self._topo_vm.selected_node)
-        except TopologyEditError as e:
-            self._log_edit_lines(e.warnings, ())
-            self.f2c_save_status = str(e)
-            return
-        self._log_edit_lines(edit.warnings, edit.infos)
-        self.f2c_save_status = edit.pending
-        self._persist_and_reload(edit.modify, self, 'f2c_save_status', edit.success)
-
-    # ── Repair row connectivity ──────────────────────────────────────────────
-
-    def repair_row_connectivity(self, connect_to: str | None = None) -> None:
-        """Rebuild missing in-row and headland edges for rows already in the loaded map.
-
-        New in-row edges use the selected row action, and existing edge actions are
-        kept. The in-memory map is updated immediately and the change is persisted in
-        the background. Validation failures and worker errors are reported in
-        ``f2c_save_status``. No persistence is scheduled if no edges are added.
-
-        Parameters:
-            connect_to (str | None): Optional node name used only in the success status
-                text; it does not add connections. An unknown node is ignored.
-
-        Raises:
-            OverflowError: Row metadata contains an infinite row ID; propagated
-                from ``plan_row_repair`` before any edges are added.
-        """
-        try:
-            edit = self._topo_edit_service.stage_repair(self._row_action, connect_to)
-        except TopologyEditError as e:
-            self._log_edit_lines(e.warnings, ())
-            self.f2c_save_status = str(e)
-            return
-        self._log_edit_lines(edit.warnings, edit.infos)
-        self.f2c_save_status = edit.pending
-        self._persist_and_reload(edit.modify, self, 'f2c_save_status', edit.success)
 
     # ── Delete topo nodes / rows ─────────────────────────────────────────────
 
@@ -844,7 +742,7 @@ class NiceGuiNode(Node):
                 # CONTOUR: terrain-following rows instead of one fixed
                 # angle — offsets from a reference elevation isoline
                 # (dem.select_reference_contour_latlon()) rather than
-                # F2C's SG_BruteForce. See f2c_planner._run_contour_f2c()'s
+                # F2C's SG_BruteForce. See f2c_planner.run_contour_f2c()'s
                 # module comment for why this isn't a config flag on F2C.
                 ui.html('<div class="sec-label mt-3">Contour rows</div>')
                 f2c_contour = ui.checkbox(
@@ -930,7 +828,7 @@ class NiceGuiNode(Node):
                 async def do_import(e):
                     """Import an uploaded plan and update its status and save button."""
                     data = (await e.file.read()) if hasattr(e, 'file') else e.content.read()
-                    msg = self.import_plan_geojson(data.decode('utf-8', errors='replace'))
+                    msg = self._plan_vm.import_plan(data.decode('utf-8', errors='replace'))
                     f2c_status.set_text(msg)
                     f2c_status.style(
                         'color:' + ('#cf222e' if msg.startswith('ERROR') else '#1a7f37'))
@@ -1002,9 +900,9 @@ class NiceGuiNode(Node):
         clear_btn.on_click(do_clear)
 
         async def do_plan():
-            """Run straight or contour F2C planning for the drawn boundary and render the swaths."""
-            if len(corners_ll) < 3:
-                f2c_status.set_text('Need at least 3 corners')
+            """Plan rows for the drawn boundary on a worker thread and render the swaths."""
+            if len(corners_ll) < MIN_CORNERS:
+                f2c_status.set_text(f'Need at least {MIN_CORNERS} corners')
                 f2c_status.style('color:#cf222e')
                 return
 
@@ -1012,51 +910,15 @@ class NiceGuiNode(Node):
             f2c_status.set_text('Running F2C…')
             f2c_status.style('color:#57606a')
 
-            width      = float(f2c_width.value or 1.2)
-            angle_deg  = float(f2c_angle.value or 0)
-            row_start  = int(f2c_row_id_start.value or 1)
-            headland_m = float(f2c_headland.value or 0.0)
-            snake      = bool(f2c_snake.value)
-            contour_on = bool(f2c_contour.value)
-
-            # OBSTACLE: snapshot obstacle rings and pad
-            obstacle_rings = self._obstacle_vm.rings_ll()
-            pad_m          = float(obstacle_pad.value or 0.0)
-
-            mode_note = ''
-            contour_used = False
-            break_after: set[int] = set()
-            try:
-                if contour_on:
-                    recon_path = (f2c_recon_path.value or '').strip() or \
-                        '/workspace/maps/recon_logs/recon.csv'
-                    dem_res = float(f2c_dem_res.value or 1.0)
-                    swaths = await ng_run.io_bound(
-                        plan_contour_rows, list(corners_ll), obstacle_rings,
-                        width, pad_m, headland_m, snake, recon_path, dem_res,
-                        break_after=break_after)
-                    if swaths is None:
-                        mode_note = ' · flat field, straight swaths used'
-                        swaths = await ng_run.io_bound(
-                            _run_f2c, list(corners_ll), obstacle_rings,
-                            width, angle_deg, pad_m, headland_m, snake)
-                    else:
-                        mode_note = ' · contour rows'
-                        contour_used = True
-                else:
-                    swaths = await ng_run.io_bound(
-                        _run_f2c, list(corners_ll), obstacle_rings,
-                        width, angle_deg, pad_m, headland_m, snake)
-            except (FileNotFoundError, ValueError) as exc:
-                stage = 'Contour planning' if contour_on else 'Planning'
-                f2c_status.set_text(f'{stage} failed: {exc}')
-                f2c_status.style('color:#cf222e')
-                plan_btn.set_enabled(True)
-                return
-            except Exception as exc:
-                self.get_logger().error(
-                    f'do_plan failed: {exc} ({type(exc)}\n{traceback.format_exc()})')
-                f2c_status.set_text(f'ERROR: {exc}')
+            request = PlanRequest.from_form(
+                corners_ll, self._obstacle_vm.rings_ll(),
+                tool_width=f2c_width.value, angle_deg=f2c_angle.value,
+                headland_m=f2c_headland.value, snake=f2c_snake.value,
+                obstacle_pad_m=obstacle_pad.value, contour=f2c_contour.value,
+                recon_path=f2c_recon_path.value, dem_res=f2c_dem_res.value)
+            outcome = await ng_run.io_bound(self._plan_vm.plan, request)
+            if not outcome.ok:
+                f2c_status.set_text(outcome.status)
                 f2c_status.style('color:#cf222e')
                 plan_btn.set_enabled(True)
                 return
@@ -1068,7 +930,7 @@ class NiceGuiNode(Node):
                     pass
             swath_layers.clear()
 
-            for pts in swaths:
+            for pts in outcome.swaths:
                 latlngs = [[lat, lon] for lat, lon in pts]
                 lyr = mission_map.generic_layer(
                     name='polyline',
@@ -1077,35 +939,15 @@ class NiceGuiNode(Node):
                 )
                 swath_layers.append(lyr)
 
-            self._f2c_swaths     = swaths
-            self._f2c_row_start  = row_start
-            self._f2c_tool_width = width
-            self._f2c_angle_deg  = angle_deg
-            self._f2c_contour_used = contour_used
-            # Field reference origin = first boundary corner, the same lat0/lon0
-            # _run_f2c projected from. The save path re-anchors to this so the
-            # lat/lon round-trip cancels and rows land at the local odom origin
-            # — instead of being offset by the distance between the field and
-            # whatever latest_gps happened to read (in sim, the datum fix).
-            self._f2c_origin_ll = tuple(corners_ll[0]) if corners_ll else None
-            self._f2c_break_after = break_after
-
-            hl_note  = f' · {headland_m}m headland' if headland_m > 0 else ''
-            snk_note = ' · snake' if snake else ''
-            obs_note = (f' · {len(obstacle_rings)} obs avoided'
-                        if obstacle_rings else '')
-            angle_note = '' if contour_used else f' · {angle_deg:.0f}°'
-            f2c_status.set_text(
-                f'{len(swaths)} rows · {width}m wide{angle_note}'
-                f'{hl_note}{snk_note}{obs_note}{mode_note}')
+            f2c_status.set_text(outcome.status)
             f2c_status.style('color:#1a7f37')
             plan_btn.set_enabled(True)
-            save_btn.set_enabled(bool(swaths))
+            save_btn.set_enabled(bool(outcome.swaths))
 
         plan_btn.on_click(do_plan)
 
         def do_save():
-            self.save_f2c_rows_to_topo(
+            self._plan_vm.save_rows(
                 f2c_prefix.value or 'F2C',
                 int(f2c_row_id_start.value or 1),
                 overwrite=f2c_overwrite.value,
@@ -1161,17 +1003,13 @@ class NiceGuiNode(Node):
             if result != 'ok':
                 return
 
-            base = (base_input.value or '').strip()
-            if base and not topo_doc.has_node(base):
-                self.f2c_save_status = f'ERROR: base node {base!r} not in map'
-                return
-            self.repair_row_connectivity(connect_to=base or None)
+            self._plan_vm.repair((base_input.value or '').strip() or None)
 
         repair_btn.on_click(do_repair)
 
         _save_prev = ['']
         def _refresh_save_status():
-            cur = self.f2c_save_status
+            cur = self._plan_vm.save_status
             if cur == _save_prev[0]:
                 return
             _save_prev[0] = cur
