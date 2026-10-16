@@ -17,7 +17,7 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 
 ```
 +---------------------------------------------------------------------------------------------------------+
-|                                    ROS 2 DUAL COMPANION SYSTEM                                          |
+|                                    ROS 2 DUAL SBC Open Core                                             |
 |                                                                                                         |
 |  +-------------------------------------+             +-----------------------------------------------+  |
 |  |              NEO SBC                |             |                  LIMBIC SBC                   |  |
