@@ -56,8 +56,8 @@ class PlanPageState:
     the attributes and call subscribe to be told when any of them changed. Nothing here
     imports the UI.
 
-    A planning run is stamped with a generation when it starts. clear() starts a new one, so
-    a run that finishes after Clear is discarded instead of restoring rows or a draft.
+    A planning run is stamped with a generation when it starts. Clearing or successfully
+    importing a plan starts a new one, so a run that finishes later is discarded.
     """
 
     def __init__(self) -> None:
@@ -124,7 +124,7 @@ class PlanPageState:
         return PlanRun(request, self._generation)
 
     def finish_plan(self, run: PlanRun, view: PlanView) -> bool:
-        """Apply a finished run's result; return False if Clear or a newer run made it stale.
+        """Apply a run's result; return False if Clear, an import or a newer run made it stale.
 
         A failed run keeps the earlier draft. A successful one replaces it.
         """
@@ -143,9 +143,12 @@ class PlanPageState:
     def apply_import(self, view: PlanView) -> None:
         """Take an imported plan as the draft, or show why it could not be read.
 
+        A successful import discards any planning run still in flight and allows planning.
         A failed import keeps the earlier draft, and Save is enabled only after a good one.
         """
         if view.ok:
+            self._generation += 1
+            self.can_plan = True
             self.draft = view.planned
         self.can_save = view.ok
         self._set_status(view.status, STATUS_OK if view.ok else STATUS_ERROR)
