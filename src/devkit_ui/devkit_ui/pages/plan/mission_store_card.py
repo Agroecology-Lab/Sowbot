@@ -60,10 +60,11 @@ class MissionStoreCard(ui.column):
         self._vm.save_queue(self._queue.items, self._name.value or '', repeat)
 
     def _refresh(self) -> None:
-        """Show the status; rebuild the saved list and the Run button state if the store changed."""
+        """Show status and Run button state; rebuild the saved list if the store changed."""
         status = self._vm.status
         self._status_lbl.set_text(status)
         self._status_lbl.style(RED if status.startswith('ERROR') else GREEN if status else GREY)
+        self._set_run_enabled(not self._vm.running)
 
         version = self._vm.version
         if version == self._version:
@@ -73,7 +74,6 @@ class MissionStoreCard(ui.column):
         missions = self._vm.missions
         self._missions_col.clear()
         self._empty_lbl.set_visibility(not missions)
-        self._set_run_enabled(not self._vm.running)
         with self._missions_col:
             for mission in missions:
                 self._add_mission(mission)

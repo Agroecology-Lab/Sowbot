@@ -2,6 +2,7 @@
 # pylint: disable=keyword-arg-before-vararg
 import asyncio
 import sys
+from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -119,7 +120,9 @@ class Dialog(Element):
         self.submitted.append(result)
 
     def __await__(self):
-        return fake_ui.answer_dialog(self)
+        answer_dialog = fake_ui.answer_dialog
+        assert answer_dialog is not None
+        return answer_dialog(self)
         yield  # pylint: disable=unreachable
 
 
@@ -133,7 +136,7 @@ class FakeUi:
         self.context = []
         self.elements = []
         self.timers = []
-        self.answer_dialog = None
+        self.answer_dialog: Callable[[Dialog], str] | None = None
 
     def reset(self) -> None:
         """Forget everything built so far."""

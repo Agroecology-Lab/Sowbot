@@ -1,18 +1,36 @@
 ## What the stack does
 
-The aim of #116 is to get logic out of `NiceGuiNode` (`ui_node.py`) into layers. On `caatinga-dev` it was 4,195 lines. On `ui-116-run-plan-sim-system` (head `caa70b9`) it is 1,589. On `ui-116-Plan-service-fixes` it is 838.
+The aim of #116 is to get logic out of `NiceGuiNode` (`ui_node.py`) into layers.
+On `caatinga-dev` it was 4,195 lines.
+On `ui-116-run-plan-sim-system` (head `caa70b9`) it is 1,589.
+On `ui-116-Plan-service-fixes` it is 838.
 
-| PR | Change |
-|---|---|
-| #152 Alan services | Drive, robot brain, row discovery and navigation as domain services, application services and view models |
-| #153 Telemetry | Odometry and GPS state moves into `TelemetryDomainService`, `TelemetryApplicationService` and `TelemetryViewModel` |
-| #156 Topo rows | Row geometry, contour planning, row building and repair become pure modules (`row_planning`, `topo_row_builder`, `plan_import`), with regression tests |
-| #158 RosGateway | Subscriptions, timers and tool publishers go through `RosGateway`. The mission executor moves into `MissionDomainService`, and `ObstacleManager` and `MissionStore` use the gateway too |
-| #161 Obstacles | `ObstacleViewModel`, and the obstacle cards move to `pages/obstacle_cards.py`. Saved missions sit behind `MissionViewModel` |
-| #162 Topology edits | `TopologyEditService` holds the rules for dropping a node, saving F2C rows, repairing and deleting. The node methods become thin wrappers |
-| #163 Sim assets | `SimAssetService` handles crop-model upload validation and writing, plus the soil zip import |
-| Branch `ui-116-run-plan-sim-system` (PR number to add) | UI split into Run, Plan, Sim and System tabs. `SimPage` and `SystemPage` are classes with their cards under `pages/sim/` and `pages/system/`. `SimWorldService` rebuilds the Gazebo world. Tool processes move into `process_registry`. Map archive goes behind `TopologyViewModel`. Layer rules are enforced with import-linter in CI (six contracts). 57 test files |
-| Branch `ui-116-Plan-service-fixes` (PR number to add) | `PlanApplicationService` plans rows, imports plans and saves them. It returns plain data and keeps no draft. `PlanViewModel` words the status and opens a `PlanPageState` per browser session (boundary, draft, status, button state). The Plan tab is `PlanPage`, with its cards under `pages/plan/`: boundary map, controls, repair dialog, mission queue, mission store. A planning result that arrives after Clear is discarded. A seventh import-linter contract keeps the node, pages and view models off the F2C planner, `row_planning` and `plan_import` |
+<table>
+<tr><th>PR</th><th>Change</th></tr>
+<tr><td>#152 Alan services</td><td>Drive, robot brain, row discovery and navigation as domain services, application services and view models</td></tr>
+<tr><td>#153 Telemetry</td><td>Odometry and GPS state moves into <code>TelemetryDomainService</code>, <code>TelemetryApplicationService</code> and <code>TelemetryViewModel</code></td></tr>
+<tr><td>#156 Topo rows</td><td>Row geometry, contour planning, row building and repair become pure modules (<code>row_planning</code>, <code>topo_row_builder</code>, <code>plan_import</code>), with regression tests</td></tr>
+<tr><td>#158 RosGateway</td><td>Subscriptions, timers and tool publishers go through <code>RosGateway</code>.
+The mission executor moves into <code>MissionDomainService</code>, and <code>ObstacleManager</code> and <code>MissionStore</code> use the gateway too</td></tr>
+<tr><td>#161 Obstacles</td><td><code>ObstacleViewModel</code>, and the obstacle cards move to <code>pages/obstacle_cards.py</code>.
+Saved missions sit behind <code>MissionViewModel</code></td></tr>
+<tr><td>#162 Topology edits</td><td><code>TopologyEditService</code> holds the rules for dropping a node, saving F2C rows, repairing and deleting.
+The node methods become thin wrappers</td></tr>
+<tr><td>#163 Sim assets</td><td><code>SimAssetService</code> handles crop-model upload validation and writing, plus the soil zip import</td></tr>
+<tr><td>Branch <code>ui-116-run-plan-sim-system</code> (PR number to add)</td><td>UI split into Run, Plan, Sim and System tabs.
+<code>SimPage</code> and <code>SystemPage</code> are classes with their cards under <code>pages/sim/</code> and <code>pages/system/</code>.
+<code>SimWorldService</code> rebuilds the Gazebo world.
+Tool processes move into <code>process_registry</code>.
+Map archive goes behind <code>TopologyViewModel</code>.
+Layer rules are enforced with import-linter in CI (six contracts).
+57 test files</td></tr>
+<tr><td>Branch <code>ui-116-Plan-service-fixes</code> (PR number to add)</td><td><code>PlanApplicationService</code> plans rows, imports plans and saves them.
+It returns plain data and keeps no draft.
+<code>PlanViewModel</code> words the status and opens a <code>PlanPageState</code> per browser session (boundary, draft, status, button state).
+The Plan tab is <code>PlanPage</code>, with its cards under <code>pages/plan/</code>: boundary map, controls, repair dialog, mission queue, mission store.
+A planning result that arrives after Clear is discarded.
+A seventh import-linter contract keeps the node, pages and view models off the F2C planner, <code>row_planning</code> and <code>plan_import</code></td></tr>
+</table>
 
 #155 (optical flow in Docker) and #157 (vendored skills) are unrelated to the refactor.
 
@@ -20,7 +38,9 @@ The three items listed as outstanding in the 9 October comment are done: the sub
 
 ## Diagram as built
 
-Solid arrows follow the dependency rule. Dashed arrows and red dashed boxes are known deviations, each listed under "Still open" below. The dotted arrows labelled "callback" and "live doc getter" are runtime callbacks.
+Solid arrows follow the dependency rule.
+Dashed arrows and red dashed boxes are known deviations, each listed under "Still open" below.
+The dotted arrows labelled "callback" and "live doc getter" are runtime callbacks.
 
 ```mermaid
 flowchart TB
@@ -198,28 +218,50 @@ flowchart TB
   style INFRA fill:#f3f4f6,stroke:#374151,color:#111827
 ```
 
-The Run tab is still a method on `NiceGuiNode`, which is why it is drawn as a red dashed box. The Plan, Sim and System tabs are page classes. The Run tab reaches `TopologyEditService` through node wrappers instead of a ViewModel. The Plan page reaches only ViewModels; the node passes it three callbacks (run, cancel and delete row), so the mission executor is not drawn as a dependency of the page.
+The Run tab is still a method on `NiceGuiNode`, which is why it is drawn as a red dashed box.
+The Plan, Sim and System tabs are page classes.
+The Run tab reaches `TopologyEditService` through node wrappers instead of a ViewModel.
+The Plan page reaches only ViewModels; the node passes it three callbacks (run, cancel and delete row), so the mission executor is not drawn as a dependency of the page.
 
 ## Decision: drop "Facade" as a layer name
 
-Nothing built plays that role. Its real job, a UI-neutral boundary that REST, MQTT and LoRa adapters can share, belongs to the application services. The ViewModels can't take it on, because they are NiceGUI-specific.
+Nothing built plays that role.
+Its real job, a UI-neutral boundary that REST, MQTT and LoRa adapters can share, belongs to the application services.
+The ViewModels can't take it on, because they are NiceGUI-specific.
 
 ### Names
 
-| Layer | Name | Rule |
-|---|---|---|
-| UI | Page | Layout only. Imports ViewModels only (enforced by import-linter). Tool processes are the one exception: cards start them through `process_registry`, and Medkit still uses `subprocess` in `tools_card` |
-| UI state | ViewModel | UI state and user intents. It is the NiceGUI adapter, and the only place presentation formatting happens |
-| Boundary | Application service | The "Robot API". Use cases, plain dataclasses in and out, no UI or rclpy types. Phase 2 adapters call this layer |
-| Live state | Domain service | Holds live state (TopoDoc, mission state). Talks to ROS only through RosGateway |
-| Persistence | Store | TopoMapStore, MissionStore. Owned by application services. `TopoMapStore` sits in the `domain_services` package for now |
-| Algorithms | Pure module | row_planning, topo_row_builder, plan_import. No state, no ROS. F2C is the separate `devkit_f2c_planner` package |
-| ROS | RosGateway | Creates publishers, subscriptions, clients and timers. Five modules still import `rclpy.qos` directly (see below) |
-| Processes | process_registry | Registry of long-running tool processes (RViz, Gazebo, explorer, grapher, neo), shared by every browser session. No NiceGUI or ROS imports |
-| Phase 2 edge | Adapter | RestAdapter, MqttAdapter, ReticulumAdapter. Each is thin and calls application services. Not built |
-| Phase 2 central | Fleet Gateway | Renamed from "Central Gateway" so "gateway" means one thing only. Not built |
+<table>
+<tr><th>Layer</th><th>Name</th><th>Rule</th></tr>
+<tr><td>UI</td><td>Page</td><td>Layout only.
+Imports ViewModels only (enforced by import-linter).
+Tool processes are the one exception: cards start them through <code>process_registry</code>, and Medkit still uses <code>subprocess</code> in <code>tools_card</code></td></tr>
+<tr><td>UI state</td><td>ViewModel</td><td>UI state and user intents.
+It is the NiceGUI adapter, and the only place presentation formatting happens</td></tr>
+<tr><td>Boundary</td><td>Application service</td><td>The "Robot API".
+Use cases, plain dataclasses in and out, no UI or rclpy types.
+Phase 2 adapters call this layer</td></tr>
+<tr><td>Live state</td><td>Domain service</td><td>Holds live state (TopoDoc, mission state).
+Talks to ROS only through RosGateway</td></tr>
+<tr><td>Persistence</td><td>Store</td><td>TopoMapStore, MissionStore.
+Owned by application services.
+<code>TopoMapStore</code> sits in the <code>domain_services</code> package for now</td></tr>
+<tr><td>Algorithms</td><td>Pure module</td><td>row_planning, topo_row_builder, plan_import.
+No state, no ROS.
+F2C is the separate <code>devkit_f2c_planner</code> package</td></tr>
+<tr><td>ROS</td><td>RosGateway</td><td>Creates publishers, subscriptions, clients and timers.
+Five modules still import <code>rclpy.qos</code> directly (see below)</td></tr>
+<tr><td>Processes</td><td>process_registry</td><td>Registry of long-running tool processes (RViz, Gazebo, explorer, grapher, neo), shared by every browser session.
+No NiceGUI or ROS imports</td></tr>
+<tr><td>Phase 2 edge</td><td>Adapter</td><td>RestAdapter, MqttAdapter, ReticulumAdapter.
+Each is thin and calls application services.
+Not built</td></tr>
+<tr><td>Phase 2 central</td><td>Fleet Gateway</td><td>Renamed from "Central Gateway" so "gateway" means one thing only.
+Not built</td></tr>
+</table>
 
-**Dependency rule:** Page → ViewModel → Application service → Domain service / Store / Pure module → RosGateway. Nothing points upward or skips a layer.
+**Dependency rule:** Page → ViewModel → Application service → Domain service / Store / Pure module → RosGateway.
+Nothing points upward or skips a layer.
 
 import-linter enforces this in CI (`make lint-imports`, `.importlinter`) with seven contracts:
 
@@ -241,35 +283,57 @@ Each exception is listed in `.importlinter` with a `TODO(#116)` and the check fa
 
 ### Consequences
 
-- **The persistence objection no longer applies.** achurichi's rule was "no state or persistence in the Facade". That was about a layer that doesn't exist now. Stores sit in the application layer, as the build already has them.
-- **Application services must stay thin orchestration.** Planning lives in pure modules and the executor in `MissionDomainService`. Otherwise the monolith concern comes straight back.
-- **`MissionStore` no longer bypasses the layers.** In the 15 August diagram `MissionRunner` and `MissionStore` bypassed the Facade. `MissionViewModel` now goes through `MissionApplicationService`, which owns the store and the domain service.
+- **The persistence objection no longer applies.**
+  achurichi's rule was "no state or persistence in the Facade".
+  That was about a layer that doesn't exist now.
+  Stores sit in the application layer, as the build already has them.
+- **Application services must stay thin orchestration.**
+  Planning lives in pure modules and the executor in `MissionDomainService`.
+  Otherwise the monolith concern comes straight back.
+- **`MissionStore` no longer bypasses the layers.**
+  In the 15 August diagram `MissionRunner` and `MissionStore` bypassed the Facade.
+  `MissionViewModel` now goes through `MissionApplicationService`, which owns the store and the domain service.
 
 ## Proposed in #116 versus built
 
-| Proposed | Built |
-|---|---|
-| Facade layer (comment of 15 and 20 August: `NavFacade`, `MissionFacade`, `TopologyFacade`, `SystemFacade`) | Dropped. `ApplicationService` is the boundary (comment of 9 October) |
-| Three ViewModels: `NavViewModel`, `MissionViewModel`, `SystemViewModel`, plus `GlobalViewModel` | Nine: `Global`, `Run`, `Topology`, `Telemetry`, `RobotBrain`, `Plan`, `Mission`, `Obstacle`, `Sim` |
-| Pages: Nav, Mission, System | Four tabs: Run, Plan, Sim, System. Plan, Sim and System are page classes. Run is still a node method |
-| `NavigationService`, `MissionService`, `TopologyService`, `SystemService` | Drive, Navigation, RowDiscovery, RobotBrain, Telemetry, Topology, TopologyEdit, Plan and Mission application services, each with a domain service, plus `SimAssetService` and `SimWorldService` (no ROS) |
-| `PlanningService (F2C)` / `PlanningDomainService` | `PlanApplicationService`, with no domain service of its own. F2C is the `devkit_f2c_planner` package, called from `PlanApplicationService`. Row geometry, row building and plan import are pure modules. Edit rules are in `TopologyEditService` |
-| `TopoRepo` | `TopoMapStore`, owned by `TopologyApplicationService` |
-| `ROSGateway` as the ROS clients layer | `RosGateway` wraps the rclpy node. All seven domain services, `MissionStore` and `ObstacleManager` use it |
-| "All UI contact points go through the Facade" | True for drive, navigation, row discovery, robot brain, telemetry, topology, planning and missions. Not true for obstacles and process control (see below) |
-| Enforce the dependency rule | Done: import-linter in CI |
-| Phase 2: Edge API (REST, MQTT, VDA 5050), Fleet Gateway, standalone UI | Not started. No adapters in the code |
+<table>
+<tr><th>Proposed</th><th>Built</th></tr>
+<tr><td>Facade layer (comment of 15 and 20 August: <code>NavFacade</code>, <code>MissionFacade</code>, <code>TopologyFacade</code>, <code>SystemFacade</code>)</td><td>Dropped.
+<code>ApplicationService</code> is the boundary (comment of 9 October)</td></tr>
+<tr><td>Three ViewModels: <code>NavViewModel</code>, <code>MissionViewModel</code>, <code>SystemViewModel</code>, plus <code>GlobalViewModel</code></td><td>Nine: <code>Global</code>, <code>Run</code>, <code>Topology</code>, <code>Telemetry</code>, <code>RobotBrain</code>, <code>Plan</code>, <code>Mission</code>, <code>Obstacle</code>, <code>Sim</code></td></tr>
+<tr><td>Pages: Nav, Mission, System</td><td>Four tabs: Run, Plan, Sim, System.
+Plan, Sim and System are page classes.
+Run is still a node method</td></tr>
+<tr><td><code>NavigationService</code>, <code>MissionService</code>, <code>TopologyService</code>, <code>SystemService</code></td><td>Drive, Navigation, RowDiscovery, RobotBrain, Telemetry, Topology, TopologyEdit, Plan and Mission application services, each with a domain service, plus <code>SimAssetService</code> and <code>SimWorldService</code> (no ROS)</td></tr>
+<tr><td><code>PlanningService (F2C)</code> / <code>PlanningDomainService</code></td><td><code>PlanApplicationService</code>, with no domain service of its own.
+F2C is the <code>devkit_f2c_planner</code> package, called from <code>PlanApplicationService</code>.
+Row geometry, row building and plan import are pure modules.
+Edit rules are in <code>TopologyEditService</code></td></tr>
+<tr><td><code>TopoRepo</code></td><td><code>TopoMapStore</code>, owned by <code>TopologyApplicationService</code></td></tr>
+<tr><td><code>ROSGateway</code> as the ROS clients layer</td><td><code>RosGateway</code> wraps the rclpy node.
+All seven domain services, <code>MissionStore</code> and <code>ObstacleManager</code> use it</td></tr>
+<tr><td>"All UI contact points go through the Facade"</td><td>True for drive, navigation, row discovery, robot brain, telemetry, topology, planning and missions.
+Not true for obstacles and process control (see below)</td></tr>
+<tr><td>Enforce the dependency rule</td><td>Done: import-linter in CI</td></tr>
+<tr><td>Phase 2: Edge API (REST, MQTT, VDA 5050), Fleet Gateway, standalone UI</td><td>Not started.
+No adapters in the code</td></tr>
+</table>
 
 ## Still open
 
 Tracked in #116 and `.importlinter`:
 
 - **Run tab** is still a method on `NiceGuiNode` (`_run_content`, about 110 lines) and reaches `TopologyEditService` through node wrappers.
-- **Plan page state** is per browser session (`PlanPageState`, `MissionQueue`), but `PlanViewModel.save_status` is shared by every session. `PlanPage` takes `_run_mission`, `cancel_mission` and `confirm_delete_row` as callbacks from the node.
-- **Plan page threading**: `PlanViewModel.plan` blocks, so the controls card calls it through `nicegui.run.io_bound`. Any other adapter has to run it on a worker thread too.
+- **Plan page state** is per browser session (`PlanPageState`, `MissionQueue`), but `PlanViewModel.save_status` is shared by every session.
+  `PlanPage` takes `_run_mission`, `cancel_mission` and `confirm_delete_row` as callbacks from the node.
+- **Plan page threading**: `PlanViewModel.plan` blocks, so the controls card calls it through `nicegui.run.io_bound`.
+  Any other adapter has to run it on a worker thread too.
 - **Mission start glue**: `_run_mission` and `_send_goal_sync` are still on the node, around `MissionDomainService.start`.
 - **Node leftovers**: the `_persist_and_reload` thread wrapper, and the `/current_node` subscription with its `rclpy.qos` import.
-- **Obstacles**: `ObstacleViewModel` calls `ObstacleManager` directly. An `ObstacleApplicationService` is needed.
+- **Obstacles**: `ObstacleViewModel` calls `ObstacleManager` directly.
+  An `ObstacleApplicationService` is needed.
 - **Medkit**: still started with `subprocess` in `pages/system/tools_card.py`.
-- **`rclpy.qos` imports**: `row_discovery_domain_service`, `telemetry_domain_service`, `topology_domain_service`, `obstacles` and `qos` still import `rclpy`. The QoS profiles should move into `RosGateway`.
-- **Process control**: the other tool cards (Gazebo, row follow, RViz, explorer, grapher) start processes through `process_registry` from the page. A ViewModel and application service would complete the rule.
+- **`rclpy.qos` imports**: `row_discovery_domain_service`, `telemetry_domain_service`, `topology_domain_service`, `obstacles` and `qos` still import `rclpy`.
+  The QoS profiles should move into `RosGateway`.
+- **Process control**: the other tool cards (Gazebo, row follow, RViz, explorer, grapher) start processes through `process_registry` from the page.
+  A ViewModel and application service would complete the rule.
