@@ -14,7 +14,6 @@ from importlib import resources
 import rclpy
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
-from nicegui import run as ng_run
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -42,7 +41,7 @@ from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
-from devkit_ui.constants import FIELD27_BOUNDS, FIELD27_CENTER, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
+from devkit_ui.constants import FIELD27_CENTER, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 from devkit_ui.domain_services.mission_domain_service import (
     ERROR,
@@ -71,9 +70,10 @@ from devkit_ui.models import (
 from devkit_ui.obstacles import ObstacleManager
 from devkit_ui.pages.obstacle_cards import (
     attach_mission_obstacle_panel,
-    attach_mission_sidebar_controls,
     attach_nav_card,
 )
+from devkit_ui.pages.plan.boundary_map_card import BoundaryMapCard
+from devkit_ui.pages.plan.plan_controls_card import PlanControlsCard
 from devkit_ui.pages.run.drop_node_card import DropNodeCard
 from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
 from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
@@ -82,7 +82,6 @@ from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.pages.sim.sim_page import SimPage
 from devkit_ui.pages.system.system_page import SystemPage
-from devkit_ui.plan_types import MIN_CORNERS, PlanRequest
 from devkit_ui.process_registry import shutdown_tools
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.topo_results import TopologyEditError
@@ -701,342 +700,13 @@ class NiceGuiNode(Node):
 
     def _plan_content(self) -> None:
         """Build the Plan tab UI: field boundary drawing, F2C planning, and row saving."""
-        corners_ll: list[tuple[float, float]] = []
-        swath_layers: list = []
-        # The rows this browser session planned or imported; Save writes exactly these.
-        draft: list = [None]
-        plan_generation = 0
-        poly_layer:   list = [None]
-
+        state = self._plan_vm.open_page()
         with ui.row().classes('w-full gap-3 items-start mb-3'):
-
-            with ui.card().classes('flex-1').style('padding:10px;min-width:0'):
-                ui.html('<div class="sec-label mb-2">Field boundary — click to draw</div>')
-                gps_center = (
-                    (self.latest_gps.latitude, self.latest_gps.longitude)
-                    if self.latest_gps else FIELD27_CENTER
-                )
-                mission_map = ui.leaflet(center=gps_center, zoom=18).classes('w-full h-96')
-                if not self.latest_gps:
-                    # No live fix yet — fit the whole field extent rather
-                    # than just zooming in on its centre point, so the
-                    # boundary-drawing view actually shows the field.
-                    mission_map.run_map_method(
-                        'fitBounds', [list(FIELD27_BOUNDS[0]), list(FIELD27_BOUNDS[1])])
-                mission_map.tile_layer(
-                    url_template='https://server.arcgisonline.com/ArcGIS/rest/services/'
-                                 'World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                    options={'attribution': 'Esri', 'maxZoom': 20},
-                )
-
-            with ui.card().style('width:220px;flex-shrink:0;padding:14px'):
-                ui.html('<div class="sec-label">Tool width</div>')
-                f2c_width = ui.number(
-                    value=1.2, min=0.1, max=10.0, step=0.1, precision=2,
-                    suffix='m',
-                ).classes('w-full')
-
-                ui.html('<div class="sec-label mt-3">Row angle</div>')
-                f2c_angle = ui.slider(min=0, max=179, step=1, value=0).classes('w-full')
-                angle_lbl = ui.label('0°').classes('text-xs font-mono').style('color:#57606a')
-                f2c_angle.on('update:model-value',
-                             lambda e: angle_lbl.set_text(f'{int(e.args)}°'))
-
-                # CONTOUR: terrain-following rows instead of one fixed
-                # angle — offsets from a reference elevation isoline
-                # (dem.select_reference_contour_latlon()) rather than
-                # F2C's SG_BruteForce. See f2c_planner.run_contour_f2c()'s
-                # module comment for why this isn't a config flag on F2C.
-                ui.html('<div class="sec-label mt-3">Contour rows</div>')
-                f2c_contour = ui.checkbox(
-                    'follow terrain (uses recon elevation log)', value=False)
-                f2c_recon_path = ui.input(
-                    value='/workspace/maps/recon_logs/recon.csv',
-                    placeholder='/workspace/maps/recon_logs/recon.csv',
-                ).classes('w-full mt-1')
-                f2c_recon_path.set_visibility(False)
-                dem_res_lbl = ui.html(
-                    '<div class="sec-label mt-1">DEM grid resolution</div>')
-                dem_res_lbl.set_visibility(False)
-                f2c_dem_res = ui.number(
-                    value=1.0, min=0.2, max=5.0, step=0.1, precision=2,
-                    suffix='m',
-                ).classes('w-full')
-                f2c_dem_res.set_visibility(False)
-                contour_note = ui.label(
-                    'Row angle is ignored in contour mode — row direction '
-                    'follows the reference elevation line instead.'
-                ).classes('text-xs').style('color:#8c959f')
-                contour_note.set_visibility(False)
-
-                def _on_contour_toggle(e) -> None:
-                    """Show/hide contour-only controls when the contour-mode switch flips."""
-                    on = bool(e.value)
-                    f2c_angle.set_enabled(not on)
-                    f2c_recon_path.set_visibility(on)
-                    dem_res_lbl.set_visibility(on)
-                    f2c_dem_res.set_visibility(on)
-                    contour_note.set_visibility(on)
-                f2c_contour.on_value_change(_on_contour_toggle)
-
-                # HEADLAND: shrink cover area by this much on all sides so
-                # swaths don't start/end at the field boundary. 0 = off.
-                ui.html('<div class="sec-label mt-3">Headland width</div>')
-                f2c_headland = ui.number(
-                    value=0.0, min=0.0, max=5.0, step=0.1, precision=2,
-                    suffix='m',
-                ).classes('w-full')
-                ui.label('0 = no inset; ≈ tool width for one-row headland').classes(
-                    'text-xs').style('color:#8c959f')
-
-                # SNAKE: reverse every other swath so end-of-N is near
-                # start-of-N+1. Default on.
-                ui.html('<div class="sec-label mt-3">Snake order</div>')
-                f2c_snake = ui.checkbox('reverse every other row', value=True)
-
-                ui.html('<div class="sec-label mt-3">First row ID</div>')
-                f2c_row_id_start = ui.number(
-                    value=1, min=1, step=1, precision=0,
-                ).classes('w-full')
-
-                ui.html('<div class="sec-label mt-3">Row name prefix</div>')
-                f2c_prefix = ui.input(
-                    value='F2C', placeholder='F2C',
-                ).classes('w-full')
-                ui.label('→ {prefix}_R{n}_IN / _OUT').classes('text-xs font-mono').style(
-                    'color:#8c959f')
-
-                # OBSTACLE: draw-mode + shape + radius + padding + map-click
-                # dispatch. Boundary-click delegates here to the local F2C
-                # corner-drawing closure.
-                def _boundary_click(lat: float, lon: float) -> None:
-                    corners_ll.append((lat, lon))
-                    mission_map.marker(latlng=(lat, lon))
-                    _redraw_polygon()
-
-                draw_handle = attach_mission_sidebar_controls(
-                    self._obstacle_vm, mission_map, _boundary_click)
-                obstacle_pad = draw_handle.obstacle_pad
-
-                ui.separator().classes('my-3')
-
-                corners_lbl = ui.label('0 corners').classes('text-xs font-mono').style(
-                    'color:#57606a')
-
-                plan_btn  = ui.button('Plan Rows').props(
-                    'color=positive no-caps').classes('w-full mt-2')
-                save_btn  = ui.button('Save as Topo Rows').props(
-                    'color=primary no-caps').classes('w-full mt-1')
-                save_btn.set_enabled(False)
-                async def do_import(e):
-                    """Import an uploaded plan and update its status and save button."""
-                    data = (await e.file.read()) if hasattr(e, 'file') else e.content.read()
-                    imported = self._plan_vm.import_plan(data.decode('utf-8', errors='replace'))
-                    if imported.ok:
-                        draft[0] = imported.planned
-                    f2c_status.set_text(imported.status)
-                    f2c_status.style('color:' + ('#1a7f37' if imported.ok else '#cf222e'))
-                    save_btn.set_enabled(imported.ok)
-
-                ui.upload(label='Import web plan (.geojson)', auto_upload=True,
-                          on_upload=do_import).props('accept=.geojson,.json').classes('w-full mt-1')
-                f2c_overwrite = ui.checkbox('Overwrite existing rows with same prefix',
-                                            value=False).classes('text-xs mt-1')
-                clear_btn = ui.button('Clear').props(
-                    'outline no-caps').classes('w-full mt-1')
-
-                repair_btn = ui.button('Repair Connectivity').props(
-                    'outline no-caps').classes('w-full mt-1')
-                repair_btn.tooltip(
-                    'Wire navigate_to_pose edges between consecutive row '
-                    'IN/OUT pairs. Splices into current node if localised.')
-
-                f2c_status = ui.label('').classes('text-xs font-mono mt-2').style(
-                    'color:#57606a;word-break:break-word')
-                f2c_save_lbl = ui.label('').classes('text-xs font-mono mt-1').style(
-                    'color:#57606a;word-break:break-word')
-
-        # OBSTACLE: map-click is wired by attach_mission_sidebar_controls.
-        # It dispatches to _boundary_click when in boundary mode, to the
-        # manager otherwise. Do NOT add a second mission_map.on('map-click')
-        # handler here — it would fire alongside ours and double-draw.
-
-        def _redraw_polygon():
-            if poly_layer[0] is not None:
-                try:
-                    poly_layer[0].run_method('remove')
-                except Exception:
-                    pass
-                poly_layer[0] = None
-            if len(corners_ll) >= 2:
-                latlngs = [[lat, lon] for lat, lon in corners_ll]
-                poly_layer[0] = mission_map.generic_layer(
-                    name='polygon',
-                    args=[latlngs,
-                          {'color': '#1a7f37', 'fillOpacity': 0.15,
-                           'weight': 2, 'dashArray': '6 4'}],
-                )
-            corners_lbl.set_text(
-                f'{len(corners_ll)} corner{"s" if len(corners_ll) != 1 else ""}' +
-                (' ✓' if len(corners_ll) >= 3 else ' — need 3+'))
-
-        def do_clear():
-            nonlocal plan_generation
-            plan_generation += 1
-            corners_ll.clear()
-            draft[0] = None
-            for lyr in swath_layers:
-                try:
-                    lyr.run_method('remove')
-                except Exception:
-                    pass
-            swath_layers.clear()
-            if poly_layer[0] is not None:
-                try:
-                    poly_layer[0].run_method('remove')
-                except Exception:
-                    pass
-                poly_layer[0] = None
-            # OBSTACLE: also tear down any in-progress obstacle polygon
-            draw_handle.clear_in_progress()
-            corners_lbl.set_text('0 corners')
-            f2c_status.set_text('')
-            save_btn.set_enabled(False)
-            plan_btn.set_enabled(True)
-            mission_map.set_center(mission_map.center)
-
-        clear_btn.on_click(do_clear)
-
-        async def do_plan():
-            """Plan rows for the drawn boundary on a worker thread and render the swaths."""
-            nonlocal plan_generation
-            if len(corners_ll) < MIN_CORNERS:
-                f2c_status.set_text(f'Need at least {MIN_CORNERS} corners')
-                f2c_status.style('color:#cf222e')
-                return
-
-            plan_generation += 1
-            run_generation = plan_generation
-            plan_btn.set_enabled(False)
-            f2c_status.set_text('Running F2C…')
-            f2c_status.style('color:#57606a')
-
-            request = PlanRequest.from_form(
-                corners_ll, self._obstacle_vm.rings_ll(),
-                tool_width=f2c_width.value, angle_deg=f2c_angle.value,
-                headland_m=f2c_headland.value, snake=f2c_snake.value,
-                obstacle_pad_m=obstacle_pad.value, contour=f2c_contour.value,
-                recon_path=f2c_recon_path.value, dem_res=f2c_dem_res.value)
-            outcome = await ng_run.io_bound(self._plan_vm.plan, request)
-            if run_generation != plan_generation:
-                return
-            if not outcome.ok:
-                f2c_status.set_text(outcome.status)
-                f2c_status.style('color:#cf222e')
-                plan_btn.set_enabled(True)
-                return
-
-            draft[0] = outcome.planned
-            for lyr in swath_layers:
-                try:
-                    lyr.run_method('remove')
-                except Exception:
-                    pass
-            swath_layers.clear()
-
-            for pts in outcome.swaths:
-                latlngs = [[lat, lon] for lat, lon in pts]
-                lyr = mission_map.generic_layer(
-                    name='polyline',
-                    args=[latlngs,
-                          {'color': '#0969da', 'weight': 2, 'opacity': 0.85}],
-                )
-                swath_layers.append(lyr)
-
-            f2c_status.set_text(outcome.status)
-            f2c_status.style('color:#1a7f37')
-            plan_btn.set_enabled(True)
-            save_btn.set_enabled(bool(outcome.swaths))
-
-        plan_btn.on_click(do_plan)
-
-        def do_save():
-            """Save planned rows using the current prefix, first row ID and overwrite option."""
-            self._plan_vm.save_rows(
-                draft[0],
-                f2c_prefix.value or 'F2C',
-                int(f2c_row_id_start.value or 1),
-                overwrite=f2c_overwrite.value,
-            )
-        save_btn.on_click(do_save)
-
-        async def do_repair():
-            """Ask for confirmation, then repair missing row edges in the loaded map.
-
-            The optional base node is validated and named in the status; repair does not
-            add splice edges to it. Return without opening a dialog if no map is loaded.
-            """
-            topo_doc = self._topo_doc
-            if topo_doc is None:
-                return
-            cur = self._topo_vm.current_node
-            selected = self._topo_vm.selected_node
-            default_base = ''
-            if cur not in ('—', 'none', 'None', '', None) and topo_doc.has_node(cur):
-                default_base = cur
-            elif selected and topo_doc.has_node(selected):
-                default_base = selected
-
-            row_count = sum(
-                1 for nd in topo_doc.nodes
-                if nd.meta.get('row_id') is not None
-                and nd.meta.get('row_role') == 'entry'
-            )
-
-            with ui.dialog() as d, ui.card():
-                ui.label('Repair row connectivity').classes('font-semibold')
-                ui.label(
-                    f'Add navigate_to_pose edges between {row_count} consecutive '
-                    f'row IN/OUT pairs. Optionally splice the chain into a base '
-                    f'node so the planner can reach it.'
-                ).classes('text-xs').style('color:#57606a;max-width:340px')
-                base_input = ui.input(
-                    label='Splice into',
-                    placeholder='leave blank for chain only',
-                    value=default_base,
-                ).classes('w-full mt-2')
-                ui.label(
-                    'Without a base node the chain is wired internally but '
-                    'remains unreachable from the rest of the graph.'
-                ).classes('text-xs').style(
-                    'color:#9a6700;max-width:340px;margin-top:4px')
-                with ui.row().classes('w-full justify-end gap-2 mt-2'):
-                    ui.button('Cancel',
-                              on_click=lambda: d.submit('cancel')).props(
-                                  'flat no-caps')
-                    ui.button('Repair', color='positive',
-                              on_click=lambda: d.submit('ok')).props('no-caps')
-
-            result = await d
-            if result != 'ok':
-                return
-
-            self._plan_vm.repair((base_input.value or '').strip() or None)
-
-        repair_btn.on_click(do_repair)
-
-        _save_prev = ['']
-        def _refresh_save_status():
-            """Update the save label and its color when the plan service status changes."""
-            cur = self._plan_vm.save_status
-            if cur == _save_prev[0]:
-                return
-            _save_prev[0] = cur
-            f2c_save_lbl.set_text(cur)
-            f2c_save_lbl.style(
-                'color:#cf222e' if cur.startswith('ERROR') else
-                'color:#1a7f37' if cur else 'color:#57606a')
-        ui.timer(0.4, _refresh_save_status)
+            gps = ((self.latest_gps.latitude, self.latest_gps.longitude)
+                   if self.latest_gps else None)
+            boundary = BoundaryMapCard(state, gps)
+            controls = PlanControlsCard(state, self._plan_vm, self._obstacle_vm, boundary.map)
+        draw_handle = controls.draw_handle
 
         # ─────────────────────────────────────────────────────────────────────
         # MISSION QUEUE CARD
