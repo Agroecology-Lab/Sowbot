@@ -1,11 +1,12 @@
-"""Test doubles that wire the topology stack onto a harness node.
+"""Test doubles that wire the topology stack onto a harness object.
 
-The harnesses exec single NiceGuiNode methods in isolation, so they have no ROS node.
-``attach_topology`` gives them a real TopologyViewModel and TopologyApplicationService
-(with a real TopoMapStore on a temporary directory) on top of a fake domain service.
-Publishing lands on ``node._topo_map_pub``, the mock the tests assert on.
+The harness stands in for the node's state, so there is no ROS node. ``attach_topology``
+gives it a real TopologyViewModel and TopologyApplicationService (with a real TopoMapStore
+on a temporary directory) on top of a fake domain service. ``attach_authoring`` adds the
+Run tab's RunViewModel and MapAuthoringViewModel on top. Publishing lands on
+``node._topo_map_pub``, the mock the tests assert on.
 """
-# The isolated node harness intentionally wires NiceGuiNode's private state.
+# The harness mirrors NiceGuiNode's private state.
 # pylint: disable=protected-access
 import os
 from types import SimpleNamespace
@@ -18,6 +19,8 @@ from devkit_ui.application_services.topology_edit_service import TopologyEditSer
 from devkit_ui.domain_services import topo_map_store
 from devkit_ui.domain_services.topo_map_store import TopoMapStore
 from devkit_ui.topo_results import SwitchResult
+from devkit_ui.view_models.map_authoring_view_model import MapAuthoringViewModel
+from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 
@@ -65,6 +68,31 @@ def attach_topology(node, maps_dir):
         _topo_vm=TopologyViewModel(app),
     )
     return node
+
+
+def attach_authoring(node, maps_dir, *, is_sim=True):
+    """Wire the Run tab's view models onto node and return its MapAuthoringViewModel.
+
+    The harness gets simulated telemetry at (1.234, 5.678) with no GPS fix, a mock timer
+    factory at ``node.create_timer`` and the view model at ``node.authoring``.
+    """
+    attach_topology(node, maps_dir)
+    node._run_vm = RunViewModel(Mock())
+    node.telemetry = SimpleNamespace(
+        latest_gps=None,
+        latest_odom=SimpleNamespace(pose=SimpleNamespace(
+            pose=SimpleNamespace(position=SimpleNamespace(x=1.234, y=5.678)))))
+    node.create_timer = Mock()
+    node.authoring = MapAuthoringViewModel(
+        node._run_vm, node._topo_vm, node._topo_app_service, node._topo_edit_service,
+        node.telemetry, node.create_timer, is_sim=is_sim)
+    return node.authoring
+
+
+def run_threads_inline(testcase):
+    """Make the topology service run its background work at once, on the calling thread."""
+    testcase.enterContext(patch.object(
+        TopologyApplicationService, '_spawn', staticmethod(lambda work: work())))
 
 
 def patch_store_io(testcase):

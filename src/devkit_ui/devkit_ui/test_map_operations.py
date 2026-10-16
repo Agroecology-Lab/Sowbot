@@ -1,55 +1,32 @@
-# pylint: disable=exec-used,no-member,protected-access,attribute-defined-outside-init
-import ast
+# pylint: disable=protected-access
 import copy
-import traceback
 import unittest
-from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 from devkit_ui.constants import ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_defaults import default_actions, default_definitions
-from devkit_ui.topo_test_fakes import attach_topology, patch_store_io
-from devkit_ui.view_models.run_view_model import RunViewModel
+from devkit_ui.topo_test_fakes import attach_authoring, patch_store_io, run_threads_inline
 
 
 def load_map_harness(directory, case):
-    """Load real map methods, redirecting filesystem boundaries to a temporary directory."""
-    source_path = Path(__file__).with_name('ui_node.py')
-    tree = ast.parse(source_path.read_text(encoding='utf-8'))
-    node_class = next(node for node in tree.body
-                      if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode')
-    names = {'_on_map_archived', '_persist_and_reload', 'set_row_action'}
-    members = [node for node in node_class.body
-               if (isinstance(node, ast.FunctionDef) and node.name in names)
-               or (isinstance(node, ast.Assign)
-               and any(isinstance(target, ast.Name) and target.id == '_MAP_NAME_RE'
-                       for target in node.targets))]
-    harness = ast.ClassDef(name='MapHarness', bases=[], keywords=[], body=members,
-                          decorator_list=[])
-
-    namespace = {
-        'copy': copy, 'traceback': traceback, 'Callable': Callable, 'TopoDoc': TopoDoc,
-        'ROW_ACTION': ROW_ACTION, 'VISION_ROW_ACTION': VISION_ROW_ACTION,
-        'threading': SimpleNamespace(
-            Thread=lambda target, daemon: SimpleNamespace(start=target)),
-    }
-    module = ast.fix_missing_locations(ast.Module(body=[harness], type_ignores=[]))
-    exec(compile(module, source_path, 'exec'), namespace)
+    """Build the Run tab's view models over real map storage in a temporary directory."""
     boundaries = patch_store_io(case)
-    node = namespace['MapHarness']()
-    node._topo_doc = TopoDoc(name='live', nodes=[TopoNode(name='A', x=1.0, y=2.0)])
-    node._run_vm = RunViewModel(Mock())
-    node._row_action = ROW_ACTION
-    attach_topology(node, directory)
+    run_threads_inline(case)
+    node = SimpleNamespace(
+        _topo_doc=TopoDoc(name='live', nodes=[TopoNode(name='A', x=1.0, y=2.0)]))
+    attach_authoring(node, directory)
     node._topo_vm.update_doc(node._topo_doc)
-    node._topo_vm.register_map_archived_callback(node._on_map_archived)
-    node.get_logger = Mock(return_value=Mock())
     return node, boundaries
+
+
+def persist_and_reload(node, modify, success='updated'):
+    """Persist modify to the saved map, reporting the outcome on the drop-node status."""
+    node._topo_app_service.persist_and_reload_async(
+        modify, success, lambda status: setattr(node._run_vm.drop_node, 'status', status))
 
 
 class TestMapOperations(unittest.TestCase):
@@ -146,7 +123,6 @@ class TestMapOperations(unittest.TestCase):
         live.seed_actions({'legacy': {'composable': True}}, {'legacy_bt': '<legacy/>'})
         live.transformation['translation'] = {'x': 42.0}
         original = copy.deepcopy(live.to_dict())
-        self.node._row_action = VISION_ROW_ACTION
         self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
 
         self.assertEqual(self.node._topo_vm.archive_and_clear_map(), 'archived → live_1')
@@ -160,7 +136,7 @@ class TestMapOperations(unittest.TestCase):
         self.assertEqual(cleared.actions, default_actions())
         self.assertEqual(cleared.definitions, default_definitions())
         self.assertEqual(cleared.transformation, original['transformation'])
-        self.assertEqual(self.node._row_action, ROW_ACTION)
+        self.assertEqual(self.node.authoring.row_action, ROW_ACTION)
         self.assertEqual(self.node._run_vm.drop_node.row_action, ROW_ACTION)
         self.assertEqual(live.to_dict(), original)
         self.node._topo_map_pub.publish.assert_called_once_with(self.node._topo_doc.to_dict())
@@ -180,15 +156,49 @@ class TestMapOperations(unittest.TestCase):
     def test_failed_clear_keeps_live_document_and_row_mode(self) -> None:
         """Verify a failed archive write preserves the live document and row selection."""
         live = self.node._topo_doc
-        self.node._row_action = self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
+        self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
         self.namespace['dump_topo_yaml'].side_effect = OSError('read only')
 
         self.assertEqual(self.node._topo_vm.archive_and_clear_map(), 'ERROR: read only')
 
         self.assertIs(self.node._topo_doc, live)
-        self.assertEqual(self.node._row_action, VISION_ROW_ACTION)
+        self.assertEqual(self.node.authoring.row_action, VISION_ROW_ACTION)
         self.assertEqual(self.node._run_vm.drop_node.row_action, VISION_ROW_ACTION)
         self.node._topo_map_pub.publish.assert_not_called()
+
+    def test_deleting_a_node_clears_its_selection_and_persists(self) -> None:
+        """Verify delete removes the node from the saved map and deselects it."""
+        live = self.node._topo_doc
+        live.add_node(TopoNode(name='B', x=3.0, y=2.0))
+        dump_topo_yaml(live, self.directory / 'live')
+        self.node._topo_vm.set_selected_node('B')
+
+        self.node.authoring.delete_node('B')
+
+        self.assertIsNone(self.node._topo_vm.selected_node)
+        self.assertEqual({n.name for n in parse_topo_yaml(self.directory / 'live').nodes}, {'A'})
+        self.assertEqual(self.node._run_vm.topo.delete_status, 'deleted B — live (no srv)')
+
+    def test_deleting_a_row_removes_all_its_nodes(self) -> None:
+        """Verify deleting a row removes every node carrying its row id."""
+        live = self.node._topo_doc
+        for name, role in (('R_IN', 'entry'), ('R_OUT', 'exit')):
+            live.add_node(TopoNode(name=name, x=4.0, y=4.0, meta={'row_id': 5, 'row_role': role}))
+        dump_topo_yaml(live, self.directory / 'live')
+
+        self.node.authoring.delete_row(5)
+
+        self.assertEqual({n.name for n in parse_topo_yaml(self.directory / 'live').nodes}, {'A'})
+        self.assertEqual(self.node._run_vm.topo.delete_status,
+                         'deleted row 5 (2 nodes) — live (no srv)')
+
+    def test_deleting_unknown_targets_reports_the_error(self) -> None:
+        """Verify a missing node or row is reported and nothing is written."""
+        self.node.authoring.delete_node('NOPE')
+        self.assertEqual(self.node._run_vm.topo.delete_status, "ERROR: 'NOPE' not in map")
+        self.node.authoring.delete_row(99)
+        self.assertEqual(self.node._run_vm.topo.delete_status, 'ERROR: no nodes for row 99')
+        self.namespace['dump_topo_yaml'].assert_not_called()
 
     def test_persist_seeds_missing_actions_and_preserves_custom_actions(self) -> None:
         """Verify new map files receive defaults only when the live map has no actions."""
@@ -202,9 +212,8 @@ class TestMapOperations(unittest.TestCase):
                 actions = original['actions'] if custom else default_actions()
                 definitions = original['definitions'] if custom else default_definitions()
                 old_doc = node._topo_doc
-                node._persist_and_reload(
-                    lambda doc: doc.insert_node(TopoNode(name='NEW', x=0.0, y=0.0)),
-                    node._run_vm.drop_node, 'status', 'updated')
+                persist_and_reload(
+                    node, lambda doc: doc.insert_node(TopoNode(name='NEW', x=0.0, y=0.0)))
                 saved = parse_topo_yaml(self.directory / 'live')
                 self.assertEqual(saved.actions, actions)
                 self.assertEqual(saved.definitions, definitions)

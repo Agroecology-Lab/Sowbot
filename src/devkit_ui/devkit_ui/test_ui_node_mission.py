@@ -15,7 +15,7 @@ def load_mission_harness():
     tree = ast.parse(source.read_text(encoding='utf-8'))
     node_class = next(n for n in tree.body
                       if isinstance(n, ast.ClassDef) and n.name == 'NiceGuiNode')
-    names = {'__init__', '_on_map_archived', '_run_mission', '_send_goal_sync', 'cancel_mission'}
+    names = {'__init__', '_run_mission', '_send_goal_sync', 'cancel_mission'}
     members = [n for n in node_class.body if isinstance(n, ast.FunctionDef) and n.name in names]
     harness = ast.ClassDef(name='Harness', bases=[ast.Name(id='Node', ctx=ast.Load())],
                           keywords=[], body=members, decorator_list=[])
@@ -40,6 +40,7 @@ def load_mission_harness():
         'RowDiscoveryApplicationService', 'NavigationApplicationService',
         'TelemetryApplicationService', 'PlanApplicationService',
         'GlobalViewModel', 'RunViewModel', 'TopologyViewModel', 'TelemetryViewModel',
+        'MapAuthoringViewModel',
         'RobotBrainViewModel', 'SimViewModel', 'PlanViewModel',
         'ObstacleManager', 'ObstacleViewModel', 'MissionStore', 'MissionDomainService', 'MissionApplicationService',
         'MissionViewModel', 'ui', 'String',
@@ -66,7 +67,6 @@ class TestUiNodeMission(unittest.TestCase):
         self.node._global_vm.soft_estop_active = False
         self.node._run_vm.navigation_available = True
         self.node._topo_doc = doc(node('E', 3, 'entry'), node('X', 3, 'exit'))
-        self.node.cancel_nav_goal = Mock()
         self.label = Mock()
         self.queue = [(3, 'weed', {'depth': 0.4})]
 
@@ -152,6 +152,6 @@ class TestUiNodeMission(unittest.TestCase):
         """Verify the worker receives cancellation before the navigation goal is cancelled."""
         order = Mock()
         order.attach_mock(self.service.cancel, 'worker_cancel')
-        order.attach_mock(self.node.cancel_nav_goal, 'navigation_cancel')
+        order.attach_mock(self.node._run_vm.cancel_navigation, 'navigation_cancel')
         self.node.cancel_mission()
         self.assertEqual(order.mock_calls, [call.worker_cancel(), call.navigation_cancel()])

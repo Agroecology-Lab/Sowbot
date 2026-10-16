@@ -1,41 +1,17 @@
-# pylint: disable=exec-used,no-member,protected-access,attribute-defined-outside-init
-import ast
-import traceback
+# pylint: disable=no-member,protected-access
+import logging
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 from devkit_ui.constants import NAV_ACTION, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_defaults import default_actions, default_definitions
-from devkit_ui.topo_results import TopologyEditError
-from devkit_ui.topo_test_fakes import attach_topology, patch_store_io
-from devkit_ui.view_models.run_view_model import RunViewModel
+from devkit_ui.topo_test_fakes import attach_authoring, patch_store_io, run_threads_inline
 
-
-def load_drop_harness():
-    """Run the real drop method with synchronous threading and a temporary YAML path."""
-    source_path = Path(__file__).with_name('ui_node.py')
-    tree = ast.parse(source_path.read_text(encoding='utf-8'))
-    node_class = next(
-        node for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode'
-    )
-    method = next(
-        node for node in node_class.body
-        if isinstance(node, ast.FunctionDef) and node.name == 'drop_topo_node'
-    )
-    namespace = {
-        'TopologyEditError': TopologyEditError,
-        'traceback': traceback,
-        'threading': SimpleNamespace(
-            Thread=lambda target, daemon: SimpleNamespace(start=target)),
-    }
-    exec(compile(ast.Module(body=[method], type_ignores=[]), source_path, 'exec'), namespace)
-    return type('DropHarness', (), {'drop_topo_node': namespace['drop_topo_node']}), namespace
+SERVICE_LOGGER = 'devkit_ui.application_services.topology_application_service'
 
 
 class TestDropTopoNode(unittest.TestCase):
@@ -45,22 +21,15 @@ class TestDropTopoNode(unittest.TestCase):
         # pylint: disable-next=consider-using-with
         temp_dir = self.enterContext(TemporaryDirectory())
         self.map_file = Path(temp_dir) / 'field.yaml'
-        harness, _ = load_drop_harness()
         self.namespace = patch_store_io(self)
-        self.node = harness()
-        self.node._topo_doc = TopoDoc(name='field.yaml')
-        self.node._run_vm = RunViewModel(Mock())
-        self.node._is_sim = True
-        self.node._row_action = ROW_ACTION
-        self.node.latest_odom = SimpleNamespace(
-            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=1.234, y=5.678))))
-        self.node.latest_gps = None
-        self.node.get_logger = Mock(return_value=Mock())
-        attach_topology(self.node, temp_dir)
+        run_threads_inline(self)
+        self.node = SimpleNamespace(_topo_doc=TopoDoc(name='field.yaml'))
+        self.authoring = attach_authoring(self.node, temp_dir)
+        self.node._topo_vm.update_doc(self.node._topo_doc)
 
     def test_missing_map_saves_node_and_defaults(self) -> None:
         """Verify a first drop saves the node, row metadata, and default navigation settings."""
-        self.node.drop_topo_node('new', 7, 'exit')
+        self.authoring.drop_node('new', 7, 'exit')
 
         saved = parse_topo_yaml(self.map_file)
         self.assertEqual({node.name for node in saved.nodes}, {'NEW'})
@@ -80,7 +49,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.node._topo_vm.current_node = 'TARGET'
         source = self.node._topo_doc
 
-        self.node.drop_topo_node('NEW', None)
+        self.authoring.drop_node('NEW', None)
 
         saved = parse_topo_yaml(self.map_file)
         self.assertEqual({node.name for node in saved.nodes}, {'NEW'})
@@ -94,7 +63,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.node._topo_vm.selected_node = 'TARGET'
         dump_topo_yaml(self.node._topo_doc, self.map_file)
 
-        self.node.drop_topo_node('NEW', None)
+        self.authoring.drop_node('NEW', None)
 
         saved = parse_topo_yaml(self.map_file)
         self.assertEqual({node.name for node in saved.nodes}, {'TARGET', 'NEW'})
@@ -107,7 +76,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.node._topo_vm.current_node = 'TARGET'
         dump_topo_yaml(TopoDoc(name='field.yaml'), self.map_file)
 
-        self.node.drop_topo_node('NEW', None)
+        self.authoring.drop_node('NEW', None)
 
         saved = parse_topo_yaml(self.map_file)
         self.assertTrue(saved.has_node('NEW'))
@@ -119,7 +88,8 @@ class TestDropTopoNode(unittest.TestCase):
         dump_topo_yaml(disk_doc, self.map_file)
         original = self.map_file.read_bytes()
 
-        self.node.drop_topo_node('NEW', None)
+        with self.assertLogs(SERVICE_LOGGER, logging.WARNING):
+            self.authoring.drop_node('NEW', None)
 
         self.assertEqual(self.map_file.read_bytes(), original)
         self.namespace['dump_topo_yaml'].assert_not_called()
@@ -131,11 +101,11 @@ class TestDropTopoNode(unittest.TestCase):
             with self.subTest(action=action):
                 self.node._topo_doc = TopoDoc(
                     name='field.yaml', nodes=[TopoNode(name='TARGET', x=0.0, y=0.0)])
-                self.node._row_action = action
+                self.node._run_vm.drop_node.row_action = action
                 self.node._topo_vm.current_node = 'TARGET'
                 dump_topo_yaml(self.node._topo_doc, self.map_file)
 
-                self.node.drop_topo_node('ROW', 1, 'entry')
+                self.authoring.drop_node('ROW', 1, 'entry')
 
                 saved = parse_topo_yaml(self.map_file)
                 self.assertEqual(list(saved.get_node('ROW').edges), [
@@ -144,12 +114,12 @@ class TestDropTopoNode(unittest.TestCase):
 
     def test_standard_drop_uses_navigation_even_in_vision_mode(self) -> None:
         """Verify non-row drops use navigation regardless of the selected row mode."""
-        self.node._row_action = VISION_ROW_ACTION
+        self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
         self.node._topo_doc.add_node(TopoNode(name='TARGET', x=0.0, y=0.0))
         self.node._topo_vm.current_node = 'TARGET'
         dump_topo_yaml(self.node._topo_doc, self.map_file)
 
-        self.node.drop_topo_node('NEW', None)
+        self.authoring.drop_node('NEW', None)
 
         self.assertEqual(list(parse_topo_yaml(self.map_file).get_node('NEW').edges), [
             TopoEdge(action=NAV_ACTION, edge_id='NEW_TARGET', node='TARGET')])
@@ -158,7 +128,7 @@ class TestDropTopoNode(unittest.TestCase):
         """Verify creating a map replaces stale actions and definitions with defaults."""
         self.node._topo_doc.seed_actions({'custom': {'composable': True}}, {'old': '<old/>'})
 
-        self.node.drop_topo_node('NEW', None)
+        self.authoring.drop_node('NEW', None)
 
         saved = parse_topo_yaml(self.map_file)
         self.assertEqual(saved.actions, default_actions())
@@ -173,7 +143,7 @@ class TestDropTopoNode(unittest.TestCase):
         dump_topo_yaml(disk, self.map_file)
         self.node._topo_doc.insert_node(TopoNode(name='UNSAVED'))
 
-        self.node.drop_topo_node('NEW', 0, 'entry')
+        self.authoring.drop_node('NEW', 0, 'entry')
 
         saved = parse_topo_yaml(self.map_file)
         self.assertEqual({node.name for node in saved.nodes}, {'DISK', 'NEW'})
@@ -189,23 +159,24 @@ class TestDropTopoNode(unittest.TestCase):
         live = self.node._topo_doc
         self.namespace['dump_topo_yaml'].side_effect = OSError('disk full')
 
-        self.node.drop_topo_node('NEW', 1)
+        with self.assertLogs(SERVICE_LOGGER, logging.ERROR) as logs:
+            self.authoring.drop_node('NEW', 1)
 
         self.assertIs(self.node._topo_doc, live)
         self.assertTrue(live.has_node('NEW'))
         self.assertEqual(self.node._run_vm.drop_node.status, 'ERROR: disk full')
         self.assertFalse(self.map_file.exists())
         self.node._topo_map_pub.publish.assert_not_called()
-        self.node.get_logger().error.assert_called_once()
+        self.assertEqual(len(logs.records), 1)
 
     def test_pruning_saved_edges_does_not_mutate_initial_node(self) -> None:
         """Verify pruning unsaved targets affects only the persisted copy of a node."""
         self.node._topo_doc.insert_node(TopoNode(name='TARGET'))
         self.node._topo_vm.current_node = 'TARGET'
         live = self.node._topo_doc
-        self.node._row_action = VISION_ROW_ACTION
+        self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
 
-        self.node.drop_topo_node('NEW', 1)
+        self.authoring.drop_node('NEW', 1)
 
         initial = live.get_node('NEW')
         saved = self.node._topo_doc.get_node('NEW')

@@ -1,5 +1,6 @@
 # pylint: disable=protected-access,attribute-defined-outside-init
 import copy
+import logging
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,8 +9,10 @@ from unittest.mock import Mock
 from devkit_ui.constants import ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
-from devkit_ui.test_map_operations import load_map_harness
+from devkit_ui.test_map_operations import load_map_harness, persist_and_reload
 from devkit_ui.topo_defaults import default_actions, default_definitions
+
+SERVICE_LOGGER = 'devkit_ui.application_services.topology_application_service'
 
 
 class TestMapFailures(unittest.TestCase):
@@ -19,7 +22,7 @@ class TestMapFailures(unittest.TestCase):
         self.directory = Path(self.enterContext(TemporaryDirectory()))
         self.node, self.namespace = load_map_harness(self.directory, self)
         self.live = self.node._topo_doc
-        self.node._row_action = self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
+        self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
         dump_topo_yaml(self.live, self.directory / 'live')
         self.original_bytes = (self.directory / 'live').read_bytes()
 
@@ -31,7 +34,7 @@ class TestMapFailures(unittest.TestCase):
 
         self.namespace['dump_topo_yaml'].assert_not_called()
         self.assertIs(self.node._topo_doc, self.live)
-        self.assertEqual(self.node._row_action, VISION_ROW_ACTION)
+        self.assertEqual(self.node.authoring.row_action, VISION_ROW_ACTION)
         self.assertEqual(self.node._run_vm.drop_node.row_action, VISION_ROW_ACTION)
         self.assertEqual((self.directory / 'live').read_bytes(), self.original_bytes)
         self.node._topo_map_pub.publish.assert_not_called()
@@ -60,7 +63,7 @@ class TestMapFailures(unittest.TestCase):
         self.assertEqual(archived, persisted)
         self.assertEqual((self.directory / 'live').read_bytes(), self.original_bytes)
         self.assertIs(self.node._topo_doc, self.live)
-        self.assertEqual(self.node._row_action, VISION_ROW_ACTION)
+        self.assertEqual(self.node.authoring.row_action, VISION_ROW_ACTION)
         self.assertEqual(self.node._run_vm.drop_node.row_action, VISION_ROW_ACTION)
         self.node._topo_map_pub.publish.assert_not_called()
 
@@ -76,7 +79,7 @@ class TestMapFailures(unittest.TestCase):
         self.assertEqual(cleared.definitions, default_definitions())
         self.assertEqual(self.node._topo_doc.to_dict(), cleared.to_dict())
         self.assertTrue(parse_topo_yaml(self.directory / 'live_1').has_node('A'))
-        self.assertEqual(self.node._row_action, ROW_ACTION)
+        self.assertEqual(self.node.authoring.row_action, ROW_ACTION)
         self.assertEqual(self.node._run_vm.drop_node.row_action, ROW_ACTION)
 
     def test_save_directory_failure_preserves_live_map_and_selection(self) -> None:
@@ -88,7 +91,7 @@ class TestMapFailures(unittest.TestCase):
         self.assertFalse((self.directory / 'copy').exists())
         self.assertEqual((self.directory / 'live').read_bytes(), self.original_bytes)
         self.assertIs(self.node._topo_doc, self.live)
-        self.assertEqual(self.node._row_action, VISION_ROW_ACTION)
+        self.assertEqual(self.node.authoring.row_action, VISION_ROW_ACTION)
         self.namespace['dump_topo_yaml'].assert_not_called()
         self.node._topo_map_pub.publish.assert_not_called()
 
@@ -97,7 +100,8 @@ class TestMapFailures(unittest.TestCase):
         self.namespace['parse_topo_yaml'].side_effect = ValueError('invalid map')
         modify = Mock()
 
-        self.node._persist_and_reload(modify, self.node._run_vm.drop_node, 'status', 'updated')
+        with self.assertLogs(SERVICE_LOGGER, logging.ERROR):
+            persist_and_reload(self.node, modify, 'updated')
 
         self.assertEqual(self.node._run_vm.drop_node.status, 'ERROR: invalid map')
         modify.assert_not_called()
@@ -116,8 +120,8 @@ class TestMapFailures(unittest.TestCase):
             doc.insert_node(TopoNode(name='NEW'))
             raise ValueError('invalid modification')
 
-        self.node._persist_and_reload(
-            modify_then_fail, self.node._run_vm.drop_node, 'status', 'updated')
+        with self.assertLogs(SERVICE_LOGGER, logging.ERROR):
+            persist_and_reload(self.node, modify_then_fail, 'updated')
 
         self.assertEqual(self.node._run_vm.drop_node.status, 'ERROR: invalid modification')
         self.assertIs(self.node._topo_doc, self.live)
@@ -132,9 +136,8 @@ class TestMapFailures(unittest.TestCase):
                        actions={'custom': {'composable': False}}, definitions={'bt': '<custom/>'})
         dump_topo_yaml(disk, self.directory / 'live')
 
-        self.node._persist_and_reload(
-            lambda doc: doc.insert_node(TopoNode(name='NEW', x=5.0, y=6.0)),
-            self.node._run_vm.drop_node, 'status', 'updated')
+        persist_and_reload(
+            self.node, lambda doc: doc.insert_node(TopoNode(name='NEW', x=5.0, y=6.0)), 'updated')
 
         saved = parse_topo_yaml(self.directory / 'live')
         self.assertEqual({node.name for node in saved.nodes}, {'DISK', 'NEW'})
