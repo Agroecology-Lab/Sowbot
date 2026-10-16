@@ -118,14 +118,15 @@ class PlanApplicationService:
     def import_plan(self, text: str) -> ImportOutcome:
         """Read a web-planner plan into planned rows the caller can save.
 
-        Does not touch the topology map. Hardware requires finite GPS coordinates with at
-        least one absolute value above 1e-9 degrees, and rejects a plan whose row-endpoint
-        center is more than 2,000 meters from the robot. Simulation skips these GPS checks.
+        Does not touch the topology map. Hardware requires a valid fix with finite GPS
+        coordinates and at least one absolute value above 1e-9 degrees, and rejects a plan
+        whose row-endpoint center is more than 2,000 meters from the robot.
+        Simulation skips these GPS checks.
         PlanError becomes a failed outcome with its message; other parser errors propagate.
         """
         robot_ll = None
         gps = self._telemetry.latest_gps
-        if gps is not None:
+        if gps is not None and gps.status.status >= 0:
             lat, lon = gps.latitude, gps.longitude
             if math.isfinite(lat) and math.isfinite(lon) and (abs(lat) > 1e-9 or abs(lon) > 1e-9):
                 robot_ll = (lat, lon)

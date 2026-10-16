@@ -239,10 +239,15 @@ class TestImportPlan(unittest.TestCase):
         self.assertTrue(view.planned.contour_used)
 
     def test_hardware_needs_a_usable_fix(self) -> None:
-        """Verify hardware imports reject missing, zero, and nonfinite GPS coordinates."""
+        """Verify hardware imports reject missing, invalid, zero, and nonfinite GPS fixes."""
         self.node.is_sim = False
-        for gps in (None, SimpleNamespace(latitude=0.0, longitude=0.0),
-                    SimpleNamespace(latitude=float('nan'), longitude=-2.6)):
+        for gps in (None,
+                    SimpleNamespace(latitude=51.45, longitude=-2.6,
+                                    status=SimpleNamespace(status=-1)),
+                    SimpleNamespace(latitude=0.0, longitude=0.0,
+                                    status=SimpleNamespace(status=0)),
+                    SimpleNamespace(latitude=float('nan'), longitude=-2.6,
+                                    status=SimpleNamespace(status=0))):
             with self.subTest(gps=gps):
                 self.node.latest_gps = gps
 
@@ -256,7 +261,8 @@ class TestImportPlan(unittest.TestCase):
     def test_hardware_refuses_a_plan_far_from_the_robot(self) -> None:
         """Verify hardware imports reject plans outside the robot's allowed proximity."""
         self.node.is_sim = False
-        self.node.latest_gps = SimpleNamespace(latitude=40.0, longitude=10.0)
+        self.node.latest_gps = SimpleNamespace(
+            latitude=40.0, longitude=10.0, status=SimpleNamespace(status=0))
 
         view = self.node.import_plan(self.text)
 
@@ -267,9 +273,12 @@ class TestImportPlan(unittest.TestCase):
     def test_hardware_accepts_a_plan_near_the_robot(self) -> None:
         """Verify hardware imports accept a valid plan near the current GPS fix."""
         self.node.is_sim = False
-        self.node.latest_gps = SimpleNamespace(latitude=51.45, longitude=-2.6)
+        for status in (0, 1, 2):
+            with self.subTest(status=status):
+                self.node.latest_gps = SimpleNamespace(
+                    latitude=51.45, longitude=-2.6, status=SimpleNamespace(status=status))
 
-        self.assertTrue(self.node.import_plan(self.text).status.startswith('imported 3 rows'))
+                self.assertTrue(self.node.import_plan(self.text).status.startswith('imported 3 rows'))
 
     def test_malformed_plan_reports_an_error_and_keeps_the_previous_plan(self) -> None:
         """Verify invalid plan JSON reports an error and preserves the last imported swaths."""

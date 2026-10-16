@@ -705,6 +705,7 @@ class NiceGuiNode(Node):
         swath_layers: list = []
         # The rows this browser session planned or imported; Save writes exactly these.
         draft: list = [None]
+        plan_generation = 0
         poly_layer:   list = [None]
 
         with ui.row().classes('w-full gap-3 items-start mb-3'):
@@ -880,6 +881,8 @@ class NiceGuiNode(Node):
                 (' ✓' if len(corners_ll) >= 3 else ' — need 3+'))
 
         def do_clear():
+            nonlocal plan_generation
+            plan_generation += 1
             corners_ll.clear()
             draft[0] = None
             for lyr in swath_layers:
@@ -899,17 +902,21 @@ class NiceGuiNode(Node):
             corners_lbl.set_text('0 corners')
             f2c_status.set_text('')
             save_btn.set_enabled(False)
+            plan_btn.set_enabled(True)
             mission_map.set_center(mission_map.center)
 
         clear_btn.on_click(do_clear)
 
         async def do_plan():
             """Plan rows for the drawn boundary on a worker thread and render the swaths."""
+            nonlocal plan_generation
             if len(corners_ll) < MIN_CORNERS:
                 f2c_status.set_text(f'Need at least {MIN_CORNERS} corners')
                 f2c_status.style('color:#cf222e')
                 return
 
+            plan_generation += 1
+            run_generation = plan_generation
             plan_btn.set_enabled(False)
             f2c_status.set_text('Running F2C…')
             f2c_status.style('color:#57606a')
@@ -921,6 +928,8 @@ class NiceGuiNode(Node):
                 obstacle_pad_m=obstacle_pad.value, contour=f2c_contour.value,
                 recon_path=f2c_recon_path.value, dem_res=f2c_dem_res.value)
             outcome = await ng_run.io_bound(self._plan_vm.plan, request)
+            if run_generation != plan_generation:
+                return
             if not outcome.ok:
                 f2c_status.set_text(outcome.status)
                 f2c_status.style('color:#cf222e')
