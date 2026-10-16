@@ -1,4 +1,4 @@
-"""Plan tab cards composed over a small fake UI: map, controls and the repair dialog."""
+"""Plan tab cards composed over a small fake UI: map, controls, repair dialog and mission queue."""
 # pylint: disable=protected-access,attribute-defined-outside-init,keyword-arg-before-vararg,no-member
 import asyncio
 import sys
@@ -6,8 +6,10 @@ import unittest
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from devkit_ui.actions import ActionDef
 from devkit_ui.constants import FIELD27_BOUNDS, FIELD27_CENTER
 from devkit_ui.plan_types import PlannedRows
+from devkit_ui.view_models.mission_view_model import MissionQueue
 from devkit_ui.view_models.plan_view_model import PlanPageState, PlanView, RepairOffer
 
 
@@ -176,8 +178,9 @@ fake_nicegui.run = SimpleNamespace(io_bound=None)
 
 _modules_before = set(sys.modules)
 with patch.dict(sys.modules, {'nicegui': fake_nicegui}):
-    from devkit_ui.pages.plan import plan_controls_card, repair_dialog
+    from devkit_ui.pages.plan import mission_queue_card, plan_controls_card, repair_dialog
     from devkit_ui.pages.plan.boundary_map_card import BoundaryMapCard
+    from devkit_ui.pages.plan.mission_queue_card import MissionQueueCard
     from devkit_ui.pages.plan.plan_controls_card import PlanControlsCard
     _imported_here = set(sys.modules) - _modules_before
 
@@ -632,6 +635,204 @@ class TestRepair(ControlsCase):
         fake_ui.find('button', 'Repair')[-1].click()
 
         self.assertEqual(dialog.submitted, ['cancel', 'ok'])
+
+
+def walk(element):
+    """Yield an element and everything built inside it, in order."""
+    yield element
+    for child in element.children:
+        yield from walk(child)
+
+
+def texts(element, kind='label'):
+    """Return the text of every element of a kind inside an element."""
+    return [e.text for e in walk(element) if e.kind == kind]
+
+
+DEPTH = SimpleNamespace(key='depth', label='Depth', unit='m', default=0.4, min=0.0, max=1.0,
+                        step=0.1, precision=2)
+
+
+class TestMissionQueueCard(unittest.TestCase):
+    def setUp(self) -> None:
+        """Build the card over a real queue and a map with rows 1 and 2."""
+        fake_ui.reset()
+        self.addCleanup(fake_ui.reset)
+        actions = {'drive': ActionDef('Drive only', 'D'),
+                   'till': ActionDef('Till', 'T', param_schema=(DEPTH,))}
+        self.enterContext(patch.object(mission_queue_card, 'ACTIONS', actions))
+        self.queue = MissionQueue()
+        self.vm = Mock()
+        self.vm.topo_snapshot.return_value = frozenset({('A_IN', 1, 'entry')})
+        self.vm.available_rows.return_value = {2: 'B_IN', 1: 'A_IN'}
+        self.on_run, self.on_cancel, self.on_delete = Mock(), Mock(), Mock()
+        self.card = MissionQueueCard(
+            self.queue, self.vm, self.on_run, self.on_cancel, self.on_delete)
+        self.tick = fake_ui.timers[-1][1]
+
+    def buttons(self, container, text):
+        """Return the buttons in a container with this label, in order."""
+        return [e for e in walk(container) if e.kind == 'button' and e.text == text]
+
+    def queue_rows(self):
+        """Return the label texts shown in the queue panel."""
+        return texts(self.card._queue_col)
+
+    def test_the_implement_picker_offers_every_action_and_starts_on_drive(self) -> None:
+        """Verify the options and the default."""
+        picker = self.card._action
+
+        self.assertEqual(picker.kwargs['options'], {'drive': 'D Drive only', 'till': 'T Till'})
+        self.assertEqual(picker.value, 'drive')
+        self.assertEqual(self.card._param_inputs, {})
+
+    def test_choosing_an_action_with_parameters_shows_an_input_for_each(self) -> None:
+        """Verify the depth input appears with its label and default, then goes again."""
+        self.card._action.value = 'till'
+        self.card._action.handlers['value'](None)
+
+        depth = self.card._param_inputs['depth']
+        self.assertEqual((depth.kwargs['label'], depth.value), ('Depth (m)', 0.4))
+        self.assertEqual(depth.kwargs['min'], 0.0)
+        self.assertEqual(depth.kwargs['max'], 1.0)
+
+        self.card._action.value = 'drive'
+        self.card._action.handlers['value'](None)
+        self.assertEqual(self.card._param_inputs, {})
+        self.assertEqual(self.card._param_row.children, [])
+
+    def test_the_queue_starts_empty_with_its_hint(self) -> None:
+        """Verify the empty-queue hint is shown."""
+        self.assertTrue(self.card._queue_lbl.visible)
+        self.assertEqual(self.card._queue_col.children, [])
+
+    def test_available_rows_are_listed_in_row_order(self) -> None:
+        """Verify rows 1 and 2 appear with their entry nodes, sorted."""
+        self.assertEqual(
+            texts(self.card._available_col),
+            ['Row 1', 'A_IN', 'Row 2', 'B_IN'])
+
+    def test_adding_a_row_queues_it_with_the_selected_action_and_parameters(self) -> None:
+        """Verify the step carries the action key and the float parameter values."""
+        self.card._action.value = 'till'
+        self.card._action.handlers['value'](None)
+        self.card._param_inputs['depth'].value = 0.7
+
+        self.buttons(self.card._available_col, 'Add →')[1].click(None)
+
+        self.assertEqual(self.queue.items, [(2, 'till', {'depth': 0.7})])
+        self.assertFalse(self.card._queue_lbl.visible)
+        self.assertEqual(self.queue_rows(), ['Row 2  T Till', 'Depth: 0.70m'])
+
+    def test_the_same_row_can_be_queued_twice(self) -> None:
+        """Verify duplicates are kept, as one row may run with two implements."""
+        add = self.buttons(self.card._available_col, 'Add →')[0]
+
+        add.click(None)
+        add.click(None)
+
+        self.assertEqual([r for r, _, _ in self.queue.items], [1, 1])
+
+    def test_an_action_without_parameters_queues_empty_parameters(self) -> None:
+        """Verify drive carries no parameters."""
+        self.buttons(self.card._available_col, 'Add →')[0].click(None)
+
+        self.assertEqual(self.queue.items, [(1, 'drive', {})])
+        self.assertEqual(self.queue_rows(), ['Row 1  D Drive only'])
+
+    def test_a_step_with_an_unknown_action_still_shows(self) -> None:
+        """Verify a queued key that no longer exists is shown by key."""
+        self.queue.add(5, 'gone', {})
+
+        self.assertEqual(self.queue_rows(), ['Row 5  ? gone'])
+
+    def test_move_buttons_are_disabled_at_the_ends_and_reorder_the_queue(self) -> None:
+        """Verify first cannot go up, last cannot go down, and the buttons swap neighbours."""
+        for row in (1, 2, 3):
+            self.queue.add(row, 'drive', {})
+        up = self.buttons(self.card._queue_col, '↑')
+        down = self.buttons(self.card._queue_col, '↓')
+        self.assertEqual([b.enabled for b in up], [False, True, True])
+        self.assertEqual([b.enabled for b in down], [True, True, False])
+
+        down[0].click(None)
+        self.assertEqual([r for r, _, _ in self.queue.items], [2, 1, 3])
+
+        self.buttons(self.card._queue_col, '↑')[2].click(None)
+        self.assertEqual([r for r, _, _ in self.queue.items], [2, 3, 1])
+        self.assertEqual(self.queue_rows(), ['Row 2  D Drive only', 'Row 3  D Drive only',
+                                             'Row 1  D Drive only'])
+
+    def test_the_remove_button_drops_that_step(self) -> None:
+        """Verify removal by position, then the hint returns."""
+        self.queue.add(1, 'drive', {})
+        self.queue.add(2, 'drive', {})
+
+        self.buttons(self.card._queue_col, '✕')[0].click(None)
+        self.assertEqual([r for r, _, _ in self.queue.items], [2])
+        self.buttons(self.card._queue_col, '✕')[0].click(None)
+
+        self.assertTrue(self.card._queue_lbl.visible)
+
+    def test_run_passes_the_queue_and_the_status_label(self) -> None:
+        """Verify Run Mission hands over the live steps and the label it reports in."""
+        self.queue.add(1, 'drive', {})
+
+        self.card.run_btn.click()
+
+        self.on_run.assert_called_once_with(self.queue.items, self.card._status_lbl)
+
+    def test_cancel_calls_the_cancel_callback(self) -> None:
+        """Verify Cancel is wired straight to the callback."""
+        fake_ui.find('button', 'Cancel')[0].click()
+
+        self.on_cancel.assert_called_once_with()
+
+    def test_run_can_be_disabled_while_a_mission_runs(self) -> None:
+        """Verify the store card's switch reaches the button."""
+        self.card.set_run_enabled(False)
+        self.assertFalse(self.card.run_btn.enabled)
+        self.card.set_run_enabled(True)
+        self.assertTrue(self.card.run_btn.enabled)
+
+    def test_deleting_a_row_goes_through_the_callback_with_its_id(self) -> None:
+        """Verify the map's row delete asks the node, which confirms it."""
+        self.buttons(self.card._available_col, '✕')[1].click(None)
+
+        self.on_delete.assert_called_once_with(2)
+
+    def test_a_changed_map_is_drawn_once_it_has_settled(self) -> None:
+        """Verify the list waits one tick, then follows the map, and not again if it is unchanged."""
+        self.vm.topo_snapshot.return_value = frozenset({('C_IN', 3, 'entry')})
+        self.vm.available_rows.return_value = {3: 'C_IN'}
+        self.vm.available_rows.reset_mock()
+
+        self.tick()
+        self.assertEqual(texts(self.card._available_col), ['Row 1', 'A_IN', 'Row 2', 'B_IN'])
+        self.tick()
+        self.assertEqual(texts(self.card._available_col), ['Row 3', 'C_IN'])
+        self.tick()
+        self.tick()
+
+        self.vm.available_rows.assert_called_once_with()
+
+    def test_a_map_that_keeps_changing_is_not_drawn(self) -> None:
+        """Verify a map still being rewritten leaves the list as it was."""
+        for n in range(4):
+            self.vm.topo_snapshot.return_value = frozenset({('X', n, 'entry')})
+            self.tick()
+
+        self.assertEqual(texts(self.card._available_col), ['Row 1', 'A_IN', 'Row 2', 'B_IN'])
+
+    def test_no_map_and_no_rows_say_so(self) -> None:
+        """Verify an unloaded map, and a map without rows, show the placeholder."""
+        self.vm.topo_snapshot.return_value = None
+        self.vm.available_rows.return_value = {}
+
+        self.tick()
+        self.tick()
+
+        self.assertEqual(texts(self.card._available_col), ['No rows in map yet'])
 
 
 if __name__ == '__main__':

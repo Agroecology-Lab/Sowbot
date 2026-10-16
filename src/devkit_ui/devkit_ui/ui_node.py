@@ -60,10 +60,7 @@ from devkit_ui.domain_services.row_discovery_domain_service import RowDiscoveryD
 from devkit_ui.domain_services.telemetry_domain_service import TelemetryDomainService
 from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
 from devkit_ui.missions import MissionStore
-from devkit_ui.models import (
-    TopoDoc,
-    TopoNode,
-)
+from devkit_ui.models import TopoDoc
 
 # pylint: enable=import-error
 # OBSTACLE: obstacle manager, view model and card helpers
@@ -73,6 +70,7 @@ from devkit_ui.pages.obstacle_cards import (
     attach_nav_card,
 )
 from devkit_ui.pages.plan.boundary_map_card import BoundaryMapCard
+from devkit_ui.pages.plan.mission_queue_card import MissionQueueCard
 from devkit_ui.pages.plan.plan_controls_card import PlanControlsCard
 from devkit_ui.pages.run.drop_node_card import DropNodeCard
 from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
@@ -712,169 +710,11 @@ class NiceGuiNode(Node):
         # MISSION QUEUE CARD
         # ─────────────────────────────────────────────────────────────────────
 
-        with ui.card().classes('w-full'):
-            with ui.row().classes('items-baseline gap-2 mb-3'):
-                ui.label('Mission Queue').classes('font-semibold')
-                ui.label('select rows · pick action · run').classes(
-                    'text-xs').style('color:#8c959f')
-
-            # ── action selector + param editor ────────────────────────────────
-            with ui.row().classes('items-center gap-3 w-full mb-2 flex-wrap'):
-                ui.html('<div class="sec-label" style="white-space:nowrap">Implement</div>')
-                action_select = ui.select(
-                    options={k: f'{a.icon} {a.label}' for k, a in ACTIONS.items()},
-                    value='drive',
-                ).classes('flex-1').props('dense outlined')
-
-            # Param inputs rendered dynamically when action changes.
-            param_row = ui.row().classes('items-end gap-3 w-full flex-wrap mb-2')
-            param_inputs: dict = {}   # key → ui.number widget
-
-            def _rebuild_params():
-                param_row.clear()
-                param_inputs.clear()
-                action = ACTIONS.get(action_select.value)
-                if action is None or not action.param_schema:
-                    return
-                with param_row:
-                    for p in action.param_schema:
-                        inp = ui.number(
-                            label=f'{p.label} ({p.unit})',
-                            value=p.default,
-                            min=p.min, max=p.max, step=p.step,
-                            precision=p.precision,
-                        ).classes('w-32').props('dense outlined')
-                        param_inputs[p.key] = inp
-
-            action_select.on_value_change(lambda _: _rebuild_params())
-            _rebuild_params()
-
-            # ── available / queue panels ──────────────────────────────────────
-            with ui.row().classes('w-full gap-4 items-start'):
-                with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
-                    ui.html('<div class="sec-label mb-2">Available rows</div>')
-                    available_col = ui.column().style('gap:2px;width:100%')
-                with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
-                    ui.html('<div class="sec-label mb-2">Today\'s queue</div>')
-                    queue_col = ui.column().style('gap:2px;width:100%')
-                    queue_lbl = ui.label('Empty — add rows from the left').classes(
-                        'text-xs').style('color:#8c959f')
-
-            # mission_queue: list of (row_id, action_key, action_params) triples
-            mission_queue: list = []
-
-            def _render_queue():
-                queue_col.clear()
-                queue_lbl.set_visibility(not mission_queue)
-                if not mission_queue:
-                    return
-                with queue_col:
-                    for i, (rid, act, params) in enumerate(mission_queue):
-                        idx = i
-                        adef = ACTIONS.get(act)
-                        param_str = ' · '.join(
-                            f'{p.label}: {params.get(p.key, p.default):.{p.precision}f}{p.unit}'
-                            for p in (adef.param_schema if adef else [])
-                        )
-                        with ui.row().classes('items-center gap-1 w-full'):
-                            with ui.column().classes('flex-1 gap-0'):
-                                ui.label(
-                                    f'Row {rid}  {adef.icon if adef else "?"} '
-                                    f'{adef.label if adef else act}'
-                                ).classes('text-sm font-mono')
-                                if param_str:
-                                    ui.label(param_str).classes('text-xs font-mono').style(
-                                        'color:#8c959f')
-                            ui.button('↑',
-                                on_click=lambda _, i=idx: _move(i, -1)).props(
-                                'flat dense').classes('text-xs').style(
-                                'color:#57606a').set_enabled(i > 0)
-                            ui.button('↓',
-                                on_click=lambda _, i=idx: _move(i, 1)).props(
-                                'flat dense').classes('text-xs').style(
-                                'color:#57606a').set_enabled(i < len(mission_queue) - 1)
-                            ui.button('✕',
-                                on_click=lambda _, i=idx: _remove(i)).props(
-                                'flat dense').classes('text-xs').style('color:#cf222e')
-
-            def _move(idx, d):
-                ni = idx + d
-                if 0 <= ni < len(mission_queue):
-                    mission_queue[idx], mission_queue[ni] = mission_queue[ni], mission_queue[idx]
-                _render_queue()
-
-            def _remove(idx):
-                mission_queue.pop(idx)
-                _render_queue()
-
-            def _add_row(row_id):
-                act = action_select.value or 'drive'
-                adef = ACTIONS.get(act)
-                params = {p.key: float(param_inputs[p.key].value)
-                          for p in (adef.param_schema if adef else [])
-                          if p.key in param_inputs}
-                # allow duplicates — operator may want to run the same row
-                # twice with different implements (e.g. spray then harvest)
-                mission_queue.append((row_id, act, params))
-                _render_queue()
-
-            mission_status = ui.label('').classes('text-xs font-mono mt-3').style(
-                'color:#57606a')
-
-            with ui.row().classes('gap-2 mt-3'):
-                run_btn = ui.button(
-                    'Run Mission',
-                    on_click=lambda: self._run_mission(mission_queue, mission_status),
-                ).props('color=positive no-caps')
-                ui.button(
-                    'Cancel',
-                    on_click=self.cancel_mission,
-                ).props('color=negative no-caps flat')
-
-            # ── available rows refresh ────────────────────────────────────────
-            _avail_prev: list[set[TopoNode]] = [set()]
-            def _refresh_available():
-                """Refresh available rows after the topology snapshot stabilizes."""
-                nonlocal _avail_prev
-                topo_doc = self._topo_doc
-                if topo_doc is None:
-                    return
-                snap = set(topo_doc.nodes)
-                prev, _avail_prev[0] = _avail_prev[0], snap
-                if snap != prev:
-                    return
-                rows: dict[int, str] = {}
-                for nd in topo_doc.nodes:
-                    meta = nd.meta
-                    rid  = meta.get('row_id')
-                    if rid is not None and meta.get('row_role', '') == 'entry':
-                        try:
-                            rows[int(rid)] = nd.name
-                        except (TypeError, ValueError):
-                            pass
-                available_col.clear()
-                if not rows:
-                    with available_col:
-                        ui.label('No rows in map yet').classes('text-xs').style(
-                            'color:#8c959f')
-                    return
-                with available_col:
-                    for rid in sorted(rows):
-                        r = rid
-                        with ui.row().classes('items-center gap-2 w-full'):
-                            ui.label(f'Row {rid}').classes('text-sm font-mono flex-1')
-                            ui.label(rows[rid]).classes('text-xs font-mono').style(
-                                'color:#8c959f')
-                            ui.button(
-                                'Add →',
-                                on_click=lambda _, r=r: _add_row(r),
-                            ).props('color=primary outline no-caps dense')
-                            ui.button(
-                                '✕',
-                                on_click=lambda _, r=r: self.confirm_delete_row(r),
-                            ).props('flat dense').classes('text-xs').style('color:#cf222e')
-
-            ui.timer(1.0, _refresh_available)
+        queue = self._mission_vm.new_queue()
+        queue_card = MissionQueueCard(
+            queue, self._plan_vm, self._run_mission, self.cancel_mission,
+            self.confirm_delete_row)
+        with queue_card:
 
             # ── mission store panel ───────────────────────────────────────────
             ui.separator().classes('my-3')
@@ -903,7 +743,7 @@ class NiceGuiNode(Node):
                     """Save the queue using the entered name and optional repeat interval in hours."""
                     rpt = int(save_repeat.value) if save_repeat.value else None
                     self._mission_vm.save_queue(
-                        mission_queue, save_name_input.value or '', rpt)
+                        queue.items, save_name_input.value or '', rpt)
 
                 ui.button('Save', on_click=_save_mission).props(
                     'color=primary no-caps dense')
@@ -929,7 +769,7 @@ class NiceGuiNode(Node):
                 snap = self._mission_vm.missions
                 missions_col.clear()
                 missions_empty_lbl.set_visibility(not snap)
-                run_btn.set_enabled(not self._mission_vm.running)
+                queue_card.set_run_enabled(not self._mission_vm.running)
 
                 if not snap:
                     return
