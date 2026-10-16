@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 MIN_CORNERS = 3
 
@@ -51,12 +52,49 @@ class PlanRequest:
         )
 
 
+class PlanMode(StrEnum):
+    """How a successful run produced its rows."""
+    STRAIGHT = 'straight'
+    CONTOUR = 'contour'
+    FLAT_FALLBACK = 'flat_fallback'  # contour was asked for, the field is flat, rows are straight
+
+
+class PlanFailure(StrEnum):
+    """Why a run produced no rows."""
+    TOO_FEW_CORNERS = 'too_few_corners'
+    PLANNING = 'planning'      # an expected error: bad field, missing elevation log
+    UNEXPECTED = 'unexpected'  # anything else; logged by the service
+
+
 @dataclass(frozen=True)
 class PlanOutcome:
-    """Result of a planning run: ok is False when status describes why nothing was planned."""
-    ok: bool
-    status: str
-    swaths: list = field(default_factory=list)
+    """Result of a planning run, as plain data with no display text.
+
+    A successful run has planned rows and a mode. A failed one has a failure kind and the
+    error text in detail, if any. Whoever called plan() decides whether to keep an earlier
+    draft; the service keeps none.
+    """
+    planned: PlannedRows | None = None
+    mode: PlanMode | None = None
+    failure: PlanFailure | None = None
+    detail: str = ''
+
+    @property
+    def ok(self) -> bool:
+        """Return True when the run produced rows."""
+        return self.failure is None
+
+
+@dataclass(frozen=True)
+class ImportOutcome:
+    """Result of importing a web-planner plan: planned rows, or the reason there are none."""
+    planned: PlannedRows | None = None
+    error: str = ''
+
+    @property
+    def ok(self) -> bool:
+        """Return True when the plan was imported."""
+        return not self.error
 
 
 @dataclass(frozen=True)

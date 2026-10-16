@@ -1,8 +1,9 @@
-"""Use cases for the Plan tab: plan field rows, hold the planned swaths, save them to the map.
+"""Use cases for the Plan tab: plan field rows, import a plan, save the rows to the map.
 
-This sits between the Plan view model and the topology services. It runs the field planner,
-remembers the latest swaths until they are saved, and turns them into topology rows through
-TopologyEditService. No ROS or NiceGUI imports.
+This sits between the Plan view model and the topology services. It runs the field planner
+and turns planned rows into topology rows through TopologyEditService. It keeps no draft:
+planning and import return the rows, and saving takes them from the caller. It returns plain
+data; the view model words the status. No ROS or NiceGUI imports.
 """
 from __future__ import annotations
 
@@ -14,7 +15,15 @@ from typing import TYPE_CHECKING
 
 from devkit_f2c_planner.f2c_planner import run_f2c
 from devkit_ui import plan_import
-from devkit_ui.plan_types import MIN_CORNERS, PlannedRows, PlanOutcome, PlanRequest
+from devkit_ui.plan_types import (
+    MIN_CORNERS,
+    ImportOutcome,
+    PlanFailure,
+    PlannedRows,
+    PlanMode,
+    PlanOutcome,
+    PlanRequest,
+)
 from devkit_ui.row_planning import plan_contour_rows
 from devkit_ui.topo_results import StagedEdit, TopologyEditError
 
@@ -53,13 +62,7 @@ class PlanApplicationService:
         self._telemetry = telemetry
         self._is_sim = is_sim
         self._background = background
-        self._planned: PlannedRows | None = None
         self._save_status = ''
-
-    @property
-    def swaths(self) -> list:
-        """Return the planned swaths as (lat, lon) lists in mission order; empty if none."""
-        return self._planned.swaths if self._planned else []
 
     @property
     def save_status(self) -> str:
@@ -71,66 +74,54 @@ class PlanApplicationService:
         self._save_status = text
 
     def plan(self, request: PlanRequest) -> PlanOutcome:
-        """Plan straight or contour rows for the boundary and keep them for saving.
+        """Plan straight or contour rows for the boundary.
 
         Blocks on terrain and planner work, so call it from a worker thread. Contour mode
         falls back to straight rows when no usable reference contour exists, using the
         requested angle. With fewer than three corners or a caught planner exception, return
-        a failed outcome and keep the previous plan. A successful run replaces it,
-        even when no rows survive.
+        a failed outcome. A successful run returns its rows even when none survive. The
+        caller keeps the rows and passes them to save_rows; nothing is remembered here.
         """
         if len(request.corners_ll) < MIN_CORNERS:
-            return PlanOutcome(False, f'Need at least {MIN_CORNERS} corners')
+            return PlanOutcome(failure=PlanFailure.TOO_FEW_CORNERS)
 
         corners = list(request.corners_ll)
-        rings = request.obstacle_rings
         break_after: set[int] = set()
-        contour_used = False
-        mode_note = ''
+        mode = PlanMode.STRAIGHT
         try:
             if request.contour:
                 swaths = plan_contour_rows(
-                    corners, rings, request.tool_width, request.obstacle_pad_m,
+                    corners, request.obstacle_rings, request.tool_width, request.obstacle_pad_m,
                     request.headland_m, request.snake,
                     request.recon_path.strip() or DEFAULT_RECON_PATH, request.dem_res,
                     break_after=break_after)
                 if swaths is None:
-                    mode_note = ' · flat field, straight swaths used'
+                    mode = PlanMode.FLAT_FALLBACK
                     swaths = self._plan_straight(request)
                 else:
-                    mode_note = ' · contour rows'
-                    contour_used = True
+                    mode = PlanMode.CONTOUR
             else:
                 swaths = self._plan_straight(request)
         except (FileNotFoundError, ValueError) as exc:
-            stage = 'Contour planning' if request.contour else 'Planning'
-            return PlanOutcome(False, f'{stage} failed: {exc}')
+            return PlanOutcome(failure=PlanFailure.PLANNING, detail=str(exc))
         except Exception as exc:
             _LOG.exception('plan failed')
-            return PlanOutcome(False, f'ERROR: {exc}')
+            return PlanOutcome(failure=PlanFailure.UNEXPECTED, detail=str(exc))
 
         # The origin is the corner run_f2c projected from. Saving re-anchors to it so the lat/lon
         # round trip cancels and rows land at the local odom origin, instead of being offset by
         # the distance between the field and whatever GPS fix is current (in sim, the datum fix).
-        self._planned = PlannedRows(
-            swaths, tuple(corners[0]), contour_used, frozenset(break_after))
+        planned = PlannedRows(
+            swaths, tuple(corners[0]), mode is PlanMode.CONTOUR, frozenset(break_after))
+        return PlanOutcome(planned=planned, mode=mode)
 
-        headland = f' · {request.headland_m}m headland' if request.headland_m > 0 else ''
-        snake = ' · snake' if request.snake else ''
-        avoided = f' · {len(rings)} obs avoided' if rings else ''
-        angle = '' if contour_used else f' · {request.angle_deg:.0f}°'
-        status = (f'{len(swaths)} rows · {request.tool_width}m wide'
-                  f'{angle}{headland}{snake}{avoided}{mode_note}')
-        return PlanOutcome(True, status, swaths)
+    def import_plan(self, text: str) -> ImportOutcome:
+        """Read a web-planner plan into planned rows the caller can save.
 
-    def import_plan(self, text: str) -> str:
-        """Load a web-planner plan as the planned rows so they can be saved.
-
-        Returns a status string; does not touch the topology map. Hardware requires finite
-        GPS coordinates with at least one absolute value above 1e-9 degrees, and rejects
-        a plan whose row-endpoint center is more than 2,000 meters from the robot.
-        Simulation skips these GPS checks. PlanError becomes an 'ERROR:' status and leaves
-        the previous plan intact; other parser errors propagate.
+        Does not touch the topology map. Hardware requires finite GPS coordinates with at
+        least one absolute value above 1e-9 degrees, and rejects a plan whose row-endpoint
+        center is more than 2,000 meters from the robot. Simulation skips these GPS checks.
+        PlanError becomes a failed outcome with its message; other parser errors propagate.
         """
         robot_ll = None
         gps = self._telemetry.latest_gps
@@ -139,21 +130,23 @@ class PlanApplicationService:
             if math.isfinite(lat) and math.isfinite(lon) and (abs(lat) > 1e-9 or abs(lon) > 1e-9):
                 robot_ll = (lat, lon)
         if robot_ll is None and not self._is_sim:
-            return 'ERROR: no GPS fix; cannot check the plan is near the robot'
+            return ImportOutcome(error='no GPS fix; cannot check the plan is near the robot')
         try:
             plan = plan_import.parse_plan(text, robot_ll=None if self._is_sim else robot_ll)
         except plan_import.PlanError as exc:
-            return f'ERROR: {exc}'
-        self._planned = PlannedRows(
+            return ImportOutcome(error=str(exc))
+        return ImportOutcome(planned=PlannedRows(
             plan.swaths, plan.origin_ll, bool(plan.params.get('contour')),
-            frozenset(plan.break_after))
-        split = (
-            f' · {len(plan.break_after)} obstacle splits (not linked)' if plan.break_after else '')
-        return f'imported {len(plan.swaths)} rows{split}; review, then Save as Topo Rows'
+            frozenset(plan.break_after)))
 
-    def save_rows(self, prefix: str, row_id_start: int, overwrite: bool, *,
-                  row_action: str, current_node: str | None, selected_node: str | None) -> None:
-        """Save the planned swaths as rows in the loaded topology map.
+    def save_rows(self, planned: PlannedRows | None, prefix: str, row_id_start: int,
+                  overwrite: bool, *, row_action: str, current_node: str | None,
+                  selected_node: str | None) -> None:
+        """Save the given planned swaths as rows in the loaded topology map.
+
+        The rows come from the caller, so a save always writes the plan its caller made. With
+        no rows (None, or an empty plan) the save is rejected in save_status and nothing is
+        written.
 
         In-row edges use row_action and headland edges use point-to-point navigation. The
         new rows connect to current_node, or selected_node when that is not usable.
@@ -163,6 +156,7 @@ class PlanApplicationService:
         propagate before anything is scheduled.
 
         Args:
+            planned: Rows from plan() or import_plan(), or None if the caller has none.
             prefix: Prefix for the generated node names, normalized by the edit service.
             row_id_start: Row id given to the first planned swath.
             overwrite: Replace existing ``<prefix>_R*`` nodes instead of skipping taken names.
@@ -170,7 +164,7 @@ class PlanApplicationService:
             current_node: Node the robot is localised on, if any.
             selected_node: Node picked in the map view, if any.
         """
-        planned = self._planned or PlannedRows([], None)
+        planned = planned or PlannedRows([], None)
         odom = self._telemetry.latest_odom
         try:
             edit = self._edits.stage_f2c_save(

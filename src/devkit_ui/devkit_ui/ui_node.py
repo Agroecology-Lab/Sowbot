@@ -703,6 +703,8 @@ class NiceGuiNode(Node):
         """Build the Plan tab UI: field boundary drawing, F2C planning, and row saving."""
         corners_ll: list[tuple[float, float]] = []
         swath_layers: list = []
+        # The rows this browser session planned or imported; Save writes exactly these.
+        draft: list = [None]
         poly_layer:   list = [None]
 
         with ui.row().classes('w-full gap-3 items-start mb-3'):
@@ -828,11 +830,12 @@ class NiceGuiNode(Node):
                 async def do_import(e):
                     """Import an uploaded plan and update its status and save button."""
                     data = (await e.file.read()) if hasattr(e, 'file') else e.content.read()
-                    msg = self._plan_vm.import_plan(data.decode('utf-8', errors='replace'))
-                    f2c_status.set_text(msg)
-                    f2c_status.style(
-                        'color:' + ('#cf222e' if msg.startswith('ERROR') else '#1a7f37'))
-                    save_btn.set_enabled(not msg.startswith('ERROR'))
+                    imported = self._plan_vm.import_plan(data.decode('utf-8', errors='replace'))
+                    if imported.ok:
+                        draft[0] = imported.planned
+                    f2c_status.set_text(imported.status)
+                    f2c_status.style('color:' + ('#1a7f37' if imported.ok else '#cf222e'))
+                    save_btn.set_enabled(imported.ok)
 
                 ui.upload(label='Import web plan (.geojson)', auto_upload=True,
                           on_upload=do_import).props('accept=.geojson,.json').classes('w-full mt-1')
@@ -878,6 +881,7 @@ class NiceGuiNode(Node):
 
         def do_clear():
             corners_ll.clear()
+            draft[0] = None
             for lyr in swath_layers:
                 try:
                     lyr.run_method('remove')
@@ -923,6 +927,7 @@ class NiceGuiNode(Node):
                 plan_btn.set_enabled(True)
                 return
 
+            draft[0] = outcome.planned
             for lyr in swath_layers:
                 try:
                     lyr.run_method('remove')
@@ -949,6 +954,7 @@ class NiceGuiNode(Node):
         def do_save():
             """Save planned rows using the current prefix, first row ID and overwrite option."""
             self._plan_vm.save_rows(
+                draft[0],
                 f2c_prefix.value or 'F2C',
                 int(f2c_row_id_start.value or 1),
                 overwrite=f2c_overwrite.value,

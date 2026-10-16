@@ -132,10 +132,29 @@ class PlanHarness:
         return self.topology.persist_and_reload.call_args.args[0]
 
     def _sync(self) -> None:
-        self.service._planned = PlannedRows(**self._planned)
+        self.draft = PlannedRows(**self._planned)
+
+    def plan(self, request):
+        """Plan as the page does: keep the rows of a successful run as the draft."""
+        view = self.vm.plan(request)
+        if view.ok:
+            self._keep(view.planned)
+        return view
+
+    def import_plan(self, text):
+        """Import as the page does: keep the rows of a successful import as the draft."""
+        view = self.vm.import_plan(text)
+        if view.ok:
+            self._keep(view.planned)
+        return view
+
+    def _keep(self, planned) -> None:
+        self._planned = {'swaths': planned.swaths, 'origin_ll': planned.origin_ll,
+                         'contour_used': planned.contour_used, 'break_after': planned.break_after}
+        self._sync()
 
     def save(self, prefix, row_id_start, overwrite=False) -> None:
-        self.vm.save_rows(prefix, row_id_start, overwrite)
+        self.vm.save_rows(self.draft, prefix, row_id_start, overwrite)
 
     def repair(self, connect_to=None) -> None:
         self.vm.repair(connect_to)
@@ -318,11 +337,11 @@ class TestDirectContourPlanning(unittest.TestCase):
             corners_ll=[(51.0, -2.0), (51.003, -2.0), (51.0, -1.999)], tool_width=4,
             snake=True, contour=True, recon_path='test.csv')
 
-        outcome = node.vm.plan(request)
+        outcome = node.plan(request)
         self.assertTrue(outcome.ok)
         self.assertEqual(outcome.swaths, swaths)
-        self.assertEqual(node.service._planned.break_after, {0})
-        self.assertTrue(node.service._planned.contour_used)
+        self.assertEqual(node.draft.break_after, {0})
+        self.assertTrue(node.draft.contour_used)
         node.save('curve', row_id_start=7)
         nodes = node.doc
         self.assertNotIn('CURVE_R8_IN', [e.node for e in nodes.get_node('CURVE_R7_OUT').edges])
@@ -330,16 +349,16 @@ class TestDirectContourPlanning(unittest.TestCase):
         self.assertIn('CURVE_R9_IN', [e.node for e in nodes.get_node('CURVE_R8_OUT').edges])
 
         select_contour.return_value = None
-        self.assertTrue(node.vm.plan(request).ok)
-        self.assertEqual(node.service._planned.break_after, set())
-        self.assertFalse(node.service._planned.contour_used)
+        self.assertTrue(node.plan(request).ok)
+        self.assertEqual(node.draft.break_after, set())
+        self.assertFalse(node.draft.contour_used)
 
         node.break_after = {0}
         node.contour_used = True
-        self.assertTrue(node.vm.plan(PlanRequest(
+        self.assertTrue(node.plan(PlanRequest(
             corners_ll=request.corners_ll, tool_width=4, contour=False)).ok)
-        self.assertEqual(node.service._planned.break_after, set())
-        self.assertFalse(node.service._planned.contour_used)
+        self.assertEqual(node.draft.break_after, set())
+        self.assertFalse(node.draft.contour_used)
 
 
 if __name__ == '__main__':

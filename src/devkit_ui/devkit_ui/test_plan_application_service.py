@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from devkit_ui.application_services import plan_application_service as plan_module
 from devkit_ui.models import TopoDoc
-from devkit_ui.plan_types import PlanRequest
+from devkit_ui.plan_types import PlanFailure, PlanMode, PlanRequest
 from devkit_ui.test_f2c_row_metadata import SERVICE_LOGGER, make_node, patch_row_geometry
 from devkit_ui.test_plan_import import ROW0, ROW1, _feat, _plan
 
@@ -29,12 +29,12 @@ class TestPlan(unittest.TestCase):
         """Verify incomplete boundaries are rejected before calling the planner."""
         for corners in ([], CORNERS[:2]):
             with self.subTest(corners=len(corners)):
-                outcome = self.node.vm.plan(PlanRequest(corners_ll=corners))
+                outcome = self.node.plan(PlanRequest(corners_ll=corners))
 
                 self.assertFalse(outcome.ok)
                 self.assertEqual(outcome.status, 'Need at least 3 corners')
+                self.assertIsNone(outcome.planned)
                 self.run_f2c.assert_not_called()
-        self.assertEqual(self.node.vm.swaths, [])
 
     def test_straight_plan_runs_planner_and_keeps_swaths_anchored_at_first_corner(self) -> None:
         """Verify straight planning forwards parameters and retains swaths with their origin."""
@@ -42,7 +42,7 @@ class TestPlan(unittest.TestCase):
             corners_ll=CORNERS, obstacle_rings=[[(1.0, 2.0)]], tool_width=2.5, angle_deg=30,
             headland_m=1.5, snake=False, obstacle_pad_m=0.4)
 
-        outcome = self.node.vm.plan(request)
+        outcome = self.node.plan(request)
 
         self.run_f2c.assert_called_once_with(CORNERS, [[(1.0, 2.0)]], 2.5, 30, 0.4, 1.5, False)
         self.contour.assert_not_called()
@@ -50,15 +50,15 @@ class TestPlan(unittest.TestCase):
         self.assertEqual(outcome.swaths, SWATHS)
         self.assertEqual(
             outcome.status, '2 rows · 2.5m wide · 30° · 1.5m headland · 1 obs avoided')
-        self.assertEqual(self.node.vm.swaths, SWATHS)
-        planned = self.node.service._planned
+        planned = outcome.planned
+        self.assertEqual(planned.swaths, SWATHS)
         self.assertEqual(planned.origin_ll, CORNERS[0])
         self.assertFalse(planned.contour_used)
         self.assertEqual(planned.break_after, frozenset())
 
     def test_snake_is_reported_and_angle_is_rounded(self) -> None:
         """Verify the status includes snake ordering and the angle rounded to whole degrees."""
-        outcome = self.node.vm.plan(PlanRequest(corners_ll=CORNERS, angle_deg=12.6))
+        outcome = self.node.plan(PlanRequest(corners_ll=CORNERS, angle_deg=12.6))
 
         self.assertEqual(outcome.status, '2 rows · 1.2m wide · 13° · snake')
 
@@ -71,35 +71,35 @@ class TestPlan(unittest.TestCase):
 
         self.contour.side_effect = contour_rows
 
-        outcome = self.node.vm.plan(PlanRequest(
+        outcome = self.node.plan(PlanRequest(
             corners_ll=CORNERS, angle_deg=45, contour=True, recon_path='  log.csv ', dem_res=2.0))
 
         self.assertEqual(self.contour.call_args.args[6:], ('log.csv', 2.0))
         self.run_f2c.assert_not_called()
         self.assertEqual(outcome.status, '2 rows · 1.2m wide · snake · contour rows')
-        planned = self.node.service._planned
+        planned = outcome.planned
         self.assertTrue(planned.contour_used)
         self.assertEqual(planned.break_after, {0})
 
     def test_blank_recon_path_uses_the_default_log(self) -> None:
         """Verify a blank reconstruction path selects the default contour elevation log."""
-        self.node.vm.plan(PlanRequest(corners_ll=CORNERS, contour=True, recon_path='  '))
+        self.node.plan(PlanRequest(corners_ll=CORNERS, contour=True, recon_path='  '))
 
         self.assertEqual(self.contour.call_args.args[6], plan_module.DEFAULT_RECON_PATH)
 
     def test_flat_field_falls_back_to_straight_rows(self) -> None:
         """Verify absent contour swaths trigger straight planning and a fallback status."""
-        outcome = self.node.vm.plan(PlanRequest(corners_ll=CORNERS, contour=True))
+        outcome = self.node.plan(PlanRequest(corners_ll=CORNERS, contour=True))
 
         self.run_f2c.assert_called_once()
         self.assertTrue(outcome.ok)
         self.assertEqual(
             outcome.status, '2 rows · 1.2m wide · 0° · snake · flat field, straight swaths used')
-        self.assertFalse(self.node.service._planned.contour_used)
+        self.assertFalse(outcome.planned.contour_used)
 
     def test_expected_failures_report_the_stage_and_keep_the_previous_plan(self) -> None:
         """Verify expected planner errors identify the failing stage and preserve prior swaths."""
-        self.node.vm.plan(PlanRequest(corners_ll=CORNERS))
+        earlier = self.node.plan(PlanRequest(corners_ll=CORNERS))
         cases = (
             (False, self.run_f2c, ValueError('bad field'), 'Planning failed: bad field'),
             (True, self.contour, FileNotFoundError('no log'), 'Contour planning failed: no log'),
@@ -108,27 +108,89 @@ class TestPlan(unittest.TestCase):
             with self.subTest(contour=contour):
                 planner.side_effect = error
 
-                outcome = self.node.vm.plan(PlanRequest(corners_ll=CORNERS[:3], contour=contour))
+                outcome = self.node.plan(PlanRequest(corners_ll=CORNERS[:3], contour=contour))
 
-                self.assertEqual((outcome.ok, outcome.status, outcome.swaths), (False, status, []))
-                self.assertEqual(self.node.vm.swaths, SWATHS)
+                self.assertEqual((outcome.ok, outcome.status, outcome.planned), (False, status, None))
+                self.assertEqual(self.node.draft, earlier.planned)
+                self.assertEqual(self.node.draft.swaths, SWATHS)
 
     def test_unexpected_failure_is_logged_and_reported(self) -> None:
         """Verify unexpected planner exceptions are logged and returned as failed outcomes."""
         self.run_f2c.side_effect = RuntimeError('boom')
 
         with self.assertLogs(SERVICE_LOGGER, level='ERROR'):
-            outcome = self.node.vm.plan(PlanRequest(corners_ll=CORNERS))
+            outcome = self.node.plan(PlanRequest(corners_ll=CORNERS))
 
         self.assertEqual((outcome.ok, outcome.status), (False, 'ERROR: boom'))
-        self.assertEqual(self.node.vm.swaths, [])
+        self.assertIsNone(outcome.planned)
+
+
+class TestPlanOutcome(unittest.TestCase):
+    """The service returns plain data and wording is left to the view model."""
+
+    def setUp(self) -> None:
+        """Create a plan harness with straight and contour planner mocks."""
+        self.service = make_node([]).service
+        self.run_f2c = self.enterContext(
+            patch.object(plan_module, 'run_f2c', Mock(return_value=SWATHS)))
+        self.contour = self.enterContext(
+            patch.object(plan_module, 'plan_contour_rows', Mock(return_value=None)))
+
+    def test_mode_says_how_the_rows_were_made(self) -> None:
+        """Verify straight, contour and flat-field fallback runs report their mode."""
+        straight = self.service.plan(PlanRequest(corners_ll=CORNERS))
+        flat = self.service.plan(PlanRequest(corners_ll=CORNERS, contour=True))
+        self.contour.return_value = SWATHS
+        contour = self.service.plan(PlanRequest(corners_ll=CORNERS, contour=True))
+
+        self.assertEqual(
+            [straight.mode, flat.mode, contour.mode],
+            [PlanMode.STRAIGHT, PlanMode.FLAT_FALLBACK, PlanMode.CONTOUR])
+        self.assertTrue(all(o.ok and o.failure is None for o in (straight, flat, contour)))
+
+    def test_failures_carry_a_kind_and_the_error_text_not_a_sentence(self) -> None:
+        """Verify failed runs report a failure kind and detail, with no rows and no status text."""
+        self.assertEqual(self.service.plan(PlanRequest(corners_ll=[])).failure,
+                         PlanFailure.TOO_FEW_CORNERS)
+        self.run_f2c.side_effect = ValueError('bad field')
+        expected = self.service.plan(PlanRequest(corners_ll=CORNERS))
+        self.run_f2c.side_effect = RuntimeError('boom')
+        with self.assertLogs(SERVICE_LOGGER, level='ERROR'):
+            unexpected = self.service.plan(PlanRequest(corners_ll=CORNERS))
+
+        self.assertEqual((expected.failure, expected.detail), (PlanFailure.PLANNING, 'bad field'))
+        self.assertEqual((unexpected.failure, unexpected.detail), (PlanFailure.UNEXPECTED, 'boom'))
+        self.assertFalse(hasattr(expected, 'status'))
+        self.assertIsNone(expected.planned)
+
+    def test_service_keeps_no_draft_between_calls(self) -> None:
+        """Verify planning leaves nothing behind on the service for another caller to save."""
+        self.service.plan(PlanRequest(corners_ll=CORNERS))
+
+        self.assertFalse(hasattr(self.service, 'swaths'))
+        self.assertFalse(hasattr(self.service, '_planned'))
+
+
+class TestSaveWritesTheRowsItIsGiven(unittest.TestCase):
+    def test_a_save_writes_its_own_plan_not_the_latest_one_planned(self) -> None:
+        """Verify two sessions planning in turn each save their own rows."""
+        patch_row_geometry(self)
+        node = make_node([])
+        with patch.object(plan_module, 'run_f2c', Mock(return_value=SWATHS[:1])):
+            mine = node.vm.plan(PlanRequest(corners_ll=CORNERS)).planned
+        with patch.object(plan_module, 'run_f2c', Mock(return_value=SWATHS)):
+            node.vm.plan(PlanRequest(corners_ll=CORNERS))
+
+        node.vm.save_rows(mine, 'crop', 1, False)
+
+        self.assertEqual({n.name for n in node.doc.nodes}, {'CROP_R1_IN', 'CROP_R1_OUT'})
 
 
 class TestSaveWithoutRows(unittest.TestCase):
     def test_saving_before_planning_reports_and_writes_nothing(self) -> None:
         """Verify saving without planned rows reports an error and skips persistence."""
         node = make_node([])
-        node.service._planned = None
+        node.draft = None
 
         node.save('crop', 1)
 
@@ -139,9 +201,9 @@ class TestSaveWithoutRows(unittest.TestCase):
         """Verify a successful plan can immediately be saved as topology entry and exit nodes."""
         patch_row_geometry(self)
         node = make_node([])
-        node.service._planned = None
+        node.draft = None
         with patch.object(plan_module, 'run_f2c', Mock(return_value=SWATHS[:1])):
-            node.vm.plan(PlanRequest(corners_ll=CORNERS))
+            node.plan(PlanRequest(corners_ll=CORNERS))
 
         node.save('crop', 1)
 
@@ -159,11 +221,12 @@ class TestImportPlan(unittest.TestCase):
         """Verify simulation imports preserve origin and split metadata without a GPS fix."""
         self.node.latest_gps = None
 
-        status = self.node.vm.import_plan(self.text)
+        view = self.node.import_plan(self.text)
 
+        self.assertTrue(view.ok)
         self.assertEqual(
-            status, 'imported 3 rows · 1 obstacle splits (not linked); review, then Save as Topo Rows')
-        planned = self.node.service._planned
+            view.status, 'imported 3 rows · 1 obstacle splits (not linked); review, then Save as Topo Rows')
+        planned = view.planned
         self.assertEqual(len(planned.swaths), 3)
         self.assertEqual(planned.origin_ll, (51.45, -2.6))
         self.assertEqual(planned.break_after, {0})
@@ -171,9 +234,9 @@ class TestImportPlan(unittest.TestCase):
 
     def test_contour_flag_is_kept(self) -> None:
         """Verify importing a contour plan retains its contour flag for saving."""
-        self.node.vm.import_plan(_plan([_feat(ROW0, 0)], contour=True))
+        view = self.node.import_plan(_plan([_feat(ROW0, 0)], contour=True))
 
-        self.assertTrue(self.node.service._planned.contour_used)
+        self.assertTrue(view.planned.contour_used)
 
     def test_hardware_needs_a_usable_fix(self) -> None:
         """Verify hardware imports reject missing, zero, and nonfinite GPS coordinates."""
@@ -183,37 +246,40 @@ class TestImportPlan(unittest.TestCase):
             with self.subTest(gps=gps):
                 self.node.latest_gps = gps
 
-                status = self.node.vm.import_plan(self.text)
+                view = self.node.import_plan(self.text)
 
+                self.assertFalse(view.ok)
                 self.assertEqual(
-                    status, 'ERROR: no GPS fix; cannot check the plan is near the robot')
-                self.assertEqual(self.node.vm.swaths, [])
+                    view.status, 'ERROR: no GPS fix; cannot check the plan is near the robot')
+                self.assertIsNone(view.planned)
 
     def test_hardware_refuses_a_plan_far_from_the_robot(self) -> None:
         """Verify hardware imports reject plans outside the robot's allowed proximity."""
         self.node.is_sim = False
         self.node.latest_gps = SimpleNamespace(latitude=40.0, longitude=10.0)
 
-        status = self.node.vm.import_plan(self.text)
+        view = self.node.import_plan(self.text)
 
-        self.assertTrue(status.startswith('ERROR: plan is '), status)
-        self.assertEqual(self.node.vm.swaths, [])
+        self.assertFalse(view.ok)
+        self.assertTrue(view.status.startswith('ERROR: plan is '), view.status)
+        self.assertIsNone(view.planned)
 
     def test_hardware_accepts_a_plan_near_the_robot(self) -> None:
         """Verify hardware imports accept a valid plan near the current GPS fix."""
         self.node.is_sim = False
         self.node.latest_gps = SimpleNamespace(latitude=51.45, longitude=-2.6)
 
-        self.assertTrue(self.node.vm.import_plan(self.text).startswith('imported 3 rows'))
+        self.assertTrue(self.node.import_plan(self.text).status.startswith('imported 3 rows'))
 
     def test_malformed_plan_reports_an_error_and_keeps_the_previous_plan(self) -> None:
         """Verify invalid plan JSON reports an error and preserves the last imported swaths."""
-        self.node.vm.import_plan(self.text)
+        self.node.import_plan(self.text)
 
-        status = self.node.vm.import_plan('not json')
+        view = self.node.import_plan('not json')
 
-        self.assertTrue(status.startswith('ERROR: not valid JSON'), status)
-        self.assertEqual(len(self.node.vm.swaths), 3)
+        self.assertFalse(view.ok)
+        self.assertTrue(view.status.startswith('ERROR: not valid JSON'), view.status)
+        self.assertEqual(len(self.node.draft.swaths), 3)
 
 
 class TestWrites(unittest.TestCase):
@@ -293,7 +359,7 @@ class TestViewModel(unittest.TestCase):
         node.save('crop', 4, overwrite=True)
 
         node.service.save_rows.assert_called_once_with(
-            'crop', 4, True, row_action='row_traversal', current_node='HERE',
+            node.draft, 'crop', 4, True, row_action='row_traversal', current_node='HERE',
             selected_node='THERE')
 
 
