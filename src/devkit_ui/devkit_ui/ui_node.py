@@ -21,7 +21,6 @@ from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import String
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
-from devkit_ui.actions import ACTIONS
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
 from devkit_ui.application_services.mission_application_service import MissionApplicationService
 from devkit_ui.application_services.navigation_application_service import (
@@ -65,13 +64,8 @@ from devkit_ui.models import TopoDoc
 # pylint: enable=import-error
 # OBSTACLE: obstacle manager, view model and card helpers
 from devkit_ui.obstacles import ObstacleManager
-from devkit_ui.pages.obstacle_cards import (
-    attach_mission_obstacle_panel,
-    attach_nav_card,
-)
-from devkit_ui.pages.plan.boundary_map_card import BoundaryMapCard
-from devkit_ui.pages.plan.mission_queue_card import MissionQueueCard
-from devkit_ui.pages.plan.plan_controls_card import PlanControlsCard
+from devkit_ui.pages.obstacle_cards import attach_nav_card
+from devkit_ui.pages.plan.plan_page import PlanPage
 from devkit_ui.pages.run.drop_node_card import DropNodeCard
 from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
 from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
@@ -697,123 +691,11 @@ class NiceGuiNode(Node):
     # ── Plan tab ──────────────────────────────────────────────────────────────
 
     def _plan_content(self) -> None:
-        """Build the Plan tab UI: field boundary drawing, F2C planning, and row saving."""
-        state = self._plan_vm.open_page()
-        with ui.row().classes('w-full gap-3 items-start mb-3'):
-            gps = ((self.latest_gps.latitude, self.latest_gps.longitude)
-                   if self.latest_gps else None)
-            boundary = BoundaryMapCard(state, gps)
-            controls = PlanControlsCard(state, self._plan_vm, self._obstacle_vm, boundary.map)
-        draw_handle = controls.draw_handle
-
-        # ─────────────────────────────────────────────────────────────────────
-        # MISSION QUEUE CARD
-        # ─────────────────────────────────────────────────────────────────────
-
-        queue = self._mission_vm.new_queue()
-        queue_card = MissionQueueCard(
-            queue, self._plan_vm, self._run_mission, self.cancel_mission,
-            self.confirm_delete_row)
-        with queue_card:
-
-            # ── mission store panel ───────────────────────────────────────────
-            ui.separator().classes('my-3')
-            with ui.row().classes('items-baseline gap-2 mb-2'):
-                ui.label('Mission Store').classes('font-semibold')
-                ui.label('saved missions with repeat schedules').classes(
-                    'text-xs').style('color:#8c959f')
-
-            with ui.card().classes('w-full').style('background:#f6f8fa;padding:10px'):
-                missions_col = ui.column().style('gap:2px;width:100%')
-                missions_empty_lbl = ui.label(
-                    'No saved missions'
-                ).classes('text-xs').style('color:#8c959f')
-
-            # Save current queue as a named recurring mission
-            with ui.row().classes('items-center gap-2 mt-2 flex-wrap'):
-                save_name_input = ui.input(
-                    placeholder='Mission name', label='Save queue as…',
-                ).classes('flex-1').props('dense outlined')
-                save_repeat = ui.number(
-                label='Repeat (h)', value=None, min=1, step=1, precision=0,
-                ).classes('w-24').props('dense outlined clearable').tooltip(
-                    'Leave blank for one-shot')
-
-                def _save_mission():
-                    """Save the queue using the entered name and optional repeat interval in hours."""
-                    rpt = int(save_repeat.value) if save_repeat.value else None
-                    self._mission_vm.save_queue(
-                        queue.items, save_name_input.value or '', rpt)
-
-                ui.button('Save', on_click=_save_mission).props(
-                    'color=primary no-caps dense')
-
-            mission_store_status = ui.label('').classes('text-xs font-mono mt-1').style(
-                'color:#57606a')
-
-            _mstore_prev = [-1]
-            def _refresh_missions():
-                """Refresh status; rebuild the saved list and run button when the version changes."""
-                # Store status line
-                cur_status = self._mission_vm.status
-                mission_store_status.set_text(cur_status)
-                mission_store_status.style(
-                    'color:#cf222e' if cur_status.startswith('ERROR') else
-                    'color:#1a7f37' if cur_status else 'color:#57606a')
-
-                v = self._mission_vm.version
-                if v == _mstore_prev[0]:
-                    return
-                _mstore_prev[0] = v
-
-                snap = self._mission_vm.missions
-                missions_col.clear()
-                missions_empty_lbl.set_visibility(not snap)
-                queue_card.set_run_enabled(not self._mission_vm.running)
-
-                if not snap:
-                    return
-                with missions_col:
-                    for m in snap:
-                        mid   = m.get('id', '?')
-                        name  = m.get('name', mid)
-                        act   = m.get('action', '—')
-                        adef  = ACTIONS.get(act)
-                        icon  = adef.icon if adef else '?'
-                        rows  = m.get('rows', [])
-                        active = m.get('active', False)
-                        due_h = self._mission_vm.next_due_in_hours(mid)
-                        if due_h is None:
-                            due_str, due_col = 'done', 'color:#8c959f'
-                        elif due_h == 0.0:
-                            due_str, due_col = 'due now', 'color:#1a7f37'
-                        else:
-                            due_str, due_col = f'in {due_h:.1f}h', 'color:#9a6700'
-                        last_ok = m.get('last_run_success')
-                        last_str = '✓' if last_ok is True else '✗' if last_ok is False else '—'
-
-                        with ui.row().classes('items-center gap-2 w-full'):
-                            ui.label(f'{icon} {name}').classes(
-                                'text-sm font-mono').style('min-width:100px')
-                            ui.label(f'{len(rows)} rows').classes(
-                                'text-xs font-mono flex-1').style('color:#8c959f')
-                            ui.label(due_str).classes('text-xs font-mono').style(due_col)
-                            ui.label(last_str).classes('text-xs font-mono').style(
-                                'color:#1a7f37' if last_ok is True else
-                                'color:#cf222e' if last_ok is False else 'color:#8c959f')
-                            act_toggle = ui.checkbox('', value=active).props('dense')
-                            act_toggle.tooltip('Active — included in today_queue()')
-                            act_toggle.on_value_change(
-                                lambda e, m=mid: self._mission_vm.set_active(m, e.value))
-                            ui.button(
-                                '✕',
-                                on_click=lambda _, m=mid: self._mission_vm.delete(m),
-                            ).props('flat dense').classes('text-xs').style('color:#cf222e')
-
-            ui.timer(0.5, _refresh_missions)
-
-        # OBSTACLE: obstacle list + map rendering, full width below the queue.
-        attach_mission_obstacle_panel(draw_handle)
+        """Build the Plan tab: field boundary, row planner, mission queue, saved missions and obstacles."""
+        gps = ((self.latest_gps.latitude, self.latest_gps.longitude)
+               if self.latest_gps else None)
+        PlanPage(self._plan_vm, self._mission_vm, self._obstacle_vm, gps,
+                 self._run_mission, self.cancel_mission, self.confirm_delete_row)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NiceGuiNode mission executor methods
