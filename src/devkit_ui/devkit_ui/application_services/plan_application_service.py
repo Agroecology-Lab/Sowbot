@@ -19,8 +19,8 @@ from devkit_ui.plan_types import (
     MIN_CORNERS,
     ImportOutcome,
     PlanFailure,
-    PlannedRows,
     PlanMode,
+    PlannedRows,
     PlanOutcome,
     PlanRequest,
 )
