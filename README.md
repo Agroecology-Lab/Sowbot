@@ -15,44 +15,46 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 
 [Docs](https://agroecology-lab.github.io/Sowbot_Data/python_api.html)
 
-```
-+---------------------------------------------------------------------------------------------------------+
-|                                    ROS 2 DUAL SBC Open Core                                             |
-|                                                                                                         |
-|  +-------------------------------------+             +-----------------------------------------------+  |
-|  |              NEO SBC                |             |                  LIMBIC SBC                   |  |
-|  | - Camera Streams (YOLO / ExG)       |  Ethernet   | - NiceGUI Web Dashboard UI                    |  |
-|  | - Visual Servoing / Crop Processing |<===========>| - Nav2 / LCAS TopoNav / Fields2Cover          |  |
-|  | - High-Throughput Perception        |   Gigabit   | - devkit_mavlink_bridge Node                  |  |
-|  +-------------------------------------+             | * Plan Services (/plan/upload, clear, start)  |  |
-|                                                      | * Telemetry Relay (/odom, /navsat/fix, /imu)  |  |
-|                                                      | * MAVLink Heartbeat & Cmd Translation         |  |
-|                                                      +-----------------------+-----------------------+  |
-+------------------------------------------------------------------------------^--------------------------+
-                                                                               |
-                                                                        Serial MAVLink
-                                                                      (UART / TTL 921600)
-                                                                               |
-+------------------------------------------------------------------------------v--------------------------+
-|                                      ARDUPILOT FLIGHT CONTROLLER                                        |
-|                                  (Levia running ArduRover Firmware)                                     |
-|                                                                                                         |
-| - Geofence: EKF3 Sensor Fusion                      - Failsafes: Heartbeat Loss, Geofence, Estop        |
-| - Arming State Machine & Pre-Arm Checks             - Direct I/O: Hardware Safety Switch, Bumpers       |
-+-------------------+------------------------------------------------------------------+------------------+
-                    |                                                                  |
-           DroneCAN / CANsimple                                                 Dual u-blox F9P
-                 (CAN Bus)                                                         RTK GNSS
-                    |                                                                  
-+-------------------v-------------------+                                              
-|    ODrive/ Dronecan Motor Controllers |                                              
-+------------------+--------------------+                                              
-                   |                                                                   
-+------------------v---------------------------------------------------------------------------+
-|                               PHYSICAL ROBOT FRAME                                           |
-|  - Safety Subsystem (Level 0)                      - Differential Drive tracked platform     |
-+----------------------------------------------------------------------------------------------+
-```
++-------------------------------------------------------+
+|               ROS 2 DUAL SBC Open Core                |
+| +----------------------+     +----------------------+ |
+| |       NEO SBC        | Gig |      LIMBIC SBC      | |
+| | - Camera Streams     | Eth | - NiceGUI Dashboard  | |
+| |   (YOLO / ExG)       |<===>| - Nav2/LCAS TopoNav  | |
+| | - Visual Servoing    |     | - devkit_mavlink node| |
+| | - Crop Processing    |     | * Plan Services      | |
+| | - High-Throughput    |     | * Telemetry Relay    | |
+| |   Perception         |     | * MAVLink Translation| |
+| +----------------------+     +----------------------+ |
++---------------------------v---------------------------+
+                            |
+                      Serial MAVLink
+                   (UART / TTL 921600)
+                            |
++---------------------------v---------------------------+
+|              ARDUPILOT FLIGHT CONTROLLER              |
+|          (Levia running ArduRover Firmware)           |
+|-------------------------------------------------------|
+| - Geofence: EKF3 Fusion   - Failsafes: Heartbeat loss,|
+| - Arming State Machine      Geofence, Estop           |
+| - Pre-Arm Checks          - Direct I/O: Safety Switch,|
+|                             Bumpers                   |
++------------+---------------------------------+--------+
+             |                                 |
+     DroneCAN/CANsimple                  Dual u-blox
+         (CAN Bus)                       F9P RTK GNSS
+             |
++------------v-------------+
+| ODrive/DroneCAN Motor    |
+| Controllers              |
++------------+-------------+
+             |
++------------v------------------------------------------+
+|                 PHYSICAL ROBOT FRAME                  |
+|-------------------------------------------------------|
+| - Safety Subsystem (Level 0)                          |
+| - Differential Drive tracked platform                 |
++-------------------------------------------------------+
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk/hardware) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
 
 Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
