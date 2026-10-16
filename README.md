@@ -9,7 +9,7 @@
 <!-- Code Coverage -->
 [![Codecov](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev/graph/badge.svg)](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev)
 
-An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and ESP32-based hardware control.
+An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and STM32-based hardware control.
 
 [Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) 
 
@@ -53,7 +53,7 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 |  - Safety Subsystem (Level 0)                      - Differential Drive tracked platform     |
 +----------------------------------------------------------------------------------------------+
 ```
-Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
+Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk/hardware) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
 
 Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
 
@@ -65,7 +65,7 @@ We have a [Online version of swath planner](https://agroecology-lab.github.io/fe
 
 [![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU) 
 
-(click image to play video)
+(click above image to play video)
 
 
 [![Architecture diagram of agroecology-lab/feldfreund_devkit_ros](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros/diagram.png)](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros?utm_source=readme&utm_medium=picture)
