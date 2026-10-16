@@ -1,6 +1,6 @@
 ## What the stack does
 
-The aim of #116 is to get logic out of `NiceGuiNode` (`ui_node.py`) into layers. On `caatinga-dev` it was 4,195 lines. On `ui-116-run-plan-sim-system` (head `caa70b9`) it is 1,589.
+The aim of #116 is to get logic out of `NiceGuiNode` (`ui_node.py`) into layers. On `caatinga-dev` it was 4,195 lines. On `ui-116-run-plan-sim-system` (head `caa70b9`) it is 1,589. On `ui-116-Plan-service-fixes` it is 838.
 
 | PR | Change |
 |---|---|
@@ -12,6 +12,7 @@ The aim of #116 is to get logic out of `NiceGuiNode` (`ui_node.py`) into layers.
 | #162 Topology edits | `TopologyEditService` holds the rules for dropping a node, saving F2C rows, repairing and deleting. The node methods become thin wrappers |
 | #163 Sim assets | `SimAssetService` handles crop-model upload validation and writing, plus the soil zip import |
 | Branch `ui-116-run-plan-sim-system` (PR number to add) | UI split into Run, Plan, Sim and System tabs. `SimPage` and `SystemPage` are classes with their cards under `pages/sim/` and `pages/system/`. `SimWorldService` rebuilds the Gazebo world. Tool processes move into `process_registry`. Map archive goes behind `TopologyViewModel`. Layer rules are enforced with import-linter in CI (six contracts). 57 test files |
+| Branch `ui-116-Plan-service-fixes` (PR number to add) | `PlanApplicationService` plans rows, imports plans and saves them. It returns plain data and keeps no draft. `PlanViewModel` words the status and opens a `PlanPageState` per browser session (boundary, draft, status, button state). The Plan tab is `PlanPage`, with its cards under `pages/plan/`: boundary map, controls, repair dialog, mission queue, mission store. A planning result that arrives after Clear is discarded. A seventh import-linter contract keeps the node, pages and view models off the F2C planner, `row_planning` and `plan_import` |
 
 #155 (optical flow in Docker) and #157 (vendored skills) are unrelated to the refactor.
 
@@ -23,14 +24,15 @@ Solid arrows follow the dependency rule. Dashed arrows and red dashed boxes are 
 
 ```mermaid
 flowchart TB
-  subgraph P1["Phase 1: same NiceGUI ROS node (NiceGuiNode, ui_node.py, 1,589 lines)"]
+  subgraph P1["Phase 1: same NiceGUI ROS node (NiceGuiNode, ui_node.py, 838 lines)"]
     subgraph UI["View (NiceGUI)"]
       Content["content(): four tabs"]
       RunTab["Run tab<br/>_run_content (method on node, ~110 lines)"]
-      PlanTab["Plan tab<br/>_plan_content (method on node, ~650 lines)"]
+      PlanPage["PlanPage (class)"]
       SimPage["SimPage (class)"]
       SystemPage["SystemPage (class)"]
       RunCards["pages/run cards<br/>(drop node, joystick, track,<br/>row discovery, node map, sidebar)"]
+      PlanCards["pages/plan cards<br/>(boundary map, controls, repair dialog,<br/>mission queue, mission store)"]
       SimCards["pages/sim cards<br/>(plant placement, Gazebo, row follow,<br/>soil texture, map archive)"]
       SysCards["pages/system cards<br/>(odometry, battery, safety, ESP, GPS, tools)"]
       ObsCards["pages/obstacle_cards"]
@@ -47,7 +49,8 @@ flowchart TB
       TopoVM["TopologyViewModel<br/>(mirrors the live TopoDoc, map archive)"]
       TelemetryVM["TelemetryViewModel"]
       RobotBrainVM["RobotBrainViewModel"]
-      MissionVM["MissionViewModel"]
+      PlanVM["PlanViewModel<br/>(plan status wording, PlanPageState per session)"]
+      MissionVM["MissionViewModel<br/>(saved missions, MissionQueue per session)"]
       ObstacleVM["ObstacleViewModel"]
       SimVM["SimViewModel"]
     end
@@ -60,6 +63,7 @@ flowchart TB
       TelemetryApp["TelemetryApplicationService"]
       TopologyApp["TopologyApplicationService<br/>(save, save-as, archive, go-live, role patch)"]
       TopologyEdit["TopologyEditService<br/>(stage drop, F2C save, repair, delete)"]
+      PlanApp["PlanApplicationService<br/>(plan rows, import plan, save rows; keeps no draft)"]
       MissionApp["MissionApplicationService"]
       SimAssets["SimAssetService<br/>(crop models, soil textures; files only)"]
       SimWorld["SimWorldService<br/>(rebuild Gazebo world via worldgen.sh)"]
@@ -90,12 +94,13 @@ flowchart TB
   end
 
   Content --> RunTab
-  Content --> PlanTab
+  Content --> PlanPage
   Content --> SimPage
   Content --> SystemPage
   RunTab --> RunCards
   RunTab --> ObsCards
-  PlanTab --> ObsCards
+  PlanPage --> PlanCards
+  PlanCards --> ObsCards
   SimPage --> SimCards
   SystemPage --> SysCards
 
@@ -103,8 +108,10 @@ flowchart TB
   RunCards --> GlobalVM
   RunCards --> TopoVM
   RunTab --> TelemetryVM
-  PlanTab --> MissionVM
-  PlanTab --> TopoVM
+  PlanCards --> PlanVM
+  PlanCards --> MissionVM
+  PlanVM -.->|"reads map"| TopoVM
+  PlanVM -.->|"reads row action"| RunVM
   SimCards --> SimVM
   SimCards --> TopoVM
   SysCards --> TelemetryVM
@@ -116,10 +123,6 @@ flowchart TB
   SysCards -.-> Medkit
 
   RunTab -.-> TopologyEdit
-  PlanTab -.-> TopologyEdit
-  PlanTab -.-> RowPlanning
-  PlanTab -.-> F2CPkg
-  PlanTab -.-> MissionDom
 
   GlobalVM --> DriveApp
   RunVM --> DriveApp
@@ -128,11 +131,17 @@ flowchart TB
   TopoVM --> TopologyApp
   TelemetryVM --> TelemetryApp
   RobotBrainVM --> RobotBrainApp
+  PlanVM --> PlanApp
   MissionVM --> MissionApp
   SimVM --> SimAssets
   SimVM --> SimWorld
   ObstacleVM -.-> ObstacleManager
 
+  PlanApp --> TopologyEdit
+  PlanApp --> TopologyApp
+  PlanApp --> TelemetryApp
+  PlanApp --> RowPlanning
+  PlanApp --> F2CPkg
   TopologyEdit --> TopologyApp
   TopologyEdit --> RowBuilder
   SimWorld --> SimAssets
@@ -169,12 +178,12 @@ flowchart TB
   classDef infra fill:#e5e7eb,stroke:#374151,color:#111827,stroke-width:1px
   classDef proc fill:#f3f4f6,stroke:#374151,color:#111827,stroke-width:1px
 
-  class Content,SimPage,SystemPage,RunCards,SimCards,SysCards,ObsCards view
-  class RunTab,PlanTab todo
+  class Content,PlanPage,SimPage,SystemPage,RunCards,PlanCards,SimCards,SysCards,ObsCards view
+  class RunTab todo
   class Medkit todo
   class ProcReg proc
-  class GlobalVM,RunVM,TopoVM,TelemetryVM,RobotBrainVM,MissionVM,ObstacleVM,SimVM vm
-  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,MissionApp,SimAssets,SimWorld app
+  class GlobalVM,RunVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM vm
+  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,SimAssets,SimWorld app
   class DriveDom,NavDom,RowDiscDom,RobotBrainDom,TelemetryDom,TopologyDom,MissionDom dom
   class RowBuilder,RowPlanning,F2CPkg pure
   class TopoMapStore,MissionStore,ObstacleManager,RosGateway infra
@@ -189,7 +198,7 @@ flowchart TB
   style INFRA fill:#f3f4f6,stroke:#374151,color:#111827
 ```
 
-The Run and Plan tabs are still methods on `NiceGuiNode`, which is why they are drawn as red dashed boxes. The Sim and System tabs are page classes. Because the Plan tab lives on the node, it reaches `TopologyEditService`, `row_planning`, `devkit_f2c_planner` and `MissionDomainService` directly instead of going through a ViewModel.
+The Run tab is still a method on `NiceGuiNode`, which is why it is drawn as a red dashed box. The Plan, Sim and System tabs are page classes. The Run tab reaches `TopologyEditService` through node wrappers instead of a ViewModel. The Plan page reaches only ViewModels; the node passes it three callbacks (run, cancel and delete row), so the mission executor is not drawn as a dependency of the page.
 
 ## Decision: drop "Facade" as a layer name
 
@@ -212,7 +221,7 @@ Nothing built plays that role. Its real job, a UI-neutral boundary that REST, MQ
 
 **Dependency rule:** Page → ViewModel → Application service → Domain service / Store / Pure module → RosGateway. Nothing points upward or skips a layer.
 
-import-linter enforces this in CI (`make lint-imports`, `.importlinter`) with six contracts:
+import-linter enforces this in CI (`make lint-imports`, `.importlinter`) with seven contracts:
 
 1. Pages import only ViewModels.
 2. Pages do not spawn processes.
@@ -220,6 +229,7 @@ import-linter enforces this in CI (`make lint-imports`, `.importlinter`) with si
 4. Services are UI-neutral.
 5. Domain services do not import application services.
 6. Only RosGateway touches rclpy.
+7. Field planning and plan import go through the Plan service: `ui_node`, the pages and the view models do not import `devkit_f2c_planner`, `row_planning` or `plan_import`.
 
 Each exception is listed in `.importlinter` with a `TODO(#116)` and the check fails if one becomes stale.
 
@@ -240,13 +250,13 @@ Each exception is listed in `.importlinter` with a `TODO(#116)` and the check fa
 | Proposed | Built |
 |---|---|
 | Facade layer (comment of 15 and 20 August: `NavFacade`, `MissionFacade`, `TopologyFacade`, `SystemFacade`) | Dropped. `ApplicationService` is the boundary (comment of 9 October) |
-| Three ViewModels: `NavViewModel`, `MissionViewModel`, `SystemViewModel`, plus `GlobalViewModel` | Eight: `Global`, `Run`, `Topology`, `Telemetry`, `RobotBrain`, `Mission`, `Obstacle`, `Sim` |
-| Pages: Nav, Mission, System | Four tabs: Run, Plan, Sim, System. Sim and System are page classes. Run and Plan are still node methods |
-| `NavigationService`, `MissionService`, `TopologyService`, `SystemService` | Drive, Navigation, RowDiscovery, RobotBrain, Telemetry, Topology, TopologyEdit and Mission application services, each with a domain service, plus `SimAssetService` and `SimWorldService` (no ROS) |
-| `PlanningService (F2C)` / `PlanningDomainService` | No such service. F2C is the `devkit_f2c_planner` package, called from the Plan tab. Row geometry, row building and plan import are pure modules. Edit rules are in `TopologyEditService` |
+| Three ViewModels: `NavViewModel`, `MissionViewModel`, `SystemViewModel`, plus `GlobalViewModel` | Nine: `Global`, `Run`, `Topology`, `Telemetry`, `RobotBrain`, `Plan`, `Mission`, `Obstacle`, `Sim` |
+| Pages: Nav, Mission, System | Four tabs: Run, Plan, Sim, System. Plan, Sim and System are page classes. Run is still a node method |
+| `NavigationService`, `MissionService`, `TopologyService`, `SystemService` | Drive, Navigation, RowDiscovery, RobotBrain, Telemetry, Topology, TopologyEdit, Plan and Mission application services, each with a domain service, plus `SimAssetService` and `SimWorldService` (no ROS) |
+| `PlanningService (F2C)` / `PlanningDomainService` | `PlanApplicationService`, with no domain service of its own. F2C is the `devkit_f2c_planner` package, called from `PlanApplicationService`. Row geometry, row building and plan import are pure modules. Edit rules are in `TopologyEditService` |
 | `TopoRepo` | `TopoMapStore`, owned by `TopologyApplicationService` |
 | `ROSGateway` as the ROS clients layer | `RosGateway` wraps the rclpy node. All seven domain services, `MissionStore` and `ObstacleManager` use it |
-| "All UI contact points go through the Facade" | True for drive, navigation, row discovery, robot brain, telemetry, topology and missions. Not true for obstacles, process control and the Plan tab (see below) |
+| "All UI contact points go through the Facade" | True for drive, navigation, row discovery, robot brain, telemetry, topology, planning and missions. Not true for obstacles and process control (see below) |
 | Enforce the dependency rule | Done: import-linter in CI |
 | Phase 2: Edge API (REST, MQTT, VDA 5050), Fleet Gateway, standalone UI | Not started. No adapters in the code |
 
@@ -254,9 +264,11 @@ Each exception is listed in `.importlinter` with a `TODO(#116)` and the check fa
 
 Tracked in #116 and `.importlinter`:
 
-- **Run and Plan tabs** are still methods on `NiceGuiNode`. `_plan_content` is about 650 lines and holds the F2C call, plan import and mission queue UI.
+- **Run tab** is still a method on `NiceGuiNode` (`_run_content`, about 110 lines) and reaches `TopologyEditService` through node wrappers.
+- **Plan page state** is per browser session (`PlanPageState`, `MissionQueue`), but `PlanViewModel.save_status` is shared by every session. `PlanPage` takes `_run_mission`, `cancel_mission` and `confirm_delete_row` as callbacks from the node.
+- **Plan page threading**: `PlanViewModel.plan` blocks, so the controls card calls it through `nicegui.run.io_bound`. Any other adapter has to run it on a worker thread too.
 - **Mission start glue**: `_run_mission` and `_send_goal_sync` are still on the node, around `MissionDomainService.start`.
-- **Node leftovers**: F2C session state (`_f2c_*`), the `_persist_and_reload` thread wrapper, and the `/current_node` subscription with its `rclpy.qos` import.
+- **Node leftovers**: the `_persist_and_reload` thread wrapper, and the `/current_node` subscription with its `rclpy.qos` import.
 - **Obstacles**: `ObstacleViewModel` calls `ObstacleManager` directly. An `ObstacleApplicationService` is needed.
 - **Medkit**: still started with `subprocess` in `pages/system/tools_card.py`.
 - **`rclpy.qos` imports**: `row_discovery_domain_service`, `telemetry_domain_service`, `topology_domain_service`, `obstacles` and `qos` still import `rclpy`. The QoS profiles should move into `RosGateway`.
