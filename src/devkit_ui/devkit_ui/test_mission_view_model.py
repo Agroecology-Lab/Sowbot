@@ -66,6 +66,32 @@ class TestMissionViewModel(unittest.TestCase):
 
         self.assertEqual(self.store.find(mid)['rows'], ['ROW_3_IN'])
 
+    def test_equivalent_parameter_dicts_are_accepted_regardless_of_key_order(self) -> None:
+        """Compare parameter values rather than object identity or insertion order."""
+        queue = [(1, 'drive', {'speed': 0.2, 'offset': 0}),
+                 (2, 'drive', {'offset': 0, 'speed': 0.2})]
+
+        mid = self.vm.save_queue(queue, 'same settings', None)
+
+        self.assertIsNotNone(mid)
+        self.assertEqual(self.store.find(mid)['rows'], ['A_1', 'ROW_2_IN'])
+        self.assertEqual(self.store.find(mid)['action_params'], {'speed': 0.2, 'offset': 0})
+
+    def test_rejected_mixed_queue_preserves_existing_missions(self) -> None:
+        """A failed save must leave prior missions and the store version intact."""
+        self.vm.save_queue([(1, 'drive', {'speed': 0.2})], 'existing', 4)
+        before = self.vm.missions
+        version = self.vm.version
+
+        result = self.vm.save_queue(
+            [(1, 'drive', {'speed': 0.2}), (2, 'drive', {})], 'rejected', None)
+
+        self.assertIsNone(result)
+        self.assertEqual(self.vm.missions, before)
+        self.assertEqual(self.vm.version, version)
+        self.assertEqual(
+            self.vm.status, 'ERROR: all queued steps must have the same action and parameters')
+
     def test_empty_queue_reports_error_without_saving(self) -> None:
         """Verify an empty queue returns None, reports it in status and leaves the version alone."""
         version = self.vm.version
