@@ -14,7 +14,7 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 [Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) 
 
 [Docs](https://agroecology-lab.github.io/Sowbot_Data/python_api.html)
-
+```
 +-------------------------------------------------------+
 |               ROS 2 DUAL SBC Open Core                |
 | +----------------------+     +----------------------+ |
@@ -55,6 +55,7 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 | - Safety Subsystem (Level 0)                          |
 | - Differential Drive tracked platform                 |
 +-------------------------------------------------------+
+```
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk/hardware) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
 
 Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
