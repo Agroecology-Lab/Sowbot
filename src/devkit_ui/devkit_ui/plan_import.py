@@ -2,7 +2,7 @@
 
 Pure Python, no ROS or UI imports, so it is unit-testable. The web planner
 exports geometry only; topo nodes are built on the robot by
-NiceGuiNode.save_f2c_rows_to_topo() because node coordinates depend on the
+PlanApplicationService.save_rows() because node coordinates depend on the
 robot's live GPS/odometry anchor and the loaded topo map.
 
 Schema (version 1): GeoJSON FeatureCollection, [lon, lat] coordinates.

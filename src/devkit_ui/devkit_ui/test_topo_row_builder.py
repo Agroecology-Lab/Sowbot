@@ -1,7 +1,7 @@
 import unittest
 from itertools import pairwise
 
-from devkit_f2c_planner.f2c_planner import _f2c_xy_to_latlon
+from devkit_f2c_planner.f2c_planner import f2c_xy_to_latlon
 from devkit_ui.constants import NAV_ACTION, ROW_ACTION
 from devkit_ui.models import TopoDoc
 from devkit_ui.topo_row_builder import (
@@ -18,7 +18,7 @@ ANCHOR = RowAnchor(lat=51.0, lon=-2.0, x=10.0, y=20.0)
 
 def swath(*points_xy: tuple[float, float]) -> list[tuple[float, float]]:
     """Build a lat/lon swath from local xy points around the test anchor."""
-    return [_f2c_xy_to_latlon(x, y, ANCHOR.lat, ANCHOR.lon) for x, y in points_xy]
+    return [f2c_xy_to_latlon(x, y, ANCHOR.lat, ANCHOR.lon) for x, y in points_xy]
 
 
 def straight_rows(count: int, *, spacing: float = 3.0, length: float = 50.0) -> list:

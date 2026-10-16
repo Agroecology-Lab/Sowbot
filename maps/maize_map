@@ -19,24 +19,33 @@ actions:
     action_server: /navigate_to_pose
     action_type: nav2_msgs.action.NavigateToPose
     composable: false
+  row_traversal:
+    action_goal_template:
+      behavior_tree: ${definitions.row_traversal_bt}
+      poses:
+      - header:
+          frame_id: ${node.nav_frame}
+        pose: ${node.pose}
+    action_server: /navigate_through_poses
+    action_type: nav2_msgs.action.NavigateThroughPoses
+    composable: true
 definitions:
-  default_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"MainTree\"\
-    >\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathToPose\
-    \ goal=\"{goal}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
+  default_bt: "<root BTCPP_format=\"4\" main_tree_to_execute=\"MainTree\">\n  <BehaviorTree\
+    \ ID=\"MainTree\">\n    <PipelineSequence name=\"NavigateWithReplanning\">\n \
+    \     <RateController hz=\"1.0\">\n        <ComputePathToPose goal=\"{goal}\"\
+    \ path=\"{path}\" planner_id=\"GridBased\"/>\n      </RateController>\n      <FollowPath\
     \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
     </root>\n"
-  goal_align_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"\
-    MainTree\">\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathToPose\
-    \ goal=\"{goal}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
-    \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
-    </root>\n"
-  row_traversal_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"\
-    MainTree\">\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathThroughPoses\
-    \ goals=\"{goals}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
-    \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
+  row_traversal_bt: "<root BTCPP_format=\"4\" main_tree_to_execute=\"MainTree\">\n\
+    \  <BehaviorTree ID=\"MainTree\">\n    <PipelineSequence name=\"NavigateWithReplanning\"\
+    >\n      <RateController hz=\"1.0\">\n        <ReactiveSequence>\n          <RemovePassedGoals\
+    \ input_goals=\"{goals}\" output_goals=\"{goals}\" radius=\"0.7\"/>\n        \
+    \  <ComputePathThroughPoses goals=\"{goals}\" path=\"{path}\" planner_id=\"GridBased\"\
+    />\n        </ReactiveSequence>\n      </RateController>\n      <FollowPath path=\"\
+    {path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
     </root>\n"
 meta:
-  last_updated: 03-10-2026_20-28-38
+  last_updated: 12-10-2026_11-38-59
 metric_map: maize_map
 name: maize_map
 nodes:

@@ -13,7 +13,7 @@ def _run(backend, **kw):
     args = dict(corners_ll=to_ll(RECT), obstacle_rings=[], tool_width=5.0, angle_deg=0.0,
                 backend=backend)
     args.update(kw)
-    return planner._run_f2c(**args)
+    return planner.run_f2c(**args)
 
 
 class ShapelyBackendTest(unittest.TestCase):
@@ -63,7 +63,7 @@ class ShapelyBackendTest(unittest.TestCase):
     def test_concave_field_gives_fragments(self):
         """Verify a concave field produces multiple fragments for some rows."""
         u = [(0, 0), (100, 0), (100, 60), (70, 60), (70, 20), (30, 20), (30, 60), (0, 60)]
-        rows = planner._run_f2c(to_ll(u), [], 5.0, 0.0, snake_order=False, backend='shapely')
+        rows = planner.run_f2c(to_ll(u), [], 5.0, 0.0, snake_order=False, backend='shapely')
         self.assertGreater(len(rows), 12)
 
     def test_unknown_backend(self):
@@ -102,8 +102,8 @@ class ParityTest(unittest.TestCase):
                     with self.subTest(shape=name, angle=angle, headland=hl):
                         kw = dict(corners_ll=to_ll(shape), obstacle_rings=[], tool_width=5.0,
                                   angle_deg=angle, headland_width_m=hl, snake_order=False)
-                        self.assertEqual(self._norm(planner._run_f2c(backend='f2c', **kw)),
-                                         self._norm(planner._run_f2c(backend='shapely', **kw)))
+                        self.assertEqual(self._norm(planner.run_f2c(backend='f2c', **kw)),
+                                         self._norm(planner.run_f2c(backend='shapely', **kw)))
 
 
 if __name__ == '__main__':
@@ -119,7 +119,7 @@ class TagRowsTest(unittest.TestCase):
         """Verify obstacle fragments share row IDs and remain in row order."""
         obs = to_ll([(40, 10), (60, 10), (60, 50), (40, 50)])
         corners = to_ll(RECT)
-        rows = planner._run_f2c(corners, [obs], 5.0, 0.0, snake_order=False, backend='shapely')
+        rows = planner.run_f2c(corners, [obs], 5.0, 0.0, snake_order=False, backend='shapely')
         tags = planner.tag_rows(rows, corners, 0.0)
         self.assertEqual(len(tags), len(rows))
         self.assertEqual(max(r for r, _ in tags) + 1, 12)
@@ -129,6 +129,6 @@ class TagRowsTest(unittest.TestCase):
     def test_rotated_rows_tagged(self):
         """Verify rotated snake rows receive consecutive, distinct row IDs."""
         corners = to_ll(RECT)
-        rows = planner._run_f2c(corners, [], 5.0, 90.0, snake_order=True, backend='shapely')
+        rows = planner.run_f2c(corners, [], 5.0, 90.0, snake_order=True, backend='shapely')
         self.assertEqual(sorted({r for r, _ in planner.tag_rows(rows, corners, 90.0)}),
                          list(range(20)))

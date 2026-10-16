@@ -28,19 +28,35 @@ class TestMissionViewModel(unittest.TestCase):
         self.vm = MissionViewModel(MissionApplicationService(
             self.store, self.executor, lambda: self.doc))
 
-    def test_save_queue_stores_entry_node_names_and_first_step_action(self) -> None:
-        """Verify rows resolve to entry nodes, with a ROW_<id>_IN fallback, and step one's action."""
-        queue = [(1, 'drive', {'a': 1}), (2, 'drive', None)]
+    def test_save_queue_stores_entry_node_names_and_shared_action(self) -> None:
+        """Verify entry names, fallback names, duplicate rows and shared action settings."""
+        queue = [(1, 'drive', {'a': 1}), (2, 'drive', {'a': 1}), (1, 'drive', {'a': 1})]
 
         mid = self.vm.save_queue(queue, 'my run', 4)
 
         mission = self.store.find(mid)
-        self.assertEqual(mission['rows'], ['A_1', 'ROW_2_IN'])
+        self.assertEqual(mission['rows'], ['A_1', 'ROW_2_IN', 'A_1'])
         self.assertEqual(mission['action'], 'drive')
         self.assertEqual(mission['action_params'], {'a': 1})
         self.assertEqual(mission['name'], 'MY_RUN')
         self.assertEqual(mission['repeat_every_hours'], 4)
         self.assertEqual(self.vm.missions, self.store.missions)
+
+    def test_mixed_queue_reports_error_without_saving(self) -> None:
+        """Verify any later step with a different action or parameters prevents persistence."""
+        for action, params in (('weed', {'a': 1}), ('drive', {'a': 2}), ('drive', None)):
+            with self.subTest(action=action, params=params):
+                queue = [
+                    (1, 'drive', {'a': 1}), (2, 'drive', {'a': 1}), (3, action, params)]
+                version = self.vm.version
+
+                self.assertIsNone(self.vm.save_queue(queue, 'mixed', None))
+
+                self.assertEqual(
+                    self.vm.status,
+                    'ERROR: all queued steps must have the same action and parameters')
+                self.assertEqual(self.vm.version, version)
+                self.assertEqual(self.vm.missions, ())
 
     def test_save_queue_without_a_map_uses_fallback_names(self) -> None:
         """Verify a missing map still saves, using ROW_<id>_IN names."""
@@ -49,6 +65,32 @@ class TestMissionViewModel(unittest.TestCase):
         mid = self.vm.save_queue([(3, 'drive', None)], '', None)
 
         self.assertEqual(self.store.find(mid)['rows'], ['ROW_3_IN'])
+
+    def test_equivalent_parameter_dicts_are_accepted_regardless_of_key_order(self) -> None:
+        """Compare parameter values rather than object identity or insertion order."""
+        queue = [(1, 'drive', {'speed': 0.2, 'offset': 0}),
+                 (2, 'drive', {'offset': 0, 'speed': 0.2})]
+
+        mid = self.vm.save_queue(queue, 'same settings', None)
+
+        self.assertIsNotNone(mid)
+        self.assertEqual(self.store.find(mid)['rows'], ['A_1', 'ROW_2_IN'])
+        self.assertEqual(self.store.find(mid)['action_params'], {'speed': 0.2, 'offset': 0})
+
+    def test_rejected_mixed_queue_preserves_existing_missions(self) -> None:
+        """A failed save must leave prior missions and the store version intact."""
+        self.vm.save_queue([(1, 'drive', {'speed': 0.2})], 'existing', 4)
+        before = self.vm.missions
+        version = self.vm.version
+
+        result = self.vm.save_queue(
+            [(1, 'drive', {'speed': 0.2}), (2, 'drive', {})], 'rejected', None)
+
+        self.assertIsNone(result)
+        self.assertEqual(self.vm.missions, before)
+        self.assertEqual(self.vm.version, version)
+        self.assertEqual(
+            self.vm.status, 'ERROR: all queued steps must have the same action and parameters')
 
     def test_empty_queue_reports_error_without_saving(self) -> None:
         """Verify an empty queue returns None, reports it in status and leaves the version alone."""

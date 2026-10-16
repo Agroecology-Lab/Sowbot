@@ -6,6 +6,7 @@ creating hard dependencies or tight coupling directly to the NiceGuiNode.
 """
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from rclpy.node import Node
@@ -15,6 +16,37 @@ if TYPE_CHECKING:
     from rclpy.publisher import Publisher
     from rclpy.qos import QoSProfile
     from rclpy.subscription import Subscription
+
+
+class _RosLogHandler(logging.Handler):
+    """Send Python log records to the wrapped node's ROS logger."""
+
+    def __init__(self, node: Node) -> None:
+        """Keep the node whose logger receives the records."""
+        super().__init__()
+        self._node = node
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Log the formatted record at the matching ROS severity.
+
+        ERROR and CRITICAL records use ROS error; levels below INFO use ROS debug.
+        Formatting or ROS logging failures are passed to logging.Handler.handleError.
+        Each severity has its own call site because rclpy refuses a call site that changes
+        severity between calls.
+        """
+        try:
+            text = self.format(record)
+            logger = self._node.get_logger()
+            if record.levelno >= logging.ERROR:
+                logger.error(text)
+            elif record.levelno >= logging.WARNING:
+                logger.warn(text)
+            elif record.levelno >= logging.INFO:
+                logger.info(text)
+            else:
+                logger.debug(text)
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.handleError(record)
 
 
 class TransformUnavailable(Exception):
@@ -51,6 +83,21 @@ class RosGateway:
     def get_logger(self):
         """Return the wrapped node's logger."""
         return self._node.get_logger()
+
+    def forward_python_logging(self, name: str) -> None:
+        """Route records from the Python logger called name, and its children, to the ROS log.
+
+        Set the named logger's level to INFO. Child records reach the handler through
+        normal logging propagation and remain subject to each child's level and filters.
+        Calling again replaces existing ROS forwarding handlers; other handlers and
+        propagation settings are preserved.
+        """
+        python_logger = logging.getLogger(name)
+        for handler in list(python_logger.handlers):
+            if isinstance(handler, _RosLogHandler):
+                python_logger.removeHandler(handler)
+        python_logger.addHandler(_RosLogHandler(self._node))
+        python_logger.setLevel(logging.INFO)
 
     def get_clock(self) -> Clock:
         """Return the wrapped node's clock."""

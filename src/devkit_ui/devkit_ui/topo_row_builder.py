@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from itertools import pairwise
 
-from devkit_f2c_planner.f2c_planner import _f2c_latlon_to_xy, _f2c_xy_to_latlon
+from devkit_f2c_planner.f2c_planner import f2c_latlon_to_xy, f2c_xy_to_latlon
 from devkit_ui.constants import NAV_ACTION
 from devkit_ui.models import (
     NodeID,
@@ -170,8 +170,8 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
         in_lat, in_lon = swath[0]
         out_lat, out_lon = swath[-1]
 
-        in_east, in_north = _f2c_latlon_to_xy(in_lat, in_lon, anchor.lat, anchor.lon)
-        out_east, out_north = _f2c_latlon_to_xy(out_lat, out_lon, anchor.lat, anchor.lon)
+        in_east, in_north = f2c_latlon_to_xy(in_lat, in_lon, anchor.lat, anchor.lon)
+        out_east, out_north = f2c_latlon_to_xy(out_lat, out_lon, anchor.lat, anchor.lon)
         in_x, in_y = round(anchor.x + in_east, 3), round(anchor.y + in_north, 3)
         out_x, out_y = round(anchor.x + out_east, 3), round(anchor.y + out_north, 3)
 
@@ -189,7 +189,7 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
                 name = f'{prefix}_R{rid}_W{k}'
                 if not settings.overwrite and name in build.nodes:
                     continue
-                wlat, wlon = _f2c_xy_to_latlon(wx, wy, anchor.lat, anchor.lon)
+                wlat, wlon = f2c_xy_to_latlon(wx, wy, anchor.lat, anchor.lon)
                 build.nodes[name] = _make_node(
                     name, round(anchor.x + wx, 3), round(anchor.y + wy, 3),
                     'waypoint', wlat, wlon, rid, settings)

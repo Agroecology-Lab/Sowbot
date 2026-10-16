@@ -15,7 +15,7 @@ scipy, scikit-image — same environment ui_node normally runs in):
 
 Field boundary
 ──────────────
-_run_contour_f2c() needs a field boundary (corners_ll) to know where each
+run_contour_f2c() needs a field boundary (corners_ll) to know where each
 offset row should be clipped — that's not optional, see the "do we even
 need to graphically select map area" discussion. Since there's no drawn
 boundary here, this script builds one from the recon points' own bounding
@@ -61,9 +61,9 @@ for pkg in ('devkit_f2c_planner', 'devkit_ui'):
         sys.path.insert(0, str(candidate))
 
 from devkit_f2c_planner.f2c_planner import (  # noqa: E402
-    _f2c_latlon_to_xy,
-    _f2c_xy_to_latlon,
-    _run_contour_f2c,
+    f2c_latlon_to_xy,
+    f2c_xy_to_latlon,
+    run_contour_f2c,
     field_centroid_xy,
 )
 from devkit_ui.dem import (  # noqa: E402
@@ -111,7 +111,7 @@ def main() -> int:
         (x_max + pad, y_max + pad),
         (x_min - pad, y_max + pad),
     ]
-    corners_ll = [_f2c_xy_to_latlon(x, y, args.anchor_lat, args.anchor_lon)
+    corners_ll = [f2c_xy_to_latlon(x, y, args.anchor_lat, args.anchor_lon)
                   for x, y in corners_xy]
     print(f'[test] test boundary (bbox + {pad}m pad): '
           f'x=[{x_min - pad:.1f},{x_max + pad:.1f}] '
@@ -121,7 +121,7 @@ def main() -> int:
     # own lat/lon, so origin_xy ends up in the same frame field_centroid_xy()
     # computes centroid_xy in below — see the module docstring above.
     lat0, lon0 = corners_ll[0]
-    xy = np.array([_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in latlon])
+    xy = np.array([f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in latlon])
     elevation_grid, origin_xy, smoothing_used = build_elevation_grid(
         xy, elevation, args.dem_resolution_m)
     print(f'[test] elevation grid: {elevation_grid.shape}, '
@@ -137,12 +137,12 @@ def main() -> int:
         print('[test] select_reference_contour_latlon returned None — field '
               'too flat, or centroid landed outside the elevation grid '
               '(the anchor-mismatch failure mode described above). '
-              'do_plan() would fall back to straight _run_f2c() rows here.')
+              'do_plan() would fall back to straight run_f2c() rows here.')
         return 1
 
     print(f'[test] reference contour: {len(reference_line_ll)} points')
 
-    swaths = _run_contour_f2c(
+    swaths = run_contour_f2c(
         corners_ll, [], reference_line_ll, args.width,
         args.pad_m, args.headland_m, not args.no_snake)
 

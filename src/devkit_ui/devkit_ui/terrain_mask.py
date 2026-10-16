@@ -3,15 +3,15 @@ terrain_mask.py
 ────────────────
 Bridges the grid_map traversability layer (see
 devkit_bringup/config/terrain_traversability_filters.yaml) to
-the devkit_f2c_planner package's _run_f2c() vector input.
+the devkit_f2c_planner package's run_f2c() vector input.
 
-_run_f2c() takes polygons (corners_ll, obstacle_rings — lists of lat/lon
+run_f2c() takes polygons (corners_ll, obstacle_rings — lists of lat/lon
 points), not a raster. grid_map's `traversable` layer is a raster mask
 (0/1 per cell). This module is the missing step: threshold -> trace the
 boundary of the unsafe (0) region -> reproject each ring's vertices back to
 lat/lon using the *same* equirectangular anchor devkit_f2c_planner already
 uses, so the traced obstacle rings line up with whatever field boundary
-_run_f2c() is given.
+run_f2c() is given.
 
 Pure functions, no ROS/grid_map_msgs dependency here — callers decode the
 GridMap message and pass in a plain numpy array + its resolution/origin, so
@@ -22,7 +22,7 @@ import numpy as np
 from skimage import measure
 
 # pylint: disable=import-error
-from devkit_f2c_planner.f2c_planner import _f2c_xy_to_latlon
+from devkit_f2c_planner.f2c_planner import f2c_xy_to_latlon
 
 
 def traversability_mask_to_latlon_rings(
@@ -43,7 +43,7 @@ def traversability_mask_to_latlon_rings(
         origin_xy: (x, y) of mask[0, 0] in the same local-XY frame that
             anchor_lat/anchor_lon projects to via f2c_planner's
             equirectangular approximation.
-        anchor_lat, anchor_lon: the SAME anchor _run_f2c() will use for
+        anchor_lat, anchor_lon: the SAME anchor run_f2c() will use for
             corners_ll[0] — mismatched anchors silently misalign the
             obstacle rings against the field boundary.
         threshold: contour level; cells below this are "unsafe".
@@ -52,7 +52,7 @@ def traversability_mask_to_latlon_rings(
 
     Returns:
         List of rings, each a list of (lat, lon) — directly usable as
-        f2c_planner._run_f2c()'s obstacle_rings argument.
+        f2c_planner.run_f2c()'s obstacle_rings argument.
     """
     if mask.ndim != 2:
         raise ValueError(f'expected a 2D mask, got shape {mask.shape}')
@@ -80,7 +80,7 @@ def traversability_mask_to_latlon_rings(
             # Subtract 1 from row/col to convert from padded to original coordinates
             x = origin_xy[0] + (col - 1) * resolution_m
             y = origin_xy[1] + (row - 1) * resolution_m
-            lat, lon = _f2c_xy_to_latlon(x, y, anchor_lat, anchor_lon)
+            lat, lon = f2c_xy_to_latlon(x, y, anchor_lat, anchor_lon)
             ring_ll.append((lat, lon))
         rings_ll.append(ring_ll)
 

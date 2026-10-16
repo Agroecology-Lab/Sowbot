@@ -13,7 +13,7 @@ ui_node's internals. Promoted to its own package because "planning core"
 and "web UI" are different concerns with different reasons to change, and
 nothing about this module actually depends on devkit_ui.
 
-devkit_ui still owns the manual-drawing UI and calls _run_f2c() the same
+devkit_ui still owns the manual-drawing UI and calls run_f2c() the same
 way it always did, now via the devkit_f2c_planner dependency instead of a
 same-package import.
 """
@@ -22,7 +22,7 @@ import math
 import sys
 
 # fields2cover is optional: it is built from source in docker/Dockerfile and is
-# unavailable in the browser (Pyodide). Without it, _run_f2c() falls back to a
+# unavailable in the browser (Pyodide). Without it, run_f2c() falls back to a
 # pure-shapely swath generator (backend='shapely').
 try:
     # pylint: disable=import-error
@@ -32,25 +32,31 @@ except ImportError:  # pragma: no cover
 from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.ops import unary_union
 
-# offset_curve() (shapely >= 2.0) is used by _run_contour_f2c() below. The
+# offset_curve() (shapely >= 2.0) is used by run_contour_f2c() below. The
 # repo doesn't pin a shapely version — it's installed generically in the
 # Dockerfile, same as fields2cover — so this is flagged here rather than
 # discovered as a cryptic AttributeError on an older pin.
 _SHAPELY_OFFSET_CURVE_MIN_VERSION = '2.0'
 
 
-def _f2c_latlon_to_xy(lat: float, lon: float,
+def f2c_latlon_to_xy(lat: float, lon: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
-    """Project lat/lon to a local equirectangular xy frame anchored at (lat0, lon0)."""
+    """Project latitude/longitude degrees to (east, north) meters about (lat0, lon0).
+
+    The anchor is also in degrees; the projection uses a local equirectangular approximation.
+    """
     R = 6_378_137.0
     x = math.radians(lon - lon0) * R * math.cos(math.radians(lat0))
     y = math.radians(lat - lat0) * R
     return x, y
 
 
-def _f2c_xy_to_latlon(x: float, y: float,
+def f2c_xy_to_latlon(x: float, y: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
-    """Inverse of _f2c_latlon_to_xy: convert local xy back to lat/lon."""
+    """Return (latitude, longitude) degrees from local (east, north) meters.
+
+    Use the same anchor (lat0, lon0), in degrees, as f2c_latlon_to_xy.
+    """
     R   = 6_378_137.0
     lat = lat0 + math.degrees(y / R)
     lon = lon0 + math.degrees(x / (R * math.cos(math.radians(lat0))))
@@ -59,14 +65,14 @@ def _f2c_xy_to_latlon(x: float, y: float,
 
 def field_centroid_xy(corners_ll: list) -> tuple[float, float]:
     """Field boundary's spatial centroid, in the same local-xy frame
-    _run_f2c()/_run_contour_f2c() use (anchored at corners_ll[0]).
+    run_f2c()/run_contour_f2c() use (anchored at corners_ll[0]).
 
     Callers pass this straight through as dem.select_reference_contour_xy()'s
     centroid_xy argument, to get a reference contour centred on the field —
     see that function's docstring for why centring keeps drift symmetric.
     """
     lat0, lon0 = corners_ll[0]
-    poly = Polygon([_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in corners_ll])
+    poly = Polygon([f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in corners_ll])
     if not poly.is_valid:
         poly = poly.buffer(0)
     return poly.centroid.x, poly.centroid.y
@@ -100,18 +106,34 @@ def field_centroid_xy(corners_ll: list) -> tuple[float, float]:
 # the local F2C build exposes. Snake-flip happens *before* shapely
 # clipping so direction is preserved per-fragment when an obstacle
 # splits a swath into pieces.
-def _run_f2c(corners_ll: list,
-             obstacle_rings: list,
-             tool_width: float,
-             angle_deg: float,
-             obstacle_pad_m: float = 0.0,
-             headland_width_m: float = 0.0,
-             snake_order: bool = True,
-             backend: str = 'auto') -> list:
+def run_f2c(corners_ll: list,
+            obstacle_rings: list,
+            tool_width: float,
+            angle_deg: float,
+            obstacle_pad_m: float = 0.0,
+            headland_width_m: float = 0.0,
+            snake_order: bool = True,
+            backend: str = 'auto') -> list:
     """Generate straight-swath field rows for the boundary, clipped around obstacles.
+
+    corners_ll and obstacle_rings contain (latitude, longitude) points in degrees.
+    The first boundary corner anchors the local projection. tool_width is positive
+    row spacing in meters; angle_deg is counterclockwise from east, modulo 180.
+    Positive obstacle_pad_m expands obstacles and positive headland_width_m insets
+    the field, both in meters. An empty inset, or failed F2C headland generation,
+    falls back to the full boundary. snake_order reverses alternate swaths before
+    obstacle clipping; clipped fragments at most half a tool width long are dropped.
 
     backend: 'f2c' (Fields2Cover), 'shapely' (pure Python, runs in Pyodide)
     or 'auto' (f2c if importable, else shapely).
+
+    Returns lists of (latitude, longitude) points in traversal order, or an empty
+    list when no swaths survive. Uncaught geometry and swath-generation errors propagate.
+
+    Raises:
+        ValueError: backend is unknown.
+        ImportError: backend='f2c' is requested but Fields2Cover is unavailable.
+        IndexError: corners_ll is empty.
     """
     if backend == 'auto':
         backend = 'f2c' if f2c is not None else 'shapely'
@@ -139,7 +161,7 @@ def _run_f2c(corners_ll: list,
     # ── Outer boundary ────────────────────────────────────────────────
     outer = f2c.LinearRing()
     for lat, lon in corners_ll:
-        x, y = _f2c_latlon_to_xy(lat, lon, lat0, lon0)
+        x, y = f2c_latlon_to_xy(lat, lon, lat0, lon0)
         outer.addPoint(f2c.Point(x, y, 0))
     outer.closeRing()
     cell = f2c.Cell()
@@ -207,7 +229,7 @@ def _run_f2c(corners_ll: list,
     # ── Project back to lat/lon ──────────────────────────────────────
     result: list = []
     for pts_xy in raw_xy:
-        pts_ll = [_f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in pts_xy]
+        pts_ll = [f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in pts_xy]
         if len(pts_ll) >= 2:
             result.append(pts_ll)
     _log(f'returning {len(result)} swaths to UI')
@@ -251,8 +273,8 @@ def _swaths_shapely(poly: Polygon, tool_width: float, angle_rad: float) -> list:
 
 def _run_shapely(corners_ll, obstacle_rings, tool_width, angle_deg,
                  obstacle_pad_m, headland_width_m, snake_order, lat0, lon0, _log):
-    """Pure-shapely twin of the F2C branch in _run_f2c()."""
-    field = Polygon([_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in corners_ll])
+    """Pure-shapely twin of the F2C branch in run_f2c()."""
+    field = Polygon([f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in corners_ll])
     if not field.is_valid:
         field = field.buffer(0)
     obstacle_polys_xy = _build_obstacle_polys(
@@ -272,13 +294,13 @@ def _run_shapely(corners_ll, obstacle_rings, tool_width, angle_deg,
         raw_xy = [list(reversed(p)) if i % 2 == 1 else list(p) for i, p in enumerate(raw_xy)]
     if obstacle_polys_xy:
         raw_xy = _clip_lines_against_obstacles(raw_xy, obstacle_polys_xy, tool_width * 0.5, _log)
-    result = [[_f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in p] for p in raw_xy if len(p) >= 2]
+    result = [[f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in p] for p in raw_xy if len(p) >= 2]
     _log(f'returning {len(result)} swaths')
     return result
 
 
 def tag_rows(rows_ll: list, corners_ll: list, angle_deg: float) -> list:
-    """Return (row, frag) for each swath returned by _run_f2c().
+    """Return (row, frag) for each swath returned by run_f2c().
 
     Obstacle clipping splits one row into consecutive swaths. Those share a
     perpendicular offset (to the swath direction), so group on that. Row
@@ -289,7 +311,7 @@ def tag_rows(rows_ll: list, corners_ll: list, angle_deg: float) -> list:
     a = math.radians(angle_deg % 180)
     tags, seen, frags = [], {}, {}
     for row in rows_ll:
-        x, y = _f2c_latlon_to_xy(row[0][0], row[0][1], lat0, lon0)
+        x, y = f2c_latlon_to_xy(row[0][0], row[0][1], lat0, lon0)
         key = round((-math.sin(a) * x + math.cos(a) * y) * 100)  # 1 cm bins
         rid = seen.setdefault(key, len(seen))
         frags[rid] = frags.get(rid, -1) + 1
@@ -300,13 +322,13 @@ def tag_rows(rows_ll: list, corners_ll: list, angle_deg: float) -> list:
 def _build_obstacle_polys(obstacle_rings: list, lat0: float, lon0: float,
                            obstacle_pad_m: float, _log, f2c_cell=None) -> list:
     """Project obstacle_rings (lat/lon) to shapely polygons in local xy,
-    repairing invalid geometry and applying padding. Shared by _run_f2c()
-    and _run_contour_f2c() so the two swath styles can't drift apart on
+    repairing invalid geometry and applying padding. Shared by run_f2c()
+    and run_contour_f2c() so the two swath styles can't drift apart on
     what counts as a valid obstacle.
 
     If f2c_cell is given (an f2c.Cell), also adds each obstacle as a hole
     ring on it — the "belt and braces" F2C hint described in the OBSTACLE
-    comment above _run_f2c(). _run_contour_f2c() passes None here: its
+    comment above run_f2c(). run_contour_f2c() passes None here: its
     swaths aren't generated by F2C at all, so there's no F2C cell to hint.
     """
     obstacle_polys_xy: list = []
@@ -314,7 +336,7 @@ def _build_obstacle_polys(obstacle_rings: list, lat0: float, lon0: float,
         if len(ring_ll) < 3:
             _log(f'obstacle {idx}: skipped (only {len(ring_ll)} pts)')
             continue
-        pts_xy = [_f2c_latlon_to_xy(lat, lon, lat0, lon0)
+        pts_xy = [f2c_latlon_to_xy(lat, lon, lat0, lon0)
                   for lat, lon in ring_ll]
         _log(f'obstacle {idx}: {len(pts_xy)} pts, '
              f'xy bbox=({min(p[0] for p in pts_xy):.1f},{min(p[1] for p in pts_xy):.1f}) '
@@ -358,7 +380,7 @@ def _clip_lines_against_obstacles(raw_xy: list, obstacle_polys_xy: list,
                                    break_after: set[int] | None = None) -> list:
     """line.difference(obstacle_union) for every row, dropping fragments
     too short to be worth driving. Shared post-clip step for both swath
-    styles — see the OBSTACLE comment above _run_f2c() for why this is
+    styles — see the OBSTACLE comment above run_f2c() for why this is
     done in shapely rather than trusted to F2C's own hole handling.
     When provided, break_after is remapped in place and includes new gaps
     introduced by obstacle clipping.
@@ -413,11 +435,11 @@ def _clip_lines_against_obstacles(raw_xy: list, obstacle_polys_xy: list,
 # CONTOUR ROWS: curved swaths that follow the terrain instead of F2C's
 # single fixed sweep angle.
 #
-# F2C's own swath generator (SG_BruteForce, used by _run_f2c() above) only
+# F2C's own swath generator (SG_BruteForce, used by run_f2c() above) only
 # produces straight parallel lines — its documented model assumes flat
 # topography. That's not a config flag to change, it's the geometry core,
 # so this doesn't patch F2C; it's a second, independent row generator that
-# reuses _run_f2c()'s projection and obstacle-clipping helpers instead of
+# reuses run_f2c()'s projection and obstacle-clipping helpers instead of
 # F2C's swath math.
 #
 # Method: offset a single reference line (dem.select_reference_contour_*(),
@@ -462,7 +484,7 @@ def _extend_line(line: LineString, dist: float, probe_m: float) -> LineString:
     return LineString([head, *pts, tail])
 
 
-def _run_contour_f2c(corners_ll: list,
+def run_contour_f2c(corners_ll: list,
                       obstacle_rings: list,
                       reference_line_ll: list,
                       tool_width: float,
@@ -472,7 +494,29 @@ def _run_contour_f2c(corners_ll: list,
                       max_rows_each_side: int = 500,
                       extend_reference: bool = True,
                       *, break_after: set[int] | None = None) -> list:
-    """Generate contour rows; fill break_after with indices of gaps between fragments."""
+    """Generate rows at constant offsets from a reference curve, clipped to the field.
+
+    corners_ll, obstacle_rings and reference_line_ll contain (latitude, longitude)
+    points in degrees, projected about corners_ll[0]. tool_width is positive row
+    spacing in meters. Positive obstacle_pad_m expands obstacles; positive
+    headland_width_m insets the field, falling back to the full boundary if the
+    inset is empty or is not a single polygon.
+
+    extend_reference extends both ends along their end directions when the result
+    does not cross itself. Try up to max_rows_each_side offsets on each side, stopping
+    each side at its first unusable offset. Offset-curve errors are caught and stop
+    that side; other geometry errors propagate. These offsets approximate terrain
+    contours away from the reference line.
+
+    Return swaths as lists of (latitude, longitude) points, ordered by signed offset.
+    snake_order reverses alternate rows, including fragment order. With obstacles,
+    fragments at most half a tool width long are dropped. Return an empty list for
+    fewer than two reference points or when no rows survive. Empty corners_ll
+    raises IndexError.
+
+    If supplied, break_after is cleared and filled with zero-based output indices
+    after which links must be skipped because of field or obstacle gaps.
+    """
 
     if break_after is None:
         break_after = set()
@@ -491,7 +535,7 @@ def _run_contour_f2c(corners_ll: list,
     lat0, lon0 = corners_ll[0]
 
     field_poly = Polygon(
-        [_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in corners_ll])
+        [f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in corners_ll])
     if not field_poly.is_valid:
         field_poly = field_poly.buffer(0)
 
@@ -508,7 +552,7 @@ def _run_contour_f2c(corners_ll: list,
     obstacle_polys_xy = _build_obstacle_polys(
         obstacle_rings, lat0, lon0, obstacle_pad_m, _log, f2c_cell=None)
 
-    ref_xy = [_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in reference_line_ll]
+    ref_xy = [f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in reference_line_ll]
     if len(ref_xy) < 2:
         _log(f'reference line has {len(ref_xy)} pts, need >= 2 — returning no rows')
         return []
@@ -559,7 +603,7 @@ def _run_contour_f2c(corners_ll: list,
                 break
             rows_by_offset[offset_m] = row
 
-    # ── Snake ordering, same as _run_f2c() ────────────────────────────
+    # ── Snake ordering, same as run_f2c() ────────────────────────────
     # A row that re-enters the field (concave boundary) yields several
     # pieces; flipping reverses the order of the pieces as well as each one.
     raw_xy = []
@@ -580,7 +624,7 @@ def _run_contour_f2c(corners_ll: list,
 
     result: list = []
     for pts_xy in raw_xy:
-        pts_ll = [_f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in pts_xy]
+        pts_ll = [f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in pts_xy]
         if len(pts_ll) >= 2:
             result.append(pts_ll)
     _log(f'returning {len(result)} contour rows to UI')

@@ -11,9 +11,9 @@ from itertools import pairwise
 import numpy as np
 
 from devkit_f2c_planner.f2c_planner import (
-    _f2c_latlon_to_xy,
-    _run_contour_f2c,
+    f2c_latlon_to_xy,
     field_centroid_xy,
+    run_contour_f2c,
 )
 from devkit_ui.dem import (
     build_elevation_grid,
@@ -26,7 +26,7 @@ from devkit_ui.dem import (
 # with, so a curved row is chopped into short, near-straight hops.
 #
 # This sets hop length, not curve fidelity. Waypoints are interpolated along the
-# polyline that f2c_planner._run_contour_f2c() already produced, which is a
+# polyline that f2c_planner.run_contour_f2c() already produced, which is a
 # simplified offset of the reference contour (see simplify_tolerance_m in
 # dem.select_reference_contour_xy(), 1.5x the DEM grid resolution by default).
 # Between two of that polyline's vertices the row is a straight chord, so
@@ -53,7 +53,7 @@ def resample_row_xy(points_ll: list, anchor_lat: float, anchor_lon: float,
     dropped if it would sit within 0.3 * ``interval_m`` of the end, since a node
     that close to OUT only adds a near-zero-length last hop.
     """
-    pts_xy = [_f2c_latlon_to_xy(lat, lon, anchor_lat, anchor_lon)
+    pts_xy = [f2c_latlon_to_xy(lat, lon, anchor_lat, anchor_lon)
               for lat, lon in points_ll]
     if len(pts_xy) < 2:
         return []
@@ -98,7 +98,7 @@ def headland_neighbour_pairs(coords: dict) -> list:
     This assumes the chosen axis separates the physical row ends; wide or irregular
     fields can violate that assumption and produce pairs that cross rows.
 
-    Used by repair_row_connectivity; initial row saving uses swath order instead.
+    Used by TopologyEditService.stage_repair; initial row saving uses swath order instead.
     Returns an empty list for fewer than two endpoints, and never pairs a node
     with itself.
     Each pair is returned once; callers add any reverse edge.
@@ -146,7 +146,7 @@ def plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float,
     Returns None when no usable reference contour exists, including flat terrain,
     contours shorter than one meter, or
     a centroid outside the elevation grid (see dem.select_reference_contour_xy()).
-    Callers should then fall back to straight swaths from ``_run_f2c``.
+    Callers should then fall back to straight swaths from ``run_f2c``.
 
     When a reference contour exists, ``break_after`` is cleared and filled in
     place with zero-based output indices after which headland links must be
@@ -174,7 +174,7 @@ def plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float,
     # is what produced the "centroid falls outside the elevation grid"
     # case with the France field-27 data: the fake India test field was
     # small enough that this mismatch went unnoticed by coincidence).
-    xy = np.array([_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in latlon])
+    xy = np.array([f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in latlon])
     elevation_grid, origin_xy, _smoothing_used = build_elevation_grid(
         xy, elevation, dem_resolution_m)
     centroid_xy = field_centroid_xy(corners_ll)
@@ -182,6 +182,6 @@ def plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float,
         elevation_grid, dem_resolution_m, origin_xy, centroid_xy, lat0, lon0)
     if reference_line_ll is None:
         return None
-    return _run_contour_f2c(
+    return run_contour_f2c(
         corners_ll, obstacle_rings, reference_line_ll, tool_width,
         pad_m, headland_m, snake, break_after=break_after)

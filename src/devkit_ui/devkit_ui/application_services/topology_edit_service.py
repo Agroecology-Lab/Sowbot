@@ -1,8 +1,9 @@
 """Validate and stage topology edits (drop node, F2C row save, repair, delete).
 
-This sits between the NiceGUI node and TopologyApplicationService. It decides what an
-edit means for the loaded map and returns plain results, so the node only has to show
-statuses, log lines and start the background write. No ROS or NiceGUI imports.
+This sits between its callers and TopologyApplicationService. The node uses it for node
+drops and deletes, and PlanApplicationService for row saves and repairs. It decides what an
+edit means for the loaded map and returns plain results; the caller shows statuses, logs
+lines and starts the background write. No ROS or NiceGUI imports.
 """
 from __future__ import annotations
 

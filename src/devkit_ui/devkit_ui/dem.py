@@ -7,7 +7,7 @@ mask from it. This is the missing link between recon logging and
 terrain_mask.py's ring vectorizer (see repo issue #110):
 
     recon.csv --[this module]--> elevation grid --[this module]--> traversable
-        mask --[terrain_mask.py]--> obstacle_rings --[f2c_planner]--> _run_f2c()
+        mask --[terrain_mask.py]--> obstacle_rings --[f2c_planner]--> run_f2c()
 
 Interpolation backend: scipy.interpolate.RBFInterpolator. RTK recon points
 are metres apart, not point-cloud density, so a thin-plate spline is enough
@@ -49,7 +49,7 @@ from shapely.geometry import LineString, Point
 from skimage import measure
 
 # pylint: disable=import-error
-from devkit_f2c_planner.f2c_planner import _f2c_latlon_to_xy, _f2c_xy_to_latlon
+from devkit_f2c_planner.f2c_planner import f2c_latlon_to_xy, f2c_xy_to_latlon
 from devkit_ui.terrain_mask import traversability_mask_to_latlon_rings
 
 # Candidate RBFInterpolator `smoothing` values tried by _choose_smoothing().
@@ -317,9 +317,9 @@ def recon_csv_to_obstacle_rings(
     anchor_lon: float,
     max_slope_deg: float = 15.0,
 ) -> list[list[tuple[float, float]]]:
-    """End to end: recon CSV -> obstacle_rings ready for f2c_planner._run_f2c().
+    """End to end: recon CSV -> obstacle_rings ready for f2c_planner.run_f2c().
 
-    anchor_lat/anchor_lon MUST be the same anchor _run_f2c() will use for
+    anchor_lat/anchor_lon MUST be the same anchor run_f2c() will use for
     corners_ll[0]. Recon points are re-anchored onto anchor_lat/lon (via
     their own lat/lon columns) before the elevation grid is built, so
     origin_xy ends up in the same frame corners_ll[0] projects to,
@@ -328,7 +328,7 @@ def recon_csv_to_obstacle_rings(
     mismatched anchors silently misaligning the rings against the field.
     """
     _xy_native, elevation, latlon = load_recon_points(csv_path)
-    xy = np.array([_f2c_latlon_to_xy(lat, lon, anchor_lat, anchor_lon)
+    xy = np.array([f2c_latlon_to_xy(lat, lon, anchor_lat, anchor_lon)
                    for lat, lon in latlon])
     elevation_grid, origin_xy, _smoothing_used = build_elevation_grid(
         xy, elevation, resolution_m)
@@ -337,7 +337,7 @@ def recon_csv_to_obstacle_rings(
         traversable, resolution_m, origin_xy, anchor_lat, anchor_lon)
 
 
-# CONTOUR ROWS: reference-line selection for f2c_planner._run_contour_f2c().
+# CONTOUR ROWS: reference-line selection for f2c_planner.run_contour_f2c().
 #
 # "Sensible reference line" = the elevation isoline through the field's
 # centroid, not an arbitrary level. Offsetting a curve at constant distance
@@ -396,7 +396,7 @@ def select_reference_contour_xy(
         a field flat enough that find_contours returns nothing, or the
         centroid falling outside the interpolated grid). Callers should
         treat None as "this field doesn't need contour rows, fall back to
-        _run_f2c()'s straight swaths" rather than an error.
+        run_f2c()'s straight swaths" rather than an error.
     """
     if simplify_tolerance_m is None:
         simplify_tolerance_m = 1.5 * resolution_m
@@ -463,7 +463,7 @@ def select_reference_contour_latlon(
 ) -> list[tuple[float, float]] | None:
     """select_reference_contour_xy(), reprojected to lat/lon.
 
-    anchor_lat/anchor_lon MUST be the same anchor _run_contour_f2c() will
+    anchor_lat/anchor_lon MUST be the same anchor run_contour_f2c() will
     use for corners_ll[0] — same warning as
     traversability_mask_to_latlon_rings(): mismatched anchors silently
     misalign the reference line against the field boundary.
@@ -473,4 +473,4 @@ def select_reference_contour_latlon(
         simplify_tolerance_m, min_length_m)
     if line_xy is None:
         return None
-    return [_f2c_xy_to_latlon(x, y, anchor_lat, anchor_lon) for x, y in line_xy]
+    return [f2c_xy_to_latlon(x, y, anchor_lat, anchor_lon) for x, y in line_xy]

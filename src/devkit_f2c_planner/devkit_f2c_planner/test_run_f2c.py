@@ -1,4 +1,4 @@
-"""Unit tests for _run_f2c() orchestration, with fields2cover replaced by FakeF2C.
+"""Unit tests for run_f2c() orchestration, with fields2cover replaced by FakeF2C.
 
 FakeF2C returns canned swaths, so these tests cover what the planner does around
 fields2cover: boundary projection, angle wrapping, headland fallback, snake
@@ -24,9 +24,9 @@ class RunF2CTest(unittest.TestCase):
         silence_planner_log(self)
 
     def run_planner(self, fake: FakeF2C, obstacles_xy: list | None = None, angle_deg: float = 0.0, **kwargs) -> list:
-        """Run _run_f2c() against the fake; returns rows in local xy metres."""
+        """Run run_f2c() against the fake; returns rows in local xy metres."""
         with mock.patch.object(planner, 'f2c', fake):
-            rows_ll = planner._run_f2c(
+            rows_ll = planner.run_f2c(
                 to_ll(FIELD_XY), [to_ll(ring) for ring in obstacles_xy or []], TOOL_WIDTH, angle_deg, **kwargs)
         return [to_xy(row) for row in rows_ll]
 
@@ -49,7 +49,7 @@ class RunF2CTest(unittest.TestCase):
     def test_result_is_projected_back_to_latlon_at_the_first_corner(self):
         fake = FakeF2C([[(0.0, 0.0), (100.0, 0.0)]])
         with mock.patch.object(planner, 'f2c', fake):
-            (row,) = planner._run_f2c(to_ll(FIELD_XY), [], TOOL_WIDTH, 0.0)
+            (row,) = planner.run_f2c(to_ll(FIELD_XY), [], TOOL_WIDTH, 0.0)
         (lat_start, lon_start), (lat_end, lon_end) = row
         self.assertEqual((lat_start, lon_start), (LAT0, LON0))
         self.assertEqual(lat_end, LAT0)
