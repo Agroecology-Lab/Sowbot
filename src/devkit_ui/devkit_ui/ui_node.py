@@ -351,8 +351,7 @@ def _protect_dashboard() -> None:
         app.add_middleware(BasicAuthMiddleware, password=password)
         return
     logging.getLogger(NODE_NAME).warning(
-        '%s is not set: the dashboard on port 80, including the joystick, accepts any client on the network',
-        UI_PASSWORD_ENV)
+        'UI password is not set: the dashboard on port 80, including the joystick, accepts any client on the network')
 
 
 _protect_dashboard()
