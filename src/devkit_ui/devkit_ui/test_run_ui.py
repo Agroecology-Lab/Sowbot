@@ -14,6 +14,7 @@ class FakeElement:
     ui = None
 
     def __init__(self, text='', *args, **kwargs) -> None:
+        self.id = len(self.ui.elements)
         self.text = text
         self.args = args
         self.kwargs = kwargs
@@ -21,6 +22,7 @@ class FakeElement:
         self.enabled = True
         self.children = []
         self.handlers = {}
+        self.js_handlers = {}
         self.binding = None
         self.class_names = ''
         self.properties = ''
@@ -86,8 +88,9 @@ class FakeElement:
         setattr(self, self.binding.kind, value)
         return value
 
-    def on(self, event, handler):
+    def on(self, event, handler=None, *, js_handler=None):
         self.handlers[event] = handler
+        self.js_handlers[event] = js_handler
         return self
 
     def set_value(self, value) -> None:

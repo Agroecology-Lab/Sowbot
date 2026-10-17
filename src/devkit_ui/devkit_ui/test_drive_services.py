@@ -160,8 +160,52 @@ class TestDriveServices(unittest.TestCase):
         self.assertEqual([(m.linear.x, m.angular.z) for m in messages],
                          [(0.5, -0.2), (0.5, -0.2), (0.0, 0.0)])
 
+    def test_held_position_stays_active_with_client_heartbeats_then_stops_when_they_cease(self):
+        """Verify a stationary hold outlasts the lease, but lost heartbeats still stop it."""
+        self.run.move_joystick(0.5, 0.2)
+        for _ in range(6):
+            self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S / 2
+            self.run.heartbeat_joystick()
+            self.run.repeat_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages], [(0.5, -0.2)] * 7)
+
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S + 0.01
+        self.run.repeat_joystick()
+        self.run.repeat_joystick()
+
+        self.assertEqual(self.velocity_publisher.publish.call_count, 8)
+        stopped = self.velocity_publisher.publish.call_args.args[0]
+        self.assertEqual((stopped.linear.x, stopped.angular.z), (0.0, 0.0))
+
+    def test_late_heartbeat_cannot_renew_an_expired_lease(self):
+        """Verify a delayed heartbeat cannot keep expired input moving before a repeat tick."""
+        self.run.move_joystick(0.5, 0.2)
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S + 0.01
+
+        self.run.heartbeat_joystick()
+        self.run.repeat_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages], [(0.5, -0.2), (0.0, 0.0)])
+
+    def test_heartbeats_without_a_held_gesture_do_not_start_motion(self):
+        """Verify idle and released gestures ignore heartbeats without publishing commands."""
+        self.run.heartbeat_joystick()
+        self.run.repeat_joystick()
+        self.velocity_publisher.publish.assert_not_called()
+        self.run.move_joystick(0.5, 0.2)
+        self.run.release_joystick()
+        self.velocity_publisher.reset_mock()
+
+        self.run.heartbeat_joystick()
+        self.run.repeat_joystick()
+
+        self.velocity_publisher.publish.assert_not_called()
+
     def test_new_input_renews_the_lease_and_recovers_after_expiry(self):
-        """Verify only new joystick input extends or restarts motion."""
+        """Verify new joystick movement extends or restarts motion."""
         self.run.move_joystick(0.5, 0.2)
         self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S
         self.run.move_joystick(0.3, -0.1)

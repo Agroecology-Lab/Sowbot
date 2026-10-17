@@ -180,22 +180,23 @@ To check and configure the authentication mode:
 1. Check current authentication settings:
 
 ```bash
-curl --digest -u root:pw "http://192.168.42.3/axis-cgi/admin/param.cgi?action=list&group=Network.HTTP" | cat
+curl --digest -u root "http://192.168.42.3/axis-cgi/admin/param.cgi?action=list&group=Network.HTTP" | cat
 ```
 
 2. Keep Digest authentication for HTTP endpoints:
 
 ```bash
-curl --digest -u root:pw "http://192.168.42.3/axis-cgi/admin/param.cgi?action=update&Network.HTTP.AuthenticationPolicy=digest" | cat
+curl --digest -u root "http://192.168.42.3/axis-cgi/admin/param.cgi?action=update&Network.HTTP.AuthenticationPolicy=digest" | cat
 ```
 
 Basic authentication is only appropriate for an HTTPS endpoint with a valid, trusted certificate:
 
 ```bash
-curl --digest -u root:pw "https://192.168.42.3/axis-cgi/admin/param.cgi?action=update&Network.HTTP.AuthenticationPolicy=basic" | cat
+curl --digest -u root "https://192.168.42.3/axis-cgi/admin/param.cgi?action=update&Network.HTTP.AuthenticationPolicy=basic" | cat
 ```
 
-Replace `root:pw` with your camera's credentials and `192.168.42.3` with your camera's IP address.
+Enter your camera's password when curl prompts for it.
+Replace `root` with your camera's username if different and `192.168.42.3` with your camera's IP address.
 Keep `digest` for HTTP; use `basic` only with HTTPS.
 These update commands use `--digest` to authenticate against a camera currently configured for Digest, including when switching the HTTPS endpoint to Basic.
 

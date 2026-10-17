@@ -170,7 +170,8 @@ For a stable reference implementation see the upstream Zauberzeug project.
 
 ### Health Warning
 
-This repo may contain traces of LLM slop, We've done our best to mitigate this.
+This repo may contain traces of LLM slop.
+We've done our best to mitigate this.
 If you are allergic to slop, please help us refactor.
 
 ## Quick Start
@@ -389,8 +390,8 @@ python3 agbot-diagnostic.py full
 * **Hardware:** Avaota A1 #1 (Allwinner T527).
 * **Software:** ROS 2 Jazzy + `topological_navigation` (AOC branch).
 * **Role:** Navigation Executive.
-* **Function:** Runs the Topological Navigation stack.
-  UBLOX sensors Manages the move_base sequence and Action on Condition (AOC) logic.
+* **Function:** Runs the Nav2-based Topological Navigation stack.
+  Manages `NavigateToPose` actions and Action on Condition (AOC) logic.
 * **I/O:** Connects to u-blox via USB/UART using `ublox_dgnss` node.
   Translates graph goals into velocity commands for the flight controller.
 

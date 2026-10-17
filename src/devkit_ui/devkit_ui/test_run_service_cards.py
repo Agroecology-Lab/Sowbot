@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.test_run_ui import fake_ui, nicegui
+from devkit_ui.view_models import run_view_model
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
@@ -38,6 +39,27 @@ class TestJoystickControlCard(unittest.TestCase):
         fake_ui.find('joystick').kwargs['on_end'](None)
 
         self.app.move_joystick.assert_called_once_with(0.0, 0.0)
+
+    def test_client_heartbeat_keeps_a_fixed_gesture_active_until_release(self):
+        """Verify client heartbeat callbacks keep a held command alive through the page timer."""
+        joystick = fake_ui.find('joystick')
+        with patch.object(run_view_model.time, 'monotonic', return_value=1000.0) as clock:
+            joystick.kwargs['on_move'](SimpleNamespace(x='-0.25', y='0.75'))
+            for _ in range(6):
+                clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S / 2
+                joystick.handlers['start']()
+                fake_ui.timers[0].callback()
+
+            self.assertEqual(self.app.move_joystick.call_count, 7)
+            for command in self.app.move_joystick.call_args_list:
+                self.assertEqual(command.args, (0.75, -0.25))
+
+            joystick.kwargs['on_end'](None)
+            joystick.handlers['start']()
+            fake_ui.timers[0].callback()
+
+        self.assertEqual(self.app.move_joystick.call_count, 8)
+        self.app.move_joystick.assert_called_with(0.0, 0.0)
 
     def test_estop_click_updates_service_state_label_and_color(self):
         """Verify estop clicks synchronize service state, button text, and button color."""

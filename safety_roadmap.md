@@ -46,7 +46,7 @@ Controller hardware and firmware choice (ArduPilot on LEVIA-H7, legacy ESP32/Liz
 The 24V loop is still being built (O7), the radar is not validated on the vehicle (O14) and the motion beacon that supports the P1 argument is not wired (O8).
 Before any operation, the hard-wired 24V loop, including the physical E-stop path, must be built and tested (O7).
 If that loop is unavailable, operation requires a separately validated independent stop method; otherwise operation is prohibited.
-Until O7, O8 and O14 close, any permitted operation is supervised-only: a competent person within reach of a physical E-stop (or the separately validated stop control), nobody working near it, and no safety claim made for it in any document.
+While any of O7, O8 or O14 remains open, any permitted operation is supervised-only: the competent operator must remain within reach of a physical E-stop (or the separately validated stop control), only that operator may be in the hazard area, and no safety claim may be made for it in any document.
 
 Planned change: an independent dual-channel geofence (2× STEVAL-SILPLC01, §2 Planned, §5) is intended as a separate safety function acting on the 48V isolation.
 It is not built, not assessed, and not in the §6 calculation.
@@ -277,7 +277,7 @@ This classification does not require a CE/UKCA mark or third-party certification
 It does require, before any unit ships: assembly instructions (Annex VI) and a Declaration of Incorporation (not a Declaration of Conformity) stating which essential health and safety requirements are met by the shipped components and that the unit must not be put into service until fully assembled (O16).
 
 The EU Machinery Regulation 2023/1230 replaces the Directive from 20 January 2027.
-For EU sales after that date, documentation must be built against the Regulation (allows digital assembly instructions/Declaration of Incorporation, adds cybersecurity requirements, requires software update logging).
+For EU sales after that date, documentation must be built against the Regulation (allows digital assembly instructions/Declaration of Incorporation, adds cybersecurity requirements, and requires tracing logs for intervention data and safety-software versions where applicable).
 No UK divergence announced; monitor.
 
 ### Functional safety calculation (draft)
@@ -392,7 +392,7 @@ Audience: university labs, ag-tech researchers, software startups.
 | Compliance claim in docs or marketing | NONE, correctly |
 | Standards used as design reference | YES, informal |
 | Liability position | User's own risk, stated in README |
-| Rated stop function | NOT COMPLETE: O7, O8, O14 open. Operation requires the built and tested 24V loop, including the physical E-stop path, or a separately validated independent stop method; otherwise prohibited. Any permitted operation remains supervised-only, with a competent person within reach of the validated stop control, nobody working near it, and no safety claim (§0) |
+| Rated stop function | NOT COMPLETE: O7, O8, O14 open. Operation requires the built and tested 24V loop, including the physical E-stop path, or a separately validated independent stop method; otherwise prohibited. While any of O7, O8 or O14 remains open, any permitted operation is supervised-only: the competent operator must remain within reach of the validated stop control, only that operator may be in the hazard area, and no safety claim may be made (§0) |
 | Controller path | ArduPilot on LEVIA-H7, in bring-up (O31). ESP32/Lizard legacy |
 | Field validation | Progression and metrics in `docs/field-validation.md` (O42) |
 | Independent geofence (2× STEVAL-SILPLC01) | PLANNED, later. Not started (O24 to O29, O32). Until then, physical boundaries or direct supervision |

@@ -94,6 +94,13 @@ class RunViewModel:
         self._last_joystick_input = time.monotonic()
         self._drive_app_service.move_joystick(x, y)
 
+    def heartbeat_joystick(self) -> None:
+        """Renew a held gesture's lease from the client without reviving expired input."""
+        if self._joystick_held and self._last_joystick_input is not None:
+            now = time.monotonic()
+            if now - self._last_joystick_input <= JOYSTICK_INPUT_LEASE_S:
+                self._last_joystick_input = now
+
     def repeat_joystick(self) -> None:
         """Re-send the held joystick command, called from a fast page timer.
 
@@ -101,7 +108,7 @@ class RunViewModel:
         Repeat only within the operator-input lease; timer ticks never renew it.
         If input is missing or older than 0.5 seconds, publish zero and release the joystick.
         Input exactly 0.5 seconds old can still be repeated.
-        New joystick input is required to keep moving after the lease expires.
+        Client heartbeats renew a held gesture; new movement is required after expiry.
         Do nothing unless the joystick is held. Publisher errors propagate to the caller.
         """
         if self._joystick_held:
