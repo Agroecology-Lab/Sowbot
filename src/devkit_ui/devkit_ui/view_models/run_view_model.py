@@ -75,6 +75,7 @@ class RunViewModel:
         self._discovery_app_service = discovery_app_service
         self._navigation_app_service = navigation_app_service
         self._joystick_held = False
+        self._joystick_command = (0.0, 0.0)
 
         if discovery_app_service is not None:
             discovery_app_service.register_status_callback(self._on_discovery_status)
@@ -85,7 +86,18 @@ class RunViewModel:
         Publisher errors propagate to the caller.
         """
         self._joystick_held = True
+        self._joystick_command = (x, y)
         self._drive_app_service.move_joystick(x, y)
+
+    def repeat_joystick(self) -> None:
+        """Re-send the held joystick command, called from a fast page timer.
+
+        The joystick widget only reports changes, but the MAVLink bridge treats any cmd_vel older than
+        about half a second as stale and commands zero. A steadily held stick must therefore keep publishing.
+        Does nothing unless the joystick is held, so it never overrides autonomous navigation on cmd_vel.
+        """
+        if self._joystick_held:
+            self._drive_app_service.move_joystick(*self._joystick_command)
 
     def stop_joystick(self) -> None:
         """Request zero linear and angular speed through the drive service."""

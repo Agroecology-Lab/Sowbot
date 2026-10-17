@@ -128,6 +128,21 @@ class TestDriveServices(unittest.TestCase):
         messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
         self.assertEqual([(m.linear.x, m.angular.z) for m in messages], [(0.5, -0.2), (0.0, 0.0)])
 
+    def test_repeat_resends_a_held_joystick_command_until_it_is_released(self):
+        """Verify a steadily held stick keeps publishing and a released one does not."""
+        self.run.repeat_joystick()
+        self.velocity_publisher.publish.assert_not_called()
+
+        self.run.move_joystick(0.5, 0.2)
+        self.run.repeat_joystick()
+        self.run.repeat_joystick()
+        self.run.stop_joystick()
+        self.run.repeat_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages],
+                         [(0.5, -0.2), (0.5, -0.2), (0.5, -0.2), (0.0, 0.0)])
+
     def test_velocity_publish_failure_reaches_caller(self):
         """Verify velocity publishing errors propagate through the view model."""
         self.velocity_publisher.publish.side_effect = RuntimeError('publisher down')
