@@ -67,14 +67,20 @@ class MissionApplicationService:
 
         queue holds (row_id, action_key, action_params) tuples. Each row is stored as its
         entry node name in the live map, or ROW_<id>_IN when the map has no such node.
-        The store has no per-step actions yet, so the first step's action and parameters
-        apply to the whole mission. An empty queue or a store validation error is
+        All steps must have the same action and parameters, as the store applies them
+        to the whole mission. An empty or mixed queue or a store validation error is
         reported in status.
         repeat_every_hours is a positive interval after success, or None for a one-shot.
         SQLite database and JSON serialization errors propagate.
         """
         if not queue:
             self._store.set_status('ERROR: queue is empty')
+            return None
+        _, action, action_params = queue[0]
+        if any(step_action != action or step_params != action_params
+               for _, step_action, step_params in queue):
+            self._store.set_status(
+                'ERROR: all queued steps must have the same action and parameters')
             return None
         doc = self._get_doc()
         nodes = doc.nodes if doc is not None else []
@@ -85,5 +91,5 @@ class MissionApplicationService:
             for rid, _, _ in queue
         ]
         return self._store.add(
-            rows=rows, action=queue[0][1], action_params=queue[0][2],
+            rows=rows, action=action, action_params=action_params,
             name=name or '', repeat_every_hours=repeat_every_hours, active=True)

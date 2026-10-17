@@ -100,7 +100,7 @@ class MissionViewModel:
     def save_queue(self, queue: list, name: str, repeat_every_hours: int | None) -> str | None:
         """Save (row_id, action_key, action_params) tuples; return the ID or None if rejected.
 
-        The first step's action and parameters apply to all saved rows.
+        All steps must have the same action and parameters to be saved.
         repeat_every_hours is a positive interval after success, or None for a one-shot.
         See MissionApplicationService.save_queue for entry-node resolution and status behavior.
         SQLite database and JSON serialization errors propagate.

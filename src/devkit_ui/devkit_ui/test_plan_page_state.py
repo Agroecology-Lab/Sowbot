@@ -199,6 +199,41 @@ class TestPlanPageState(unittest.TestCase):
 
         self.assertIs(self.state.draft, view.planned)
 
+    def test_a_new_run_without_clear_discards_the_previous_result(self) -> None:
+        """Starting another run invalidates earlier work even if the boundary is unchanged."""
+        for stale in (good(52.0), PlanView(False, 'old failure')):
+            with self.subTest(ok=stale.ok):
+                first = self.state.begin_plan([], **FORM)
+                current = self.state.begin_plan([], **FORM)
+                self.changes.reset_mock()
+
+                self.assertFalse(self.state.finish_plan(first, stale))
+
+                self.assertFalse(self.state.can_plan)
+                self.assertEqual(self.state.status, 'Running F2C…')
+                self.changes.assert_not_called()
+                latest = good(53.0)
+                self.assertTrue(self.state.finish_plan(current, latest))
+                self.assertIs(self.state.draft, latest.planned)
+
+    def test_invalid_form_does_not_invalidate_an_already_running_plan(self) -> None:
+        """A rejected form preserves the draft, status and validity of pending work."""
+        earlier = good()
+        self.state.apply_import(earlier)
+        run = self.state.begin_plan([], **FORM)
+        self.changes.reset_mock()
+
+        with self.assertRaises(TypeError):
+            self.state.begin_plan([], **{**FORM, 'dem_res': object()})
+
+        self.assertIs(self.state.draft, earlier.planned)
+        self.assertEqual((self.state.can_plan, self.state.can_save), (False, True))
+        self.assertEqual((self.state.status, self.state.status_kind), ('Running F2C…', STATUS_INFO))
+        self.changes.assert_not_called()
+        latest = good(52.0)
+        self.assertTrue(self.state.finish_plan(run, latest))
+        self.assertIs(self.state.draft, latest.planned)
+
     def test_a_good_import_becomes_the_draft(self) -> None:
         """Verify an imported plan is saveable and shown as a success."""
         view = good()
@@ -220,6 +255,41 @@ class TestPlanPageState(unittest.TestCase):
         self.assertFalse(self.state.can_save)
         self.assertEqual((self.state.status, self.state.status_kind),
                          ('ERROR: not a plan', STATUS_ERROR))
+
+    def test_a_good_import_discards_a_pending_success_and_a_pending_failure(self) -> None:
+        """Verify a late planning result cannot replace imported rows or their status."""
+        for pending in (good(52.0), PlanView(False, 'old failure')):
+            with self.subTest(ok=pending.ok):
+                run = self.state.begin_plan([], **FORM)
+                imported = PlanView(True, 'imported rows', planned(53.0))
+
+                self.state.apply_import(imported)
+
+                self.assertTrue(self.state.can_plan)
+                self.changes.reset_mock()
+                self.assertFalse(self.state.finish_plan(run, pending))
+                self.assertIs(self.state.draft, imported.planned)
+                self.assertEqual((self.state.can_plan, self.state.can_save), (True, True))
+                self.assertEqual(
+                    (self.state.status, self.state.status_kind), ('imported rows', STATUS_OK))
+                self.changes.assert_not_called()
+
+    def test_a_failed_import_keeps_the_pending_run_current(self) -> None:
+        """Verify an import error preserves the draft and allows pending planning to finish."""
+        earlier = good()
+        self.state.apply_import(earlier)
+        run = self.state.begin_plan([], **FORM)
+
+        self.state.apply_import(PlanView(False, 'ERROR: not a plan'))
+
+        self.assertIs(self.state.draft, earlier.planned)
+        self.assertEqual((self.state.can_plan, self.state.can_save), (False, False))
+        self.assertEqual(
+            (self.state.status, self.state.status_kind), ('ERROR: not a plan', STATUS_ERROR))
+        current = good(52.0)
+        self.assertTrue(self.state.finish_plan(run, current))
+        self.assertIs(self.state.draft, current.planned)
+        self.assertEqual((self.state.can_plan, self.state.can_save), (True, True))
 
 
 class TestMissionQueue(unittest.TestCase):

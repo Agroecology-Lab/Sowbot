@@ -279,27 +279,31 @@ class TestMissionStoreCard(unittest.TestCase):
         self.assertEqual(self.rows(), [])
 
     def test_the_list_is_rebuilt_only_when_the_store_version_changes(self) -> None:
-        """Verify an unchanged version leaves the list, and the Run button state, alone."""
+        """Verify an unchanged version leaves the list while refreshing the Run button."""
         self.vm.missions = ()
         self.set_run_enabled.reset_mock()
 
         self.tick()
         self.assertEqual(len(self.rows()), 3)
-        self.set_run_enabled.assert_not_called()
+        self.set_run_enabled.assert_called_once_with(True)
 
         self.vm.version = 2
         self.tick()
         self.assertEqual(self.rows(), [])
 
     def test_run_is_disabled_while_a_mission_runs(self) -> None:
-        """Verify the Run button follows the executor each time the list is rebuilt."""
+        """Verify Run follows the executor without a store version change."""
         self.set_run_enabled.assert_called_once_with(True)
         self.vm.running = True
-        self.vm.version = 2
 
         self.tick()
 
         self.set_run_enabled.assert_called_with(False)
+
+        self.vm.running = False
+        self.tick()
+
+        self.set_run_enabled.assert_called_with(True)
 
     def test_save_stores_the_queue_under_the_name_and_repeat_interval(self) -> None:
         """Verify the live queue steps, the name and the interval reach the view model."""

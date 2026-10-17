@@ -54,6 +54,35 @@ class TestPlanRequestFromForm(unittest.TestCase):
 
         self.assertEqual(request.corners_ll, CORNERS)
 
+    def test_numeric_strings_are_converted_without_treating_zero_as_empty(self) -> None:
+        """Keep explicit string zeros, unlike the numeric zero widget defaults."""
+        request = PlanRequest.from_form(CORNERS, [], **form(
+            tool_width='0', angle_deg=' -12.5 ', headland_m='2.75',
+            obstacle_pad_m='0.25', dem_res='0'))
+
+        self.assertEqual((request.tool_width, request.angle_deg, request.headland_m,
+                          request.obstacle_pad_m, request.dem_res),
+                         (0.0, -12.5, 2.75, 0.25, 0.0))
+        for value in (request.tool_width, request.angle_deg, request.headland_m,
+                      request.obstacle_pad_m, request.dem_res):
+            self.assertIsInstance(value, float)
+
+    def test_invalid_numbers_raise_for_each_numeric_field(self) -> None:
+        """Reject invalid and unsupported values instead of silently using defaults."""
+        for field in ('tool_width', 'angle_deg', 'headland_m', 'obstacle_pad_m', 'dem_res'):
+            for value, error in (('not a number', ValueError), (object(), TypeError)):
+                with self.subTest(field=field, value=value), self.assertRaises(error):
+                    PlanRequest.from_form(CORNERS, [], **form(**{field: value}))
+
+    def test_obstacle_rings_remain_the_supplied_collection(self) -> None:
+        """Retain obstacle rings while taking an independent boundary list."""
+        rings = [list(RING)]
+
+        request = PlanRequest.from_form(CORNERS, rings, **form())
+
+        self.assertIs(request.obstacle_rings, rings)
+        self.assertIsNot(request.corners_ll, CORNERS)
+
 
 if __name__ == '__main__':
     unittest.main()

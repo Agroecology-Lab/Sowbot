@@ -9,13 +9,54 @@
 <!-- Code Coverage -->
 [![Codecov](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev/graph/badge.svg)](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev)
 
-An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and ESP32-based hardware control.
+An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and STM32-based hardware control.
 
 [Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) 
 
 [Docs](https://agroecology-lab.github.io/Sowbot_Data/python_api.html)
-
-Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
+```
++-------------------------------------------------------+
+|               ROS 2 DUAL SBC Open Core                |
+| +----------------------+     +----------------------+ |
+| |       NEO SBC        | Gig |      LIMBIC SBC      | |
+| | - Camera Streams     | Eth | - NiceGUI Dashboard  | |
+| |   (YOLO / ExG)       |<===>| - Nav2/LCAS TopoNav  | |
+| | - Visual Servoing    |     | - devkit_mavlink node| |
+| | - Crop Processing    |     | * Plan Services      | |
+| | - High-Throughput    |     | * Telemetry Relay    | |
+| |   Perception         |     | * MAVLink Translation| |
+| +----------------------+     +----------------------+ |
++---------------------------v---------------------------+
+                            |
+                      Serial MAVLink
+                   (UART / TTL 921600)
+                            |
++---------------------------v---------------------------+
+|              ARDUPILOT FLIGHT CONTROLLER              |
+|          (Levia running ArduRover Firmware)           |
+|-------------------------------------------------------|
+| - Geofence: EKF3 Fusion   - Failsafes: Heartbeat loss,|
+| - Arming State Machine      Geofence, Estop           |
+| - Pre-Arm Checks          - Direct I/O: Safety Switch,|
+|                             Bumpers                   |
++------------+---------------------------------+--------+
+             |                                 |
+     DroneCAN/CANsimple                  Dual u-blox
+         (CAN Bus)                       F9P RTK GNSS
+             |
++------------v-------------+
+| ODrive/DroneCAN Motor    |
+| Controllers              |
++------------+-------------+
+             |
++------------v------------------------------------------+
+|                 PHYSICAL ROBOT FRAME                  |
+|-------------------------------------------------------|
+| - Safety Subsystem (Level 0)                          |
+| - Differential Drive tracked platform                 |
++-------------------------------------------------------+
+```
+Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk/hardware) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
 
 Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
 
@@ -27,7 +68,7 @@ We have a [Online version of swath planner](https://agroecology-lab.github.io/fe
 
 [![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU) 
 
-(click image to play video)
+(click above image to play video)
 
 
 [![Architecture diagram of agroecology-lab/feldfreund_devkit_ros](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros/diagram.png)](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros?utm_source=readme&utm_medium=picture)
@@ -121,11 +162,6 @@ Excludes OpenCV, GDAL, Boost, Eigen, PyTorch — rewriting those too pushes this
 At a $120/hr fully-loaded US engineering rate, that's **≈$18.9M–$44.4M**.
 
 
-
-
-
-
-
 # ⚠️ CRITICAL SAFETY WARNING: 
 
  This software is under active development and may be broken at any given moment. For a stable reference implementation see the upstream Zauberzeug project.
@@ -138,7 +174,7 @@ At a $120/hr fully-loaded US engineering rate, that's **≈$18.9M–$44.4M**.
    standard open-source licenses apply, users are reminded that operating agricultural 
    robotics requires a professional duty of care.
 3. **MANDATORY HARDWARE SAFETY**: Under no circumstances should this software be used 
-   to control a robot of any size without a independent, hard-wired, physical Emergency Stop (E-Stop) 
+   to control a robot of any size without a independent, safety subsystem 
    system. Software-based stops (such as /estop/soft) are NOT a substitute for 
    Category 0 or 1 hardware safety stops.
 4. **NO LIABILITY**: To the extent permitted by the laws of England and Wales, the 
@@ -148,7 +184,6 @@ At a $120/hr fully-loaded US engineering rate, that's **≈$18.9M–$44.4M**.
 ### Health Warning
 
 This repo may contain traces of LLM slop, We've done our best to mitigate this. If you are allergic to slop, please help us refactor.
-
 
 ## Quick Start
 

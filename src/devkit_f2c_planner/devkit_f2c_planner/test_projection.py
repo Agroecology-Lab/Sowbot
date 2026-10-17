@@ -3,6 +3,7 @@
 import math
 import unittest
 
+from devkit_f2c_planner.f2c_planner import f2c_xy_to_latlon
 from devkit_f2c_planner.f2c_test_helpers import planner, silence_planner_log, to_ll
 
 # Anchors: UK, southern hemisphere / western longitude, equator, Australia.
@@ -71,6 +72,16 @@ class ProjectionTest(unittest.TestCase):
                     x2, y2 = planner.f2c_latlon_to_xy(lat, lon, lat0, lon0)
                     self.assertAlmostEqual(x2, x, places=6)
                     self.assertAlmostEqual(y2, y, places=6)
+
+    def test_public_inverse_returns_latitude_then_longitude_in_degrees(self):
+        """Check the public inverse independently of the forward projection at high latitudes."""
+        for lat0, lon0 in ((60.0, 12.0), (-60.0, -70.0)):
+            with self.subTest(anchor=(lat0, lon0)):
+                lat, lon = f2c_xy_to_latlon(-METRES_PER_DEGREE / 2, METRES_PER_DEGREE,
+                                           lat0, lon0)
+
+                self.assertAlmostEqual(lat, lat0 + 1.0, places=7)
+                self.assertAlmostEqual(lon, lon0 - 1.0, places=7)
 
     def test_distances_match_great_circle_within_field_scale(self):
         """Equirectangular error stays under 0.01 % out to ~1.4 km from the anchor."""

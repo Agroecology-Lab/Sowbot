@@ -1,3 +1,13 @@
+To resolve the merge conflict in your file, you can combine the best parts of both branches (`ui-extract-navpage` and `caatinga-dev`).
+
+### Recommended Resolution
+
+1. **In `Dialog.__await__**`: Use the explicit `assert` check from `caatinga-dev` (cleaner and fail-fast) while retaining the fallback logic or simplified return structure.
+2. **In `FakeUi.__init__**`: Keep `str | None` from `ui-extract-navpage` in the type hint if your dialog handlers are allowed to return `None` (e.g., when a user cancels or dismisses a dialog).
+
+Here is the fully resolved code:
+
+```python
 """A small fake nicegui.ui, and the Plan cards imported over it, for the Plan card tests."""
 # pylint: disable=keyword-arg-before-vararg
 import asyncio
@@ -120,9 +130,9 @@ class Dialog(Element):
         self.submitted.append(result)
 
     def __await__(self):
-        if fake_ui.answer_dialog is not None:
-            return fake_ui.answer_dialog(self)
-        raise AssertionError('Set fake_ui.answer_dialog before awaiting a dialog')
+        answer_dialog = fake_ui.answer_dialog
+        assert answer_dialog is not None, 'Set fake_ui.answer_dialog before awaiting a dialog'
+        return answer_dialog(self)
         yield  # pylint: disable=unreachable
 
 
@@ -246,3 +256,5 @@ def walk(element):
 def texts(element, kind='label'):
     """Return the text of every element of a kind inside an element."""
     return [e.text for e in walk(element) if e.kind == kind]
+
+```
