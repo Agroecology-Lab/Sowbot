@@ -52,7 +52,14 @@ class MavlinkBridgeNode(Node):
     """Bridges cmd_vel to an ArduPilot Rover RTU over MAVLink (GUIDED mode)."""
 
     def __init__(self):
-        """Connect to MAVLink and register the ROS subscription and timer."""
+        """Connect to MAVLink and register the ROS subscription and timer.
+
+        ROS parameters republish_period_s and cmd_vel_timeout_s are in seconds, defaulting
+        to 0.1 and 0.5. MAVLINK_ENDPOINT selects the connection; MAVLINK_BAUD defaults to 115200.
+        Raise ValueError for a nonpositive republish period, a nonpositive or nonfinite command
+        timeout, a missing or placeholder endpoint, or a baud value that cannot be parsed as an int.
+        MAVLink connection errors propagate.
+        """
         super().__init__('devkit_mavlink_bridge_node')
 
         self.declare_parameter('republish_period_s', _DEFAULT_REPUBLISH_PERIOD_S)
@@ -81,11 +88,17 @@ class MavlinkBridgeNode(Node):
             f'{republish_period_s}s, zero velocity once cmd_vel is older than {cmd_vel_timeout_s}s')
 
     def _on_cmd_vel(self, msg: Twist) -> None:
-        """Record the latest velocity command and its arrival time."""
+        """Record linear.x (m/s), angular.z (rad/s), and their monotonic arrival time.
+
+        If either component is nonfinite, leave the previous command and arrival time unchanged.
+        """
         self._watchdog.update(msg.linear.x, msg.angular.z)
 
     def _republish(self) -> None:
-        """Send the current velocity target, or an explicit zero if cmd_vel has gone stale."""
+        """Send the current velocity target, or zero if no command exists or it has gone stale.
+
+        MAVLink send errors propagate.
+        """
         linear_x, angular_z, stale = self._watchdog.current()
         if stale != self._was_stale:
             if stale:

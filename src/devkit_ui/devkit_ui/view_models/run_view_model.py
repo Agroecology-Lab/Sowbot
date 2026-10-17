@@ -86,6 +86,7 @@ class RunViewModel:
     def move_joystick(self, x: float, y: float) -> None:
         """Publish forward speed x (m/s) and negated turn y (rad/s).
 
+        Cache the command as held and renew its 0.5-second input lease before publishing.
         Publisher errors propagate to the caller.
         """
         self._joystick_held = True
@@ -98,8 +99,10 @@ class RunViewModel:
 
         The MAVLink bridge treats any cmd_vel older than about half a second as stale and commands zero.
         Repeat only within the operator-input lease; timer ticks never renew it.
+        If input is missing or older than 0.5 seconds, publish zero and release the joystick.
+        Input exactly 0.5 seconds old can still be repeated.
         New joystick input is required to keep moving after the lease expires.
-        Does nothing unless the joystick is held, so it never overrides autonomous navigation on cmd_vel.
+        Do nothing unless the joystick is held. Publisher errors propagate to the caller.
         """
         if self._joystick_held:
             if (self._last_joystick_input is None

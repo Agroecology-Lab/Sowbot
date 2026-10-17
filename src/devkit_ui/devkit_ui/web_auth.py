@@ -20,14 +20,18 @@ class BasicAuthMiddleware:
     """Pure ASGI middleware that rejects http and websocket requests without the shared password."""
 
     def __init__(self, app, password: str) -> None:
-        """Wrap an ASGI app; password must be non-empty."""
+        """Wrap an ASGI app with a shared password; raise ValueError if the password is empty."""
         if not password:
             raise ValueError('password must not be empty')
         self._app = app
         self._password = password.encode()
 
     async def __call__(self, scope, receive, send) -> None:
-        """Pass authorised requests through, answer everything else with 401 or a refused handshake."""
+        """Pass authorized HTTP/WebSocket requests and other ASGI scope types to the wrapped app.
+
+        Reject unauthorized HTTP requests with a 401 Basic challenge and WebSocket handshakes
+        with close code 1008. Errors from the wrapped app, receive, or send propagate.
+        """
         if scope['type'] not in ('http', 'websocket'):
             await self._app(scope, receive, send)
             return
@@ -44,7 +48,11 @@ class BasicAuthMiddleware:
         await send({'type': 'http.response.body', 'body': b'Unauthorised'})
 
     def _authorised(self, headers) -> bool:
-        """Return True when an Authorization header carries the shared password."""
+        """Check the first Authorization header for Basic credentials with the shared password.
+
+        Ignore the username; passwords may contain colons. Return False for a missing header,
+        a non-Basic scheme, invalid base64, or a password mismatch.
+        """
         for name, value in headers:
             if name.lower() != b'authorization':
                 continue

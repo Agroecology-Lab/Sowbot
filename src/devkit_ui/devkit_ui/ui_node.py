@@ -345,7 +345,10 @@ def ros_main() -> None:
 
 
 def _protect_dashboard() -> None:
-    """Require SOWBOT_UI_PASSWORD on every request, or warn loudly that the dashboard is open."""
+    """Install HTTP and WebSocket Basic authentication when SOWBOT_UI_PASSWORD is nonempty.
+
+    An unset or empty value leaves the dashboard open to any network client.
+    """
     password = os.environ.get(UI_PASSWORD_ENV, '')
     if password:
         app.add_middleware(BasicAuthMiddleware, password=password)
