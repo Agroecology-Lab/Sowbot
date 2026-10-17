@@ -121,7 +121,7 @@ class Dialog(Element):
 
     def __await__(self):
         answer_dialog = fake_ui.answer_dialog
-        assert answer_dialog is not None
+        assert answer_dialog is not None, 'Set fake_ui.answer_dialog before awaiting a dialog'
         return answer_dialog(self)
         yield  # pylint: disable=unreachable
 
@@ -136,7 +136,7 @@ class FakeUi:
         self.context = []
         self.elements = []
         self.timers = []
-        self.answer_dialog: Callable[[Dialog], str] | None = None
+        self.answer_dialog: Callable[[Dialog], str | None] | None = None
 
     def reset(self) -> None:
         """Forget everything built so far."""

@@ -1,5 +1,6 @@
 # pylint: disable=protected-access,attribute-defined-outside-init
 import copy
+import logging
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,6 +10,8 @@ from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.test_map_operations import load_map_harness
 
+SERVICE_LOGGER = 'devkit_ui.application_services.topology_application_service'
+
 
 class TestRowActions(unittest.TestCase):
     def setUp(self) -> None:
@@ -16,20 +19,25 @@ class TestRowActions(unittest.TestCase):
         # pylint: disable-next=consider-using-with
         self.directory = Path(self.enterContext(TemporaryDirectory()))
         self.node, self.namespace = load_map_harness(self.directory, self)
-        self.node._topo_doc = TopoDoc(name='live', nodes=[
+        self.load(TopoDoc(name='live', nodes=[
             TopoNode(name='A', x=0.0, y=0.0, edges=[
                 TopoEdge(ROW_ACTION, 'row', 'B'), TopoEdge(NAV_ACTION, 'headland', 'C')]),
             TopoNode(name='B', x=0.0, y=10.0, edges=[TopoEdge(VISION_ROW_ACTION, 'back', 'A')]),
             TopoNode(name='C', x=2.0, y=0.0),
-        ])
+        ]))
+
+    def load(self, doc) -> None:
+        """Make doc the live map, as the domain service would."""
+        self.node._topo_doc = doc
+        self.node._topo_vm.update_doc(doc)
 
     def test_switch_updates_state_and_persists_only_row_edges_in_both_directions(self) -> None:
         """Verify mode changes update session state and save only changes to row edges."""
         for action, count in ((VISION_ROW_ACTION, 1), (ROW_ACTION, 2)):
             with self.subTest(action=action):
-                self.node.set_row_action(action)
+                self.node.authoring.set_row_action(action)
 
-                self.assertEqual(self.node._row_action, action)
+                self.assertEqual(self.node.authoring.row_action, action)
                 self.assertEqual(self.node._run_vm.drop_node.row_action, action)
                 saved = parse_topo_yaml(self.directory / 'live')
                 self.assertEqual(list(saved.get_node('A').edges), [
@@ -44,8 +52,8 @@ class TestRowActions(unittest.TestCase):
         self.node._run_vm.drop_node.status = 'previous status'
         for action in ('', 'unsupported', NAV_ACTION, ROW_ACTION):
             with self.subTest(action=action):
-                self.node.set_row_action(action)
-                self.assertEqual(self.node._row_action, ROW_ACTION)
+                self.node.authoring.set_row_action(action)
+                self.assertEqual(self.node.authoring.row_action, ROW_ACTION)
                 self.assertEqual(self.node._run_vm.drop_node.row_action, ROW_ACTION)
                 self.assertEqual(self.node._topo_doc.to_dict(), original)
                 self.assertEqual(self.node._run_vm.drop_node.status, 'previous status')
@@ -58,11 +66,10 @@ class TestRowActions(unittest.TestCase):
             TopoNode(name='A', edges=[TopoEdge(NAV_ACTION, 'headland', 'B')]),
         ])):
             with self.subTest(doc=doc):
-                self.node._topo_doc = doc
-                self.node._row_action = ROW_ACTION
+                self.load(doc)
                 self.node._run_vm.drop_node.row_action = ROW_ACTION
-                self.node.set_row_action(VISION_ROW_ACTION)
-                self.assertEqual(self.node._row_action, VISION_ROW_ACTION)
+                self.node.authoring.set_row_action(VISION_ROW_ACTION)
+                self.assertEqual(self.node.authoring.row_action, VISION_ROW_ACTION)
                 self.assertEqual(self.node._run_vm.drop_node.row_action, VISION_ROW_ACTION)
                 if doc is not None:
                     self.assertIn('no edges to change', self.node._run_vm.drop_node.status)
@@ -75,7 +82,7 @@ class TestRowActions(unittest.TestCase):
                                  edges=[TopoEdge(ROW_ACTION, 'extra', 'A')]))
         dump_topo_yaml(disk, self.directory / 'live')
 
-        self.node.set_row_action(VISION_ROW_ACTION)
+        self.node.authoring.set_row_action(VISION_ROW_ACTION)
 
         saved = parse_topo_yaml(self.directory / 'live')
         self.assertEqual(list(saved.get_node('DISK').edges), [
@@ -89,10 +96,11 @@ class TestRowActions(unittest.TestCase):
         original_bytes = (self.directory / 'live').read_bytes()
         self.namespace['dump_topo_yaml'].side_effect = OSError('read only')
 
-        self.node.set_row_action(VISION_ROW_ACTION)
+        with self.assertLogs(SERVICE_LOGGER, logging.ERROR):
+            self.node.authoring.set_row_action(VISION_ROW_ACTION)
 
         self.assertEqual(self.node._run_vm.drop_node.status, 'ERROR: read only')
-        self.assertEqual(self.node._row_action, VISION_ROW_ACTION)
+        self.assertEqual(self.node.authoring.row_action, VISION_ROW_ACTION)
         self.assertEqual(self.node._run_vm.drop_node.row_action, VISION_ROW_ACTION)
         self.assertIs(self.node._topo_doc, live)
         self.assertEqual(live.to_dict(), original)

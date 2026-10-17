@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -17,6 +18,8 @@ if TYPE_CHECKING:
         RowDiscoveryApplicationService,
     )
     from devkit_ui.topo_results import DiscoveryResult, NavUpdate
+
+_LOG = logging.getLogger(__name__)
 
 
 class RunViewModel:
@@ -147,6 +150,16 @@ class RunViewModel:
         self.topo.nav_status = f'connecting → {target}…'
         self.topo.navigating = True
         self._navigation_app_service.navigate(target, self._on_nav_update)
+
+    def go_to(self, target: str, soft_estop_active: bool) -> None:
+        """Start navigating to a node unless a goal is running or the soft e-stop is active.
+
+        A rejected request is logged and leaves the displayed navigation status unchanged.
+        """
+        if self.topo.navigating or soft_estop_active:
+            _LOG.warning('go_to: rejected, navigation already in progress or soft-estop active')
+            return
+        self.navigate_to(target)
 
     def cancel_navigation(self) -> None:
         """Cancel the running navigation goal, if any."""

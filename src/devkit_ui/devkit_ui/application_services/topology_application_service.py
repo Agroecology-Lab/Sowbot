@@ -4,13 +4,14 @@ import copy
 import logging
 import re
 import threading
+import traceback
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from devkit_ui.domain_services.topo_map_store import TopoMapStore
 from devkit_ui.models import TopoDoc, TopoNode, TopoPose
 from devkit_ui.topo_defaults import default_actions, default_definitions
-from devkit_ui.topo_results import PersistResult
+from devkit_ui.topo_results import PersistResult, StagedDrop
 
 if TYPE_CHECKING:
     from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
@@ -221,6 +222,69 @@ class TopologyApplicationService:
             if doc.has_node(node_name):
                 doc.get_node(node_name).patch_role(role)
             self._store.save(doc, live.name)
+
+    # ── background persistence ───────────────────────────────────────────────
+    # These return at once and write on a worker thread. Each reports progress and the
+    # final outcome, including errors, as status text through report, which is therefore
+    # called from that thread. Worker exceptions are logged and never propagate.
+
+    def persist_and_reload_async(self, modify: Callable[[TopoDoc], None], success_msg: str,
+                                 report: Callable[[str], None]) -> None:
+        """Run persist_and_reload in the background and report success_msg or the error.
+
+        Requires a loaded map; without one the worker reports 'ERROR: map not loaded'.
+        Returning does not mean the map has been saved or made live.
+        """
+        def work() -> None:
+            try:
+                report(self.persist_and_reload(modify).describe(success_msg))
+                _LOG.info('persist_and_reload: %s', success_msg)
+            except Exception as e:  # pylint: disable=broad-except
+                report(f'ERROR: {e}')
+                _LOG.error('persist_and_reload failed: %s (%s)\n%s',
+                           e, type(e), traceback.format_exc())
+
+        self._spawn(work)
+
+    def drop_node_async(self, drop: StagedDrop, report: Callable[[str], None]) -> None:
+        """Run drop_node for a staged drop in the background and report its progress.
+
+        The node is already in the live map, so a failed save is reported but does not
+        remove it. A node that is already on disk is skipped without a status update.
+        """
+        def work() -> None:
+            try:
+                result = self.drop_node(
+                    drop.node, on_saved=lambda: report(f'{drop.base} — reloading…'))
+                if result.kind == 'skipped':
+                    _LOG.warning('Node %s already in file, skipping write', drop.node.name)
+                    return
+                if result.kind == 'switch_failed':
+                    report(f'{drop.short} saved (switch failed: {result.detail})')
+                    _LOG.warning('switch_topological_map failed (%s)', result.detail)
+                else:
+                    report(result.describe(drop.base))
+                _LOG.info(drop.log)
+            except Exception as e:  # pylint: disable=broad-except
+                report(f'ERROR: {e}')
+                _LOG.error('drop_node failed: %s (%s)\n%s', e, type(e), traceback.format_exc())
+
+        self._spawn(work)
+
+    def patch_node_role_async(self, node_name: str, role: str) -> None:
+        """Run patch_node_role in the background, logging any failure."""
+        def work() -> None:
+            try:
+                self.patch_node_role(node_name, role)
+            except Exception as e:  # pylint: disable=broad-except
+                _LOG.error('patch_node_role failed: %s', e)
+
+        self._spawn(work)
+
+    @staticmethod
+    def _spawn(work: Callable[[], None]) -> None:
+        """Run work on a daemon thread."""
+        threading.Thread(target=work, daemon=True).start()
 
     def save_map_as(self, name: str) -> str:
         """Save a named copy of the map without touching the live one.

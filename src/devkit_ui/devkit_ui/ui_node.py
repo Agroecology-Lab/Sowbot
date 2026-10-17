@@ -1,12 +1,9 @@
-# pylint: disable=duplicate-code,too-many-lines,consider-using-with
+# pylint: disable=duplicate-code
 """
 ui_node.py — Sowbot web cockpit on :80
 """
 
-import re
 import threading
-import traceback
-from collections.abc import Callable
 from importlib import resources
 
 # The following imports get generated in the Dockerfile, they aren't available to pylint
@@ -40,7 +37,7 @@ from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
-from devkit_ui.constants import FIELD27_CENTER, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
+from devkit_ui.constants import FIELD27_CENTER, NODE_NAME
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 from devkit_ui.domain_services.mission_domain_service import (
     ERROR,
@@ -64,20 +61,15 @@ from devkit_ui.models import TopoDoc
 # pylint: enable=import-error
 # OBSTACLE: obstacle manager, view model and card helpers
 from devkit_ui.obstacles import ObstacleManager
-from devkit_ui.pages.obstacle_cards import attach_nav_card
+from devkit_ui.pages.delete_dialogs import confirm_delete_row
 from devkit_ui.pages.plan.plan_page import PlanPage
-from devkit_ui.pages.run.drop_node_card import DropNodeCard
-from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
-from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
-from devkit_ui.pages.run.node_map_card import NodeMapCard
-from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
-from devkit_ui.pages.run.track_card import TrackCard
+from devkit_ui.pages.run.nav_page import NavPage
 from devkit_ui.pages.sim.sim_page import SimPage
 from devkit_ui.pages.system.system_page import SystemPage
 from devkit_ui.process_registry import shutdown_tools
 from devkit_ui.ros_gateway import RosGateway
-from devkit_ui.topo_results import TopologyEditError
 from devkit_ui.view_models.global_view_model import GlobalViewModel
+from devkit_ui.view_models.map_authoring_view_model import MapAuthoringViewModel
 from devkit_ui.view_models.mission_view_model import MissionViewModel
 from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
 from devkit_ui.view_models.plan_view_model import PlanViewModel
@@ -86,9 +78,6 @@ from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.sim_view_model import SimViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
-
-_NAME_RE = re.compile(r'^[A-Z0-9_]+$')
-
 
 # ── Import CSS ────────────────────────────────────────────────────────────────
 
@@ -165,8 +154,10 @@ class NiceGuiNode(Node):
         self._run_vm = RunViewModel(
             self._drive_app_service, self._row_discovery_app_service, self._nav_app_service)
         self._topo_vm = TopologyViewModel(self._topo_app_service)
-        self._topo_vm.register_map_archived_callback(self._on_map_archived)
         self._plan_vm = PlanViewModel(self._plan_app_service, self._topo_vm, self._run_vm)
+        self._authoring_vm = MapAuthoringViewModel(
+            self._run_vm, self._topo_vm, self._topo_app_service, self._topo_edit_service,
+            self._telemetry_app_service, self._ros.create_timer, is_sim=self._is_sim)
         self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
         self._robot_brain_vm = RobotBrainViewModel(self._robot_brain_app_service)
         sim_assets = SimAssetService()
@@ -185,13 +176,6 @@ class NiceGuiNode(Node):
             lambda m: self._topo_vm.set_current_node(m.data),
             _SENSOR_QOS,
         )
-
-        # Per-session, never persisted: each new map starts on geometry-only rows.
-        self._row_action: str = ROW_ACTION
-
-        self._track_timer:   object  | None   = None
-        self._track_counter: int              = 0
-        self._track_first:   bool             = True
 
         # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher; the view model is what
         # the cards bind to. Start after the telemetry service exists so the getters resolve.
@@ -244,314 +228,6 @@ class NiceGuiNode(Node):
         """
         return self._telemetry_app_service.latest_gps
 
-    # ── nav actions ───────────────────────────────────────────────────────────
-
-    def send_nav_goal(self, target: str) -> None:
-        """Send a navigation goal to the specified topology node.
-
-        Parameters:
-            target (str): Name of the topology node to navigate to.
-        """
-        if self._run_vm.topo.navigating or self._global_vm.soft_estop_active:
-            self.get_logger().warn(
-                'send_nav_goal: rejected — navigation already in progress '
-                'or soft-estop active')
-            return
-        self._run_vm.navigate_to(target)
-
-    def cancel_nav_goal(self) -> None:
-        """Cancel the active navigation goal."""
-        self._run_vm.cancel_navigation()
-
-    # ── node dropping ─────────────────────────────────────────────────────────
-
-    def drop_topo_node(self, name: str, row_id: int | None,
-                       row_role: str = 'entry') -> None:
-        """Add a topology node at the current robot position and persist it to the active map.
-
-        Add the node in memory immediately, then save and reload in a background thread.
-        Use (0, 0) in simulation if odometry is unavailable. Connect to the current node,
-        or the selected node as a fallback; save the outgoing edge only if its target is
-        already on disk. Row nodes use the selected row action. Validation failures and
-        worker exceptions set drop_node.status; a failed save does not roll back the
-        initial in-memory addition. The rules live in TopologyEditService.
-
-        Parameters:
-            name (str): Name, stripped and uppercased, with spaces replaced by underscores
-                and characters outside A-Z, 0-9, and underscore removed.
-            row_id (int | None): Row identifier to associate with the node, or None for a
-                navigation node.
-            row_role (str): Role of the node within its row, such as "entry" or "exit".
-        """
-        odom = self.latest_odom
-        try:
-            drop = self._topo_edit_service.stage_drop(
-                name, row_id, row_role,
-                pose=(odom.pose.pose.position.x, odom.pose.pose.position.y) if odom else None,
-                is_sim=self._is_sim, gps=self.latest_gps, row_action=self._row_action,
-                current_node=self._topo_vm.current_node,
-                selected_node=self._topo_vm.selected_node)
-        except TopologyEditError as e:
-            self._run_vm.drop_node.status = str(e)
-            return
-        self._run_vm.drop_node.status = drop.pending
-        node_name = drop.node.name
-
-        def _publish_and_persist():
-            """Save the dropped node and make the updated map available to navigation.
-
-            The service creates a missing map from defaults, saves only edges to nodes
-            already on disk and adds no reverse edges. A duplicate name on disk skips
-            writing. Worker exceptions become drop_node.status errors.
-            """
-            try:
-                def _saved() -> None:
-                    """Show reloading status after saving the node and before switching maps."""
-                    self._run_vm.drop_node.status = f'{drop.base} — reloading…'
-
-                result = self._topo_app_service.drop_node(drop.node, on_saved=_saved)
-                if result.kind == 'skipped':
-                    self.get_logger().warn(f'Node {node_name} already in file — skipping write')
-                    return
-                if result.kind == 'switch_failed':
-                    self._run_vm.drop_node.status = (
-                        f'{drop.short} saved (switch failed: {result.detail})')
-                    self.get_logger().warn(
-                        f'switch_topological_map failed ({result.detail})')
-                else:
-                    self._run_vm.drop_node.status = result.describe(drop.base)
-                self.get_logger().info(drop.log)
-            except Exception as e:
-                self._run_vm.drop_node.status = f'ERROR: {e}'
-                self.get_logger().error(
-                    f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
-
-        threading.Thread(target=_publish_and_persist, daemon=True).start()
-
-    # ── track mode ────────────────────────────────────────────────────────────
-
-    def start_track(self, prefix: str, interval: float,
-                    row_id: int | None, row_role: str | None) -> None:
-        """Record a topology node immediately, then periodically using the node's clock.
-
-        Parameters:
-            prefix (str): Prefix used for numbered node names after normalization.
-            interval (float): Time in seconds between recorded nodes.
-            row_id (int | None): Optional row identifier; its first node is an entry,
-                and subsequent nodes are middle nodes.
-            row_role (str | None): Role assigned when no row identifier is provided.
-
-        Continue numbering after existing nodes with the same prefix.
-        Report an empty normalized prefix or an existing timer in tracking status and return.
-        Requires a loaded topology document; timer creation errors propagate after the
-        initial recording attempt.
-        """
-        prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
-        if not prefix:
-            self._run_vm.track.running = False
-            self._run_vm.track.status = 'ERROR: prefix required'
-            return
-        if self._track_timer is not None:
-            self._run_vm.track.running = True
-            self._run_vm.track.status = 'ERROR: already running'
-            return
-        existing = [n.name for n in self._topo_doc.nodes
-                    if n.name.startswith(prefix + '_') and n.name[len(prefix)+1:].isdigit()]
-        self._track_counter = (max(int(n[len(prefix)+1:]) for n in existing)
-                               if existing else 0)
-        self._track_first  = True
-
-        self._run_vm.track.prefix = prefix
-        self._run_vm.track.interval = interval
-        self._run_vm.track.row_id = row_id
-        self._run_vm.track.row_role = row_role or 'entry'
-        self._run_vm.track.running = True
-        self._run_vm.track.status = ''
-
-        is_row = row_id is not None
-
-        def _drop() -> None:
-            """Record the next topology node in the active tracking sequence and update tracking
-            status.
-            """
-            self._track_counter += 1
-            node_name = f'{prefix}_{self._track_counter}'
-            if is_row:
-                role = 'entry' if self._track_first else 'middle'
-                self._track_first = False
-            else:
-                role = row_role
-            self.drop_topo_node(node_name, row_id, role)
-            self._run_vm.track.status = f'recording  {node_name}  (#{self._track_counter})'
-
-        _drop()
-        self._track_timer = self._ros.create_timer(interval, _drop)
-
-    def stop_track(self) -> None:
-        """Stop tracking and mark the last tracked node as the row exit when applicable."""
-        if self._track_timer is not None:
-            self._track_timer.cancel()
-            self._track_timer = None
-        is_row = self._run_vm.track.row_id is not None
-        if is_row and self._track_counter > 0:
-            last_name = f'{self._run_vm.track.prefix}_{self._track_counter}'
-            self._patch_node_role(last_name, 'exit')
-            self._run_vm.track.status = (f'stopped — {last_name} marked exit'
-                                      f'  (#{self._track_counter} nodes)')
-        else:
-            self._run_vm.track.status = f'stopped at #{self._track_counter}'
-        self._run_vm.track.running = False
-        self._track_counter = 0
-        self._track_first = True
-        self._run_vm.track.prefix = ''
-        self._run_vm.track.row_id = None
-        self._run_vm.track.row_role = 'entry'
-
-    # ── shared topo-map persistence helper ────────────────────────────────────
-
-    # ── Row discovery ────────────────────────────────────────────────────────
-
-    def start_discovery(self) -> None:
-        """Start row discovery."""
-        self._run_vm.start_discovery()
-
-    def stop_discovery(self) -> None:
-        """Stop row discovery."""
-        self._run_vm.stop_discovery()
-
-    def _persist_and_reload(self, modify_fn: Callable[[TopoDoc], None], status_owner: object,
-                             status_attr: str, success_msg: str) -> None:
-        """
-                             Apply a topology modification, persist the updated map, and make it
-                             live in a background thread. Requires a loaded topology document.
-                             Worker exceptions become status messages; returning does not mean
-                             the map has been saved or reloaded.
-
-                             Parameters:
-                                 modify_fn (Callable[[TopoDoc], None]): Function that mutates the
-                                 topology document.
-                                 status_owner (object): Object whose status attribute receives
-                                 progress or error messages.
-                                 status_attr (str): Name of the status attribute to update.
-                                 success_msg (str): Message reported after the map is persisted
-                                 successfully.
-                             """
-        def _work():
-            """Run the service's persist-and-reload and report the outcome as a status."""
-            try:
-                result = self._topo_app_service.persist_and_reload(modify_fn)
-                setattr(status_owner, status_attr, result.describe(success_msg))
-                self.get_logger().info(f'_persist_and_reload: {success_msg}')
-            except Exception as e:
-                setattr(status_owner, status_attr, f'ERROR: {e}')
-                self.get_logger().error(
-                    f'_persist_and_reload failed: {e} ({type(e)}\n{traceback.format_exc()})')
-
-        threading.Thread(target=_work, daemon=True).start()
-
-    # ── F2C → topo rows ──────────────────────────────────────────────────────
-
-    # ── Delete topo nodes / rows ─────────────────────────────────────────────
-
-    def delete_topo_node(self, name: str) -> None:
-        """Delete a topology node and persist the updated map.
-
-        Parameters:
-            name (str): Name of the topology node to delete.
-        """
-        self._persist_deletion(self._topo_edit_service.stage_delete_node, name)
-
-    def delete_row(self, row_id: int) -> None:
-        """Delete all topology nodes belonging to a row and persist the updated map.
-
-        Parameters:
-            row_id (int): Identifier of the row whose nodes should be deleted.
-        """
-        self._persist_deletion(self._topo_edit_service.stage_delete_row, row_id)
-
-    def _persist_deletion(self, stage, target) -> None:
-        """Stage a deletion, clear a selection it removes, and persist it in the background.
-
-        Parameters:
-            stage: TopologyEditService method that returns the StagedEdit for target.
-            target: Node name or row id passed to stage.
-        """
-        status_owner = self._run_vm.topo
-        try:
-            edit = stage(target)
-        except TopologyEditError as e:
-            status_owner.delete_status = str(e)
-            return
-        if self._topo_vm.selected_node in edit.affected:
-            self._topo_vm.set_selected_node(None)
-        status_owner.delete_status = edit.pending
-        self._persist_and_reload(edit.modify, status_owner, 'delete_status', edit.success)
-
-    def _log_edit_lines(self, warnings: tuple[str, ...], infos: tuple[str, ...]) -> None:
-        """Log the warning and info lines produced while staging a topology edit."""
-        for line in infos:
-            self.get_logger().info(line)
-        for line in warnings:
-            self.get_logger().warn(line)
-
-    # ── Confirmation dialogs ─────────────────────────────────────────────────
-
-    async def confirm_delete_node(self, name: str | None) -> None:
-        """Ask for confirmation before deleting and persisting a topology node.
-
-        With a loaded map, ignore an empty name or a node absent from that map.
-        Canceling the dialog leaves the node unchanged.
-        """
-        if not name or not self._topo_doc.has_node(name):
-            return
-        nd = self._topo_doc.get_node(name)
-        rid = nd.meta.get('row_id')
-        with ui.dialog() as d, ui.card():
-            ui.label(f'Delete topo node "{name}"?').classes('font-semibold')
-            if rid is not None:
-                ui.label(
-                    f'This is part of row {rid}. To delete the whole row '
-                    f'(entry + exit), use the ✕ on the Plan tab instead.'
-                ).classes('text-xs').style('color:#9a6700;max-width:340px')
-            ui.label('This persists immediately and cannot be undone.').classes(
-                'text-xs').style('color:#8c959f')
-            with ui.row().classes('w-full justify-end gap-2 mt-2'):
-                ui.button('Cancel', on_click=lambda: d.submit('cancel')).props('flat no-caps')
-                ui.button('Delete', color='negative',
-                          on_click=lambda: d.submit('ok')).props('no-caps')
-        if await d == 'ok':
-            self.delete_topo_node(name)
-
-    async def confirm_delete_row(self, row_id: int) -> None:
-        targets = sorted(node.name for node in self._topo_doc.nodes
-                         if node.meta.get('row_id') == row_id)
-        if not targets:
-            return
-        with ui.dialog() as d, ui.card():
-            ui.label(f'Delete row {row_id}?').classes('font-semibold')
-            ui.label(f'{len(targets)} nodes will be removed:').classes('text-xs').style(
-                'color:#57606a')
-            ui.label(', '.join(targets)).classes('text-xs font-mono').style(
-                'color:#8c959f;max-width:340px;word-break:break-all')
-            with ui.row().classes('w-full justify-end gap-2 mt-2'):
-                ui.button('Cancel', on_click=lambda: d.submit('cancel')).props('flat no-caps')
-                ui.button('Delete', color='negative',
-                          on_click=lambda: d.submit('ok')).props('no-caps')
-        if await d == 'ok':
-            self.delete_row(row_id)
-
-    # ── existing helpers below ───────────────────────────────────────────────
-
-    def _patch_node_role(self, node_name: str, role: str) -> None:
-        """Update the saved node role in a worker thread without blocking the caller."""
-        def _write():
-            """Persist the role through the topology service and log any failure."""
-            try:
-                self._topo_app_service.patch_node_role(node_name, role)
-            except Exception as e:
-                self.get_logger().error(f'_patch_node_role failed: {e}')
-        threading.Thread(target=_write, daemon=True).start()
-
     # ── UI shell ──────────────────────────────────────────────────────────────
 
     def content(self) -> None:
@@ -565,7 +241,14 @@ class NiceGuiNode(Node):
             tab_system  = ui.tab('System',  icon='settings')
         with ui.tab_panels(tabs, value=tab_run).classes('w-full'):
             with ui.tab_panel(tab_run):
-                self._run_content()
+                NavPage(
+                    global_vm=self._global_vm,
+                    run_vm=self._run_vm,
+                    topo_vm=self._topo_vm,
+                    telemetry_vm=self._telemetry_vm,
+                    obstacle_vm=self._obstacle_vm,
+                    authoring=self._authoring_vm,
+                )
             with ui.tab_panel(tab_plan):
                 self._plan_content()
             with ui.tab_panel(tab_sim):
@@ -576,118 +259,6 @@ class NiceGuiNode(Node):
                     robot_brain_vm=self._robot_brain_vm,
                 )
 
-    # ── Run tab ───────────────────────────────────────────────────────────────
-
-    def _run_content(self) -> None:
-
-        """Builds the navigation interface and keeps its displayed state synchronized with the robot
-        and topology.
-        """
-        # A dropped connection never delivers the joystick's on_end, which would leave the last
-        # cmd_vel in force. release_joystick only stops a joystick that still holds a command.
-        ui.context.client.on_disconnect(self._run_vm.release_joystick)
-
-        with ui.row().classes('w-full gap-3 items-stretch'):
-
-            with ui.column().classes('flex-1 gap-3').style('min-width:0'):
-
-                with ui.row().classes('w-full gap-3 items-stretch'):
-
-                    JoystickControlCard(
-                        global_vm=self._global_vm,
-                        run_vm=self._run_vm,
-                    )
-
-                    NodeMapCard(
-                        topo_vm=self._topo_vm,
-                        pose_state=self._run_vm.node_map,
-                    )
-
-                with ui.row().classes('w-full gap-3 items-start'):
-
-                    TrackCard(
-                        state=self._run_vm.track,
-                        on_start=self.start_track,
-                        on_stop=self.stop_track
-                    )
-
-                    DropNodeCard(
-                        state=self._run_vm.drop_node,
-                        topo_vm=self._topo_vm,
-                        on_drop=self.drop_topo_node,
-                        on_row_action=self.set_row_action,
-                    )
-
-                    RowDiscoveryCard(
-                        state=self._run_vm.discovery,
-                        on_start=self.start_discovery,
-                        on_stop=self.stop_discovery,
-                    )
-
-                    # OBSTACLE: Mark Obstacle card next to Drop Node
-                    attach_nav_card(self._obstacle_vm)
-
-            navigation_sidebar = NavigationSidebar(
-                global_store=self._global_vm,
-                topo_vm=self._topo_vm,
-                nav_state=self._run_vm.topo,
-                on_go=lambda:
-                    self.send_nav_goal(self._topo_vm.selected_node)
-                    if self._topo_vm.selected_node else None,
-                on_cancel=self.cancel_nav_goal,
-                on_delete=lambda: self.confirm_delete_node(self._topo_vm.selected_node),
-                on_select=self._topo_vm.set_selected_node,
-            )
-
-        def on_node_clicked(e) -> None:
-            """Selects the clicked topology node when it exists in the current map."""
-            n = (e.args or {}).get('node')
-            if n and self._topo_doc and self._topo_doc.has_node(n):
-                self._topo_vm.set_selected_node(n)
-        ui.on('topo_node_clicked', on_node_clicked)
-
-        _prev: dict = {}
-
-        def refresh_nav() -> None:
-            """
-            Refresh the navigation view with the latest robot pose, topology, and navigation state.
-            """
-            self._telemetry_vm.refresh()
-            self._run_vm.update_pose_label(self._telemetry_vm.odom, self._telemetry_vm.gps)
-
-            topo_doc = self._topo_doc
-            if topo_doc is None:
-                return
-
-            current_node = self._topo_vm.current_node
-
-            rp = self._telemetry_vm.robot_pose()
-            rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
-                                            round(rp[2], 2))
-            self._run_vm.node_map.robot_pose = rp
-
-            snap = {
-                'sel': self._topo_vm.selected_node,
-                'cur': current_node,
-                'stat': self._run_vm.topo.nav_status,
-                'nav': self._run_vm.topo.navigating,
-                'nodes': set(topo_doc.nodes),
-                'robot': rp_key
-            }
-            nonlocal _prev
-            changed = {k for k, v in snap.items() if _prev.get(k) != v}
-            if not changed:
-                return
-            _prev.update(snap)
-
-            if changed & {'sel', 'nodes'}:
-                navigation_sidebar.render_nodes(
-                    topo_doc.nodes,
-                    self._topo_vm.selected_node,
-                )
-
-        ui.timer(0.2, refresh_nav)
-
     # ── Plan tab ──────────────────────────────────────────────────────────────
 
     def _plan_content(self) -> None:
@@ -695,7 +266,7 @@ class NiceGuiNode(Node):
         gps = ((self.latest_gps.latitude, self.latest_gps.longitude)
                if self.latest_gps else None)
         PlanPage(self._plan_vm, self._mission_vm, self._obstacle_vm, gps,
-                 self._run_mission, self.cancel_mission, self.confirm_delete_row)
+                 self._run_mission, self.cancel_mission, self._confirm_delete_row)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NiceGuiNode mission executor methods
@@ -754,60 +325,11 @@ class NiceGuiNode(Node):
     def cancel_mission(self) -> None:
         """Signal the executor to stop before its next goal and cancel the active goal."""
         self._mission_service.cancel()
-        self.cancel_nav_goal()
+        self._run_vm.cancel_navigation()
 
-    # ── Map archive ───────────────────────────────────────────────────────────
-
-    def set_row_action(self, action: str) -> None:
-        """Switch row driving between geometry-only and vision following.
-
-        Applies to rows added from now on and rewrites the row edges already in
-        the map, so the same map can be seeded with row_traversal and then run
-        with limbic_row_follow once a crop exists.
-
-        Ignore unsupported or unchanged actions. Update the session selection immediately;
-        if the loaded map has matching edges to change, persist and reload in the background.
-        Worker errors are reported in drop_node.status without reverting the selection.
-        """
-        if action not in (ROW_ACTION, VISION_ROW_ACTION) or action == self._row_action:
-            return
-        self._row_action = action
-        self._run_vm.drop_node.row_action = action
-        if not self._topo_doc:
-            return
-        n_edges = sum(1 for n in self._topo_doc.nodes for e in n.edges
-                      if e.action in (ROW_ACTION, VISION_ROW_ACTION) and e.action != action)
-        if n_edges == 0:
-            self._run_vm.drop_node.status = f'row action: {action} (no edges to change)'
-            return
-
-        def _modify(doc):
-            """Apply the selected driving action to the document's row edges."""
-            doc.set_row_action({ROW_ACTION, VISION_ROW_ACTION}, action)
-
-        self._persist_and_reload(
-            _modify, self._run_vm.drop_node, 'status',
-            f'row action: {action}, {n_edges} row edges updated')
-
-    def _on_map_archived(self) -> None:
-        """Return row driving to geometry mode after the map was archived and cleared."""
-        self._row_action = ROW_ACTION
-        self._run_vm.drop_node.row_action = ROW_ACTION
-
-    def toggle_estop(self) -> None:
-        """
-        Toggle the soft emergency-stop state and publish the updated value.
-        """
-        self._global_vm.toggle_estop()
-
-    def send_speed(self, x: float, y: float) -> None:
-        """Publish a velocity command, propagating publisher errors.
-
-        Parameters:
-            x (float): Forward linear velocity in meters per second.
-            y (float): Turn command in radians per second; published as angular.z = -y.
-        """
-        self._run_vm.move_joystick(x, y)
+    async def _confirm_delete_row(self, row_id: int) -> None:
+        """Ask for confirmation, then delete the row from the map."""
+        await confirm_delete_row(self._topo_vm, row_id, self._authoring_vm.delete_row)
 
 
 # ── entrypoints ───────────────────────────────────────────────────────────────
