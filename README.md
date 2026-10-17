@@ -1,17 +1,17 @@
 # Sowbot (ROS 2 stack)
 <!-- CI & Test Status -->
-[![Industrial CI](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/industrial_ci.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/industrial_ci.yml?query=branch%3Acaatinga-dev)
-[![Run Tests](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/test.yml/badge.svg)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/test.yml)
-[![CodeQL](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/github-code-scanning/codeql)
-[![CodeQL Code Quality](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/github-code-quality/codeql/badge.svg)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/github-code-quality/codeql)
-[![Docs](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/documentation.yml/badge.svg)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/documentation.yml)
+[![Industrial CI](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/industrial_ci.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/industrial_ci.yml?query=branch%3Acaatinga-dev)
+[![Run Tests](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/test.yml/badge.svg)](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/test.yml)
+[![CodeQL](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/github-code-scanning/codeql)
+[![CodeQL Code Quality](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/github-code-quality/codeql/badge.svg)](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/github-code-quality/codeql)
+[![Docs](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/documentation.yml/badge.svg)](https://github.com/Agroecology-Lab/Sowbot/actions/workflows/documentation.yml)
 
 <!-- Code Coverage -->
-[![Codecov](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev/graph/badge.svg)](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev)
+[![Codecov](https://codecov.io/gh/Agroecology-Lab/Sowbot/branch/caatinga-dev/graph/badge.svg)](https://codecov.io/gh/Agroecology-Lab/Sowbot/branch/caatinga-dev)
 
 An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and STM32-based hardware control.
 
-[Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) 
+[Quick start](#quick-start) 
 
 [Docs](https://agroecology-lab.github.io/Sowbot_Data/python_api.html)
 ```
@@ -71,11 +71,11 @@ We have a [Online version of swath planner](https://agroecology-lab.github.io/fe
 (click above image to play video)
 
 
-[![Architecture diagram of agroecology-lab/feldfreund_devkit_ros](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros/diagram.png)](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros?utm_source=readme&utm_medium=picture)
+[![Architecture diagram of agroecology-lab/Sowbot](https://gitdiagram.com/agroecology-lab/Sowbot/diagram.png)](https://gitdiagram.com/agroecology-lab/Sowbot?utm_source=readme&utm_medium=picture)
 
 ## Sowbot Roadmap
 
-Related [Safety Roadmap](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/caatinga-dev/safety_roadmap.md)
+Related [Safety Roadmap](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/safety_roadmap.md)
 
 | # | Feature | Description | Status | TRL | Phase |
 |---|---------|-------------|--------|-----|-------|
@@ -96,9 +96,9 @@ Related [Safety Roadmap](https://github.com/Agroecology-Lab/feldfreund_devkit_ro
 | M7 | Sentor safety monitoring | `sowbot_monitor.yaml` fully authored (e-stop, bumpers, battery, camera, odom, neo_vision heartbeat, node monitors). `sentor_node.py` wired into `devkit.launch.py`. Pending: smoke-test on live hardware; battery voltage cutoff needs field confirmation (`# TODO: CONFIRM` in YAML). | ~75% Done | 3 | 2026 |
 | M8 | Visual crop-row navigation | `sowbot_row_follow` package implemented. ExG+Otsu, visual servo, `limbic_row_follow_node.py` as Nav2 action server. Cancel and heartbeat-loss safety. TSM row-swap hold with 6-second debounce implemented. Tested and iterated against a lettuce crop in the UK. | ~80% Done | 4 | 2026 |
 | **PRODUCTION** | | | | | **~2027** |
-| P1 | Phase 1: dev platform (current) | ESP32 + Lizard DSL remains the controller for this phase. Audience: university labs, ag-tech researchers, software startups. No compliance claimed, standards used as informal design reference only, user's own risk per README. Product status [Partly completed machinery](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/caatinga-dev/safety_roadmap.md#product-classification) | Done | 4 | 2026 |
-| P2 | Phase 2: OEM modular subsystems (Ardupilot migration) | Replaces ESP32/Lizard DSL with [Ardupilot on Levia STM32 H7](https://github.com/piecol/LEVIA-H7).  Audience: startups integrating Sowbot's core. No third-party certification needed yet, formal internal assessment only. Can offer [PLd hardware subsystem](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/caatinga-dev/safety_roadmap.md) | Research | 2 | 2027 |
-| P3 | Phase 3: commercial sale to farmers [(Safety sub-systems hardened)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/caatinga-dev/safety_roadmap.md) | Full ISO 18497 compliance, ISO 13849 PLc certification (or equivalent), third-party safety audit, field trial history, and an insurance/liability structure. All required before sale, none yet scoped. | Planned | 1 | 2027+ |
+| P1 | Phase 1: dev platform (current) | ESP32 + Lizard DSL remains the controller for this phase. Audience: university labs, ag-tech researchers, software startups. No compliance claimed, standards used as informal design reference only, user's own risk per README. Product status [Partly completed machinery](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/safety_roadmap.md#product-classification) | Done | 4 | 2026 |
+| P2 | Phase 2: OEM modular subsystems (Ardupilot migration) | Replaces ESP32/Lizard DSL with [Ardupilot on Levia STM32 H7](https://github.com/piecol/LEVIA-H7).  Audience: startups integrating Sowbot's core. No third-party certification needed yet, formal internal assessment only. Can offer [PLd hardware subsystem](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/safety_roadmap.md) | Research | 2 | 2027 |
+| P3 | Phase 3: commercial sale to farmers [(Safety sub-systems hardened)](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/safety_roadmap.md) | Full ISO 18497 compliance, ISO 13849 PLc certification (or equivalent), third-party safety audit, field trial history, and an insurance/liability structure. All required before sale, none yet scoped. | Planned | 1 | 2027+ |
 | P4 | CANopen bus | ISO 11898 FDCAN at 500 kbit/s / 2 Mbit/s. lely-core CANopen master on T527 native M_CAN. DSP402 drive profile. | Research | 2 | 2027 |
 | P5 | RT kernel + core isolation | PREEMPT_RT on Limbic T527. `isolcpus=4-7`, RTK EKF on core 2 (SCHED_FIFO 60), AOC nav on cores 4-6, watchdog on core 5. GbE/CAN IRQ pinned to core 0. | Planned | 2 | 2027 |
 | P6 | ROFS image | Read-only rootfs, Ubuntu Noble minimal or Yocto with RT kernel, pre-built LCAS topo nav, Nav2, `rmw_zenoh_cpp`. Immutable field deployment. | Research | 1 | 2027 |
@@ -126,16 +126,18 @@ Simulation configuration is partially derived from work by [caatingarobotics](ht
 
 **THIS SOFTWARE COULD CONTROL PHYSICAL HARDWARE CAPABLE OF PRODUCING SIGNIFICANT KINETIC FORCE.**
 
-1. **EXPERIMENTAL STATUS**: This branch ('sowbot') contains experimental code generated and 
+1. **EXPERIMENTAL STATUS**: This branch ('caatinga-dev') contains experimental code generated and 
    refined with AI assistance. It has NOT undergone full-scale field validation.
 2. **STATUTORY NOTICE (UK)**: Usage of this software is at the user's sole risk. While 
    standard open-source licenses apply, users are reminded that operating agricultural 
    robotics requires a professional duty of care.
 3. **MANDATORY HARDWARE SAFETY**: Under no circumstances should this software be used 
-   to control a robot of any size without a independent, safety subsystem 
-   system. Software-based stops (such as /estop/soft) are NOT a substitute for 
+   to control a robot of any size without an independent safety subsystem. Software-based stops (such as /estop/soft) are NOT a substitute for 
    Category 0 or 1 hardware safety stops.
-4. **NO LIABILITY**: To the extent permitted by the laws of England and Wales, the 
+4. **CURRENT STATUS**: the hardwired 24V stop loop is still being built and the radar is not yet validated
+   on the vehicle (see [safety_roadmap.md](safety_roadmap.md), O7, O8, O14). Until those close, treat the
+   robot as supervised-only, with a person within reach of a physical E-stop.
+5. **NO LIABILITY**: To the extent permitted by the laws of England and Wales, the 
    contributors exclude all liability for property damage, crop loss, or indirect 
    consequential damages.
 
@@ -172,12 +174,12 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 ### 1. Clone the Repository
 Open a terminal on your host machine and download the workspace:
 ```bash
-git clone -b caatinga-dev https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
-cd feldfreund_devkit_ros
+git clone -b caatinga-dev https://github.com/Agroecology-Lab/Sowbot.git
+cd Sowbot
 ```
 
 
-### 3. Build & Launch
+### 2. Build & Launch
 Use the management script to build the ROS 2 workspace and launch the robot stack. This script automatically handles hardware discovery and port permissions:
 ```bash
 ./manage.py full-build
@@ -413,229 +415,6 @@ python3 agbot-diagnostic.py full
 | **YOLOX 0.3.0** + yolox_nano weights | Megvii | Apache-2.0 | ✅ | [Ge et al., 2021](https://arxiv.org/abs/2107.08430) | Confirm weights terms for commercial use |
 | **PyTorch (CPU)** | Meta | BSD-3-Clause | ✅ | [Paszke et al., 2019](https://papers.nips.cc/paper/9015-pytorch-an-imperative-style-high-performance-deep-learning-library) | Core machine learning runtime engine |
 
+## Upstream documentation
 
-
-
-
-
-===============================================================
-
-## Feldfreund DevKit ROS 
-(Below from original Zauberzeug forked repo)
-
-Feldfreund DevKit ROS is a comprehensive ROS2 package that handles the communication and configuration of various Feldfreund components:
-
-- Communication with Lizard (ESP32) to control the Feldfreund
-- GNSS positioning system
-- Camera systems (USB and AXIS cameras)
-- Example UI to control the robot
-
-All launch files and configuration files (except for the UI) are stored in the `devkit_bringup` package.
-
-## Components
-
-### DevKit driver
-
-The DevKit driver (based on [ATB Potsdam's field_friend_driver](https://github.com/ATB-potsdam-automation/field_friend_driver)) manages the communication with the ESP32 microcontroller running [Lizard](https://lizard.dev/) firmware - a domain-specific language for defining hardware behavior on embedded systems.
-
-For the separate local Lizard firmware checkout, build, and flash workflow, see [Local Lizard Firmware Setup](docs/lizard-firmware-setup.md).
-
-The package provides:
-
-- `config/devkit.liz`: Basic Lizard configuration for DevKit robot
-- `config/devkit.yaml`: Corresponding ROS2 driver configuration
-
-Available ROS2 topics:
-
-- `/cmd_vel` (geometry_msgs/Twist): Control robot movement
-- `/odom` (nav_msgs/Odometry): Robot odometry data
-- `/battery_state` (sensor_msgs/BatteryState): Battery status information
-- `/bumper/front_top` (std_msgs/Bool): Front top bumper state
-- `/bumper/front_bottom` (std_msgs/Bool): Front bottom bumper state
-- `/bumper/back` (std_msgs/Bool): Back bumper state
-- `/estop/soft` (std_msgs/Bool): Software emergency stop control
-- `/estop/front` (std_msgs/Bool): Hardware front emergency stop state
-- `/estop/back` (std_msgs/Bool): Hardware back emergency stop state
-- `/configure` (std_msgs/Empty): Trigger loading of the Lizard configuration file
-
-### Camera System
-
-The camera system supports both USB cameras and AXIS cameras, managed through a unified launch system in `camera_system.launch.py` that handles USB cameras, AXIS cameras, and the Foxglove Bridge for remote viewing.
-
-The USB camera system provides video streaming through ROS2 topics using the `usb_cam` ROS2 package. Camera parameters can be configured through `config/camera.yaml`.
-
-The AXIS camera system integrates with the [ROS2 AXIS camera driver](https://github.com/ros-drivers/axis_camera/tree/humble-devel) to support multiple IP cameras with individual streams. Each camera can be configured through `config/axis_camera.yaml`, with credentials managed through `config/secrets.yaml` (template provided in `config/secrets.yaml.template`). The cameras' authentication mode (basic or digest) might need to be configured - see [AXIS Camera Authentication](#axis-camera-authentication) section for details.
-
-The visualization system integrates with [Foxglove Studio](https://foxglove.dev/) for remote camera viewing, supporting compressed image transport. The Foxglove Bridge is accessible via WebSocket connection on port 8765.
-
-### GNSS System
-
-The GNSS system uses the [Septentrio GNSS driver](https://github.com/septentrio-gnss/septentrio_gnss_driver) with the default `config/gnss.yaml` configuration. Available topics:
-
-- `/pvtgeodetic`: Position, velocity, and time in geodetic coordinates
-- `/poscovgeodetic`: Position covariance in geodetic coordinates
-- `/velcovgeodetic`: Velocity covariance in geodetic coordinates
-- `/atteuler`: Attitude in Euler angles
-- `/attcoveuler`: Attitude covariance
-- `/gpsfix`: Detailed GPS fix information including satellites and quality
-- `/aimplusstatus`: AIM+ status information
-
-### DevKit UI
-
-The example UI provides a robot control interface built with NiceGUI, featuring a joystick control similar to turtlesim. It gives you access to and visualization of all topics made available by the DevKit driver, including:
-
-- Robot movement control through a joystick interface
-- Real-time visualization of GNSS data
-- Monitoring of safety systems (bumpers, emergency stops)
-- Software emergency stop control
-
-The interface is accessible through a web browser at `http://<ROBOT-IP>:80` when the robot is running.
-
-The System tab's Medkit Gateway button binds the gateway to `127.0.0.1` for host-local use.
-Stop sends SIGINT, waits for shutdown, and escalates to termination and kill only on timeout.
-Gateway and SOVD links use the host serving the page, on ports 8080 and 3000 respectively.
-Remote gateway access requires a separately configured deployment with authentication, TLS, and restricted network access; the button does not enable remote binding.
-For a TLS deployment, use its configured HTTPS endpoint in the browser and SOVD settings.
-
-<div align="center">
-  <img src="assets/DevKitUI.png" alt="Example UI Screenshot" width="500"/>
-  <div style="font-size: 0.95em; color: #555; margin-top: 0.5em;">
-    Example UI: Control, data, safety, and GPS map in one interface.
-  </div>
-</div>
-
-## Docker Setup
-
-### Using Docker Compose
-
-1. Build and run the container:
-
-```bash
-cd docker
-docker-compose up --build
-```
-
-2. Run in detached mode:
-
-```bash
-docker-compose up -d
-```
-
-3. Attach to running container:
-
-```bash
-docker-compose exec devkit bash
-```
-
-4. Stop containers:
-
-```bash
-docker-compose down
-```
-
-The Docker setup includes:
-
-- All necessary ROS2 packages
-- Lizard communication tools
-- Camera drivers
-- GNSS drivers
-
-## Connect to UI
-
-To access the user interface (UI), follow these steps:
-
-1. **Connect to the Robot's Wi-Fi:**
-   Join the robot's WLAN network.
-
-2. **Open the UI in your browser:**
-   Navigate to:
-
-   ```
-   http://<ROBOT-IP>:80
-   ```
-
-   (Replace `<ROBOT-IP>` with the actual IP address once you have it.)
-
-## Launch Files
-
-The system can be started using different launch files:
-
-- `devkit.launch.py`: Launches all components
-- `devkit_nocams.launch.py`: Launches all components without the cameras
-- `devkit_driver.launch.py`: Launches only Feldfreund DevKit driver
-- `camera_system.launch.py`: Launches complete camera system (USB + AXIS) and Foxglove Bridge
-- `usb_camera.launch.py`: Launches USB camera only
-- `axis_cameras.launch.py`: Launches AXIS cameras only
-- `gnss.launch.py`: Launches GNSS system
-- `ui.launch.py`: Launches the example UI node
-
-To launch the complete system:
-
-```bash
-ros2 launch devkit_bringup devkit.launch.py
-```
-
-## AXIS Camera Authentication
-
-The AXIS cameras can be configured to use either digest or basic authentication. To check and configure the authentication mode:
-
-1. Check current authentication settings:
-
-```bash
-curl --digest -u root:pw "http://192.168.42.3/axis-cgi/admin/param.cgi?action=list&group=Network.HTTP" | cat
-```
-
-2. Switch authentication mode (e.g., from digest to basic):
-
-```bash
-curl --digest -u root:pw "http://192.168.42.3/axis-cgi/admin/param.cgi?action=update&Network.HTTP.AuthenticationPolicy=basic" | cat
-```
-
-Replace `root:pw` with your camera's credentials and `192.168.42.3` with your camera's IP address. The authentication mode can be set to either `basic` or `digest`. Note that you should always use the `--digest` flag in these commands even when switching to basic auth, as the camera's current setting might be using digest authentication.
-
-## Quickstart guide
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/zauberzeug/devkit_ros.git
-cd devkit_ros
-```
-
-### 2. Validate Configuration
-
-Before building, check and adjust if needed:
-
-1. **ROS2 Configuration** (`devkit_bringup/config/devkit.yaml`):
-   - Verify `serial_port` matches your setup (default: "/dev/ttyTHS0")
-   - Check `flash_parameters` for your hardware (default: "-j orin --nand")
-
-2. **Lizard Configuration** (`devkit_bringup/config/devkit.liz`):
-   - Verify motor configuration matches your hardware
-   - Check pin assignments for bumpers and emergency stops
-   - Adjust any other hardware-specific settings
-
-### 3. Build with Docker
-
-```bash
-./docker.sh u
-```
-
-### 4. Send Lizard Configuration
-
-Once the system is running:
-
-- Use the "Send Lizard Config" button in the UI
-- Or use the `/configure` topic in ROS2
-
-### 5. Ready to Go
-
-Check the UI at `http://<ROBOT-IP>:80` to control and monitor your robot.
-
-## Future features
-
-This repository is still work in progress. Please feel free to contribute or reach out to us, if you need any unimplemented feature.
-
-- Complete tf2 frames
-- Handle camera calibrations
-- Robot visualization
+The original Feldfreund DevKit text (components, UI, camera and AXIS setup) is kept in [docs/upstream-feldfreund-readme.md](docs/upstream-feldfreund-readme.md). Parts of it do not apply to Sowbot, see the note at the top of that file.
