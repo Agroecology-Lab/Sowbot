@@ -28,12 +28,6 @@ std_msgs = ModuleType('std_msgs.msg')
 std_msgs.Bool = FakeBool
 rclpy_node = ModuleType('rclpy.node')
 rclpy_node.Node = type('Node', (), {})
-rclpy_qos = ModuleType('rclpy.qos')
-rclpy_qos.QoSProfile = SimpleNamespace
-rclpy_qos.ReliabilityPolicy = SimpleNamespace(RELIABLE='reliable')
-rclpy_qos.DurabilityPolicy = SimpleNamespace(TRANSIENT_LOCAL='transient_local')
-rclpy_qos.LivelinessPolicy = SimpleNamespace(AUTOMATIC='automatic')
-rclpy_qos.Duration = lambda seconds: seconds
 
 with patch.dict(sys.modules, {
     'geometry_msgs': ModuleType('geometry_msgs'),
@@ -42,7 +36,6 @@ with patch.dict(sys.modules, {
     'std_msgs.msg': std_msgs,
     'rclpy': ModuleType('rclpy'),
     'rclpy.node': rclpy_node,
-    'rclpy.qos': rclpy_qos,
 }):
     from devkit_ui import qos
     from devkit_ui.domain_services.drive_domain_service import DriveDomainService
@@ -73,7 +66,7 @@ class TestDriveServices(unittest.TestCase):
         self.assertEqual(
             (profile.depth, profile.reliability, profile.durability, profile.liveliness),
             (1, 'reliable', 'transient_local', 'automatic'))
-        self.assertEqual(profile.liveliness_lease_duration, 1)
+        self.assertEqual(profile.liveliness_lease_sec, 1.0)
         self.assertIs(self.ros.create_publisher.call_args_list[1].args[2], qos.SAFETY_QOS)
 
     def test_joystick_preserves_linear_speed_and_reverses_turn_direction(self):

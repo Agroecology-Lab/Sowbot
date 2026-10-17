@@ -3,22 +3,11 @@ from __future__ import annotations
 import math
 
 from nav_msgs.msg import Odometry
-from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
 from std_msgs.msg import Bool
 
-from devkit_ui.qos import SAFETY_QOS
+from devkit_ui.qos import ODOM_QOS, SAFETY_QOS, SENSOR_QOS
 from devkit_ui.ros_gateway import RosGateway, TransformUnavailable
-
-_SENSOR_QOS = QoSProfile(
-    depth=1,
-    reliability=ReliabilityPolicy.BEST_EFFORT,
-)
-
-_ODOM_QOS = QoSProfile(
-    depth=10,
-    reliability=ReliabilityPolicy.RELIABLE,
-)
 
 # s — map->base_link older than this: don't draw it
 TF_STALENESS_LIMIT = 2.0
@@ -103,7 +92,7 @@ class TelemetryDomainService:
         self._pose_fail_log_t = 0.0
         self._fake_gps_pub = None
 
-        ros.create_subscription(NavSatFix, '/gnss/fix', self._on_gps, _SENSOR_QOS)
+        ros.create_subscription(NavSatFix, '/gnss/fix', self._on_gps, SENSOR_QOS)
 
         # Sim GPS shim: saving a topo map hard-requires a finite, non-zero fix to anchor nodes
         # to a datum, and at cold start nothing has published one yet. Gazebo's real navsat
@@ -120,9 +109,9 @@ class TelemetryDomainService:
         # shim regardless of timing.
         if is_sim:
             self._fake_gps_pub = ros.create_publisher(
-                NavSatFix, self.FAKE_GPS_TOPIC, _SENSOR_QOS)
+                NavSatFix, self.FAKE_GPS_TOPIC, SENSOR_QOS)
             ros.create_subscription(
-                NavSatFix, self.FAKE_GPS_TOPIC, self._on_fake_gps, _SENSOR_QOS)
+                NavSatFix, self.FAKE_GPS_TOPIC, self._on_fake_gps, SENSOR_QOS)
             # Wall-clock timer: a sim-time timer never fires before Gazebo publishes /clock,
             # which would silently disable this shim for the entire cold-start window it
             # exists to cover.
@@ -141,12 +130,12 @@ class TelemetryDomainService:
         ros.create_subscription(Bool, 'estop/front', self._on_estop_front, SAFETY_QOS)
         ros.create_subscription(Bool, 'estop/back', self._on_estop_back, SAFETY_QOS)
 
-        ros.create_subscription(Odometry, '/fusion/odom', self._on_fusion_odom, _ODOM_QOS)
-        ros.create_subscription(Odometry, '/odom', self._on_odom_fallback, _ODOM_QOS)
+        ros.create_subscription(Odometry, '/fusion/odom', self._on_fusion_odom, ODOM_QOS)
+        ros.create_subscription(Odometry, '/odom', self._on_odom_fallback, ODOM_QOS)
         # /odometry/global is fed by a relay of /fusion/odom in sim (see sim_nav.launch.py) —
         # same trust gating applies via _on_odom_fallback's _fusion_odom_seen check, so it
         # won't overwrite a good pose with a stale/uninitialized one either.
-        ros.create_subscription(Odometry, '/odometry/global', self._on_odom_fallback, _ODOM_QOS)
+        ros.create_subscription(Odometry, '/odometry/global', self._on_odom_fallback, ODOM_QOS)
 
         # TF: robot_pose() needs the actual map->base_link transform, not a raw odom-frame
         # pose. The odom frame origin is wherever the robot started dead-reckoning (spawn

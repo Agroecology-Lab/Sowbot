@@ -13,7 +13,6 @@ from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import String
 
@@ -67,6 +66,7 @@ from devkit_ui.pages.run.nav_page import NavPage
 from devkit_ui.pages.sim.sim_page import SimPage
 from devkit_ui.pages.system.system_page import SystemPage
 from devkit_ui.process_registry import shutdown_tools
+from devkit_ui.qos import SENSOR_QOS
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.map_authoring_view_model import MapAuthoringViewModel
@@ -99,27 +99,24 @@ MISSION_STATUS_COLOURS = {
     INFO: '#57606a', PROGRESS: '#0969da', WARN: '#9a6700', ERROR: '#cf222e', OK: '#1a7f37'}
 
 
-class NiceGuiNode(Node):
+class NiceGuiNode:
+    """The NiceGUI application. It reaches ROS only through the RosGateway it is given."""
 
-    def __init__(self) -> None:
+    def __init__(self, ros: RosGateway) -> None:
         """
-        Initialize the ROS node, GUI view models, navigation interfaces, sensor state, and
+        Initialize the GUI view models, navigation interfaces, sensor state, and
         mission-planning components.
 
         In simulation, configure the dedicated fallback GPS source used when no recent real GPS fix
         is available. Register the NiceGUI root page and initialize topology, obstacle, mission,
         safety, and navigation state.
         """
-        super().__init__(NODE_NAME)
-
-        # Instantiate the temporary ROS gateway bridge to abstract underlying ROS nodes
-        self._ros = RosGateway(self)
+        self._ros = ros
         self._ros.forward_python_logging('devkit_ui')
 
         # The sim flag is the authoritative signal, plumbed from manage.py's is_sim through
         # devkit.launch.py -> ui.launch.py.
-        self.declare_parameter('sim', False)
-        self._is_sim = bool(self.get_parameter('sim').value)
+        self._is_sim = self._ros.get_bool_parameter('sim', False)
 
         # Initialize the domain services using the gateway.
         self._drive_domain_service = DriveDomainService(self._ros)
@@ -166,15 +163,11 @@ class NiceGuiNode(Node):
         # Initialize with default demo document
         self._topo_app_service.initialize_with_default()
 
-        _SENSOR_QOS = QoSProfile(
-            depth=1,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-        )
         self._ros.create_subscription(
             String,
             '/current_node',
             lambda m: self._topo_vm.set_current_node(m.data),
-            _SENSOR_QOS,
+            SENSOR_QOS,
         )
 
         # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher; the view model is what
@@ -340,7 +333,8 @@ def main() -> None:
 
 def ros_main() -> None:
     rclpy.init()
-    node = NiceGuiNode()
+    node = Node(NODE_NAME)
+    NiceGuiNode(RosGateway(node))  # its callbacks and the registered page keep it alive
     try:
         rclpy.spin(node)
     except ExternalShutdownException:

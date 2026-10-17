@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import threading
 
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.parse import parse_topo_json
+from devkit_ui.qos import LATCHED_QOS
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.topo_results import SwitchResult
 
@@ -16,13 +16,8 @@ try:
 except ImportError:  # topological navigation not installed (e.g. unit tests)
     WriteTopologicalMap = None
 
-# QoS for topology map: reliable, transient-local so new subscribers get last map
-TMAP_QOS = QoSProfile(
-    depth=1,
-    reliability=ReliabilityPolicy.RELIABLE,
-    durability=DurabilityPolicy.TRANSIENT_LOCAL,
-    history=HistoryPolicy.KEEP_LAST
-)
+# The topology map uses LATCHED_QOS so new subscribers get the last map.
+TMAP_QOS = LATCHED_QOS
 
 
 class TopologyDomainService:

@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 from rclpy.node import Node
 
+from devkit_ui.qos import QosSpec
+
 if TYPE_CHECKING:
     from rclpy.clock import Clock
     from rclpy.publisher import Publisher
@@ -49,6 +51,43 @@ class _RosLogHandler(logging.Handler):
             self.handleError(record)
 
 
+def to_qos_profile(qos: int | QosSpec | QoSProfile) -> int | QoSProfile:
+    """Return qos as something rclpy accepts: a QosSpec becomes a QoSProfile, anything else is returned unchanged.
+
+    Optional spec fields set to None retain rclpy defaults; liveliness_lease_sec is in seconds.
+    Unknown policy names raise KeyError.
+    Errors importing rclpy or constructing durations and profiles propagate.
+    """
+    if not isinstance(qos, QosSpec):
+        return qos
+    # Imported here so modules that only need topics and services load without rclpy.qos.
+    # pylint: disable=import-outside-toplevel
+    from rclpy.qos import (
+        DurabilityPolicy,
+        Duration,
+        HistoryPolicy,
+        LivelinessPolicy,
+        QoSProfile,
+        ReliabilityPolicy,
+    )
+    # pylint: enable=import-outside-toplevel
+    # Explicit members, so the mapping does not depend on how rclpy's policy enums handle lookup by name.
+    reliability = {'reliable': ReliabilityPolicy.RELIABLE, 'best_effort': ReliabilityPolicy.BEST_EFFORT}
+    durability = {'volatile': DurabilityPolicy.VOLATILE, 'transient_local': DurabilityPolicy.TRANSIENT_LOCAL}
+    history = {'keep_last': HistoryPolicy.KEEP_LAST, 'keep_all': HistoryPolicy.KEEP_ALL}
+    liveliness = {'automatic': LivelinessPolicy.AUTOMATIC, 'manual_by_topic': LivelinessPolicy.MANUAL_BY_TOPIC}
+    kwargs = {'depth': qos.depth, 'reliability': reliability[qos.reliability]}
+    if qos.durability is not None:
+        kwargs['durability'] = durability[qos.durability]
+    if qos.history is not None:
+        kwargs['history'] = history[qos.history]
+    if qos.liveliness is not None:
+        kwargs['liveliness'] = liveliness[qos.liveliness]
+    if qos.liveliness_lease_sec is not None:
+        kwargs['liveliness_lease_duration'] = Duration(seconds=qos.liveliness_lease_sec)
+    return QoSProfile(**kwargs)
+
+
 class TransformUnavailable(Exception):
     """A TF lookup failed because the transform is missing, disconnected or out of range."""
 
@@ -62,13 +101,26 @@ class RosGateway:
         self._wall_clock: Clock | None = None
         self._tf_buffer = None
 
-    def create_publisher(self, msg_type, topic: str, qos: int | QoSProfile) -> Publisher:
-        """Create a publisher on the wrapped node with the supplied type, topic, and QoS."""
-        return self._node.create_publisher(msg_type, topic, qos)
+    def create_publisher(self, msg_type, topic: str, qos: int | QosSpec | QoSProfile) -> Publisher:
+        """Create a publisher on the wrapped node with the supplied type, topic, and QoS.
 
-    def create_subscription(self, msg_type, topic: str, callback, qos: int | QoSProfile) -> Subscription:
-        """Create a subscription on the wrapped node with the supplied callback and QoS."""
-        return self._node.create_subscription(msg_type, topic, callback, qos)
+        qos may be an integer queue depth, a QosSpec to convert, or an existing QoSProfile
+        to pass through.
+        Return the node's publisher handle.
+        QoS conversion and publisher creation errors propagate.
+        """
+        return self._node.create_publisher(msg_type, topic, to_qos_profile(qos))
+
+    def create_subscription(
+            self, msg_type, topic: str, callback, qos: int | QosSpec | QoSProfile) -> Subscription:
+        """Create a subscription on the wrapped node with the supplied callback and QoS.
+
+        qos may be an integer queue depth, a QosSpec to convert, or an existing QoSProfile
+        to pass through.
+        Return the node's subscription handle.
+        QoS conversion and subscription creation errors propagate.
+        """
+        return self._node.create_subscription(msg_type, topic, callback, to_qos_profile(qos))
 
     def create_client(self, srv_type, name: str):
         """Create a service client on the wrapped node."""
@@ -79,6 +131,16 @@ class RosGateway:
         # Imported here so modules that only need topics and services load without rclpy.action.
         from rclpy.action import ActionClient  # pylint: disable=import-outside-toplevel
         return ActionClient(self._node, action_type, name)
+
+    def get_bool_parameter(self, name: str, default: bool = False) -> bool:
+        """Return the node parameter name as a bool, declaring it with default if it is not declared yet.
+
+        Safe to call more than once for the same name: rclpy raises when a parameter is declared twice,
+        so an existing declaration, for example from a launch override, is read and left unchanged.
+        """
+        if not self._node.has_parameter(name):
+            self._node.declare_parameter(name, default)
+        return bool(self._node.get_parameter(name).value)
 
     def get_logger(self):
         """Return the wrapped node's logger."""

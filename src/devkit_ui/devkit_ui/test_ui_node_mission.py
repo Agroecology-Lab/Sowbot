@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call
 
+from devkit_ui.qos import SENSOR_QOS
 from devkit_ui.test_mission_domain_service import doc, mds, node
 
 
@@ -17,19 +18,10 @@ def load_mission_harness():
                       if isinstance(n, ast.ClassDef) and n.name == 'NiceGuiNode')
     names = {'__init__', '_run_mission', '_send_goal_sync', 'cancel_mission'}
     members = [n for n in node_class.body if isinstance(n, ast.FunctionDef) and n.name in names]
-    harness = ast.ClassDef(name='Harness', bases=[ast.Name(id='Node', ctx=ast.Load())],
-                          keywords=[], body=members, decorator_list=[])
+    harness = ast.ClassDef(name='Harness', bases=[], keywords=[], body=members, decorator_list=[])
     colours = next(n for n in tree.body if isinstance(n, ast.Assign)
                    and any(isinstance(t, ast.Name) and t.id == 'MISSION_STATUS_COLOURS'
                            for t in n.targets))
-
-    class FakeNode:
-        """Provide only the node boundary used during initialization."""
-        def __init__(self, _name):
-            """Mock node parameters and reject subscriptions that bypass the gateway."""
-            self.declare_parameter = Mock()
-            self.get_parameter = Mock(return_value=SimpleNamespace(value=False))
-            self.create_subscription = Mock(side_effect=AssertionError('gateway bypassed'))
 
     namespace = {name: Mock(name=name) for name in (
         'RosGateway', 'DriveDomainService', 'TopologyDomainService', 'RobotBrainDomainService',
@@ -49,12 +41,12 @@ def load_mission_harness():
         'INFO', 'PROGRESS', 'WARN', 'ERROR', 'OK', 'NAV_TIMEOUT_SEC',
         'MissionError', 'resolve_steps',
     )})
-    namespace.update(Node=FakeNode, NODE_NAME='test_ui', FIELD27_CENTER=(0.0, 0.0),
-                     ROW_ACTION='row', QoSProfile=SimpleNamespace,
-                     ReliabilityPolicy=SimpleNamespace(BEST_EFFORT='best_effort'))
+    namespace.update(FIELD27_CENTER=(0.0, 0.0), ROW_ACTION='row', SENSOR_QOS=SENSOR_QOS)
     module = ast.fix_missing_locations(ast.Module(body=[colours, harness], type_ignores=[]))
     exec(compile(module, source, 'exec'), namespace)
-    return namespace['Harness'](), namespace
+    gateway = Mock(name='RosGateway')
+    gateway.get_bool_parameter.return_value = False
+    return namespace['Harness'](gateway), namespace
 
 
 class TestUiNodeMission(unittest.TestCase):
@@ -73,12 +65,12 @@ class TestUiNodeMission(unittest.TestCase):
     def test_constructor_routes_current_node_subscription_and_mission_service_through_gateway(self):
         """Verify gateway wiring, subscription QoS, and delivery of current-node updates."""
         gateway = self.node._ros
+        gateway.get_bool_parameter.assert_called_once_with('sim', False)
         gateway.create_subscription.assert_called_once()
         message_type, topic, callback, qos = gateway.create_subscription.call_args.args
         self.assertIs(message_type, self.namespace['String'])
         self.assertEqual(topic, '/current_node')
         self.assertEqual((qos.depth, qos.reliability), (1, 'best_effort'))
-        self.node.create_subscription.assert_not_called()
         self.namespace['MissionDomainService'].assert_called_once_with(gateway)
         callback(SimpleNamespace(data='E'))
         callback(SimpleNamespace(data='X'))

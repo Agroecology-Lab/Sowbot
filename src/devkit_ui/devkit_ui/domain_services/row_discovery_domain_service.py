@@ -3,14 +3,12 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
-from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 from std_srvs.srv import Trigger  # pylint: disable=import-error
 
+from devkit_ui.qos import SENSOR_QOS
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.topo_results import DiscoveryResult
-
-_STATUS_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 
 class RowDiscoveryDomainService:
@@ -25,7 +23,7 @@ class RowDiscoveryDomainService:
         self._start_cli = ros.create_client(Trigger, '/row_discovery_node/start_discovery')
         self._stop_cli = ros.create_client(Trigger, '/row_discovery_node/stop_discovery')
         self._status_callback: Callable[[str], None] | None = None
-        ros.create_subscription(String, '/row_discovery/status', self._on_status, _STATUS_QOS)
+        ros.create_subscription(String, '/row_discovery/status', self._on_status, SENSOR_QOS)
 
     def set_status_callback(self, callback: Callable[[str], None]) -> None:
         """Register a callback for each status string the discovery node publishes."""
