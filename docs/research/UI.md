@@ -35,8 +35,8 @@ A seventh import-linter contract keeps the node, pages and view models off the F
 <tr><td>#175 NavPage (#164, #167)</td><td>The Run tab is <code>NavPage</code>.
 The node wrappers move into view models: <code>persist_and_reload</code> and <code>patch_node_role</code> are in <code>TopologyApplicationService</code>, and <code>MapAuthoringViewModel</code> holds the map-authoring actions</td></tr>
 <tr><td>#168, #169 (PR number to add)</td><td>Topic QoS is declared as <code>QosSpec</code> values in <code>qos.py</code>, which has no rclpy import, and <code>RosGateway</code> converts them to <code>QoSProfile</code>.
-<code>RosGateway</code> handles ROS access for UI services, and the five ignores in the <code>rclpy-via-gateway</code> contract are gone.
-<code>NiceGuiNode</code> is a plain class built on a <code>RosGateway</code>; <code>ui_node.py</code> retains ROS startup imports, and <code>ros_main</code> creates and spins the <code>Node</code>.
+No module outside <code>RosGateway</code> imports <code>rclpy</code>, and the five ignores in the <code>rclpy-via-gateway</code> contract are gone.
+<code>NiceGuiNode</code> is a plain class built on a <code>RosGateway</code>; <code>ros_main</code> creates the <code>Node</code>.
 The <code>sim</code> parameter is read through <code>RosGateway.get_bool_parameter</code></td></tr>
 </table>
 

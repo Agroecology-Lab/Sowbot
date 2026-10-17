@@ -42,6 +42,22 @@ def make_stack():
 
 
 class TestTopologyStack(unittest.TestCase):
+    def test_map_publisher_and_subscription_share_the_latched_spec(self):
+        """Late map subscribers must retain reliable, transient-local, depth-one delivery."""
+        ros, domain, _, _ = make_stack()
+        ros.create_publisher.assert_called_once()
+        ros.create_subscription.assert_called_once()
+        msg_type, topic, spec = ros.create_publisher.call_args.args
+        ros.create_subscription.assert_called_once_with(
+            msg_type, '/topological_map_2',
+            domain._on_topo_map, spec)  # pylint: disable=protected-access
+        self.assertEqual(topic, '/topological_map_2')
+        self.assertIs(spec, TopologyDomainService.__init__.__globals__['LATCHED_QOS'])
+        self.assertIs(ros.create_subscription.call_args.args[-1], spec)
+        self.assertEqual(
+            (spec.depth, spec.reliability, spec.durability, spec.history),
+            (1, 'reliable', 'transient_local', 'keep_last'))
+
     def test_default_doc_has_linear_chain(self) -> None:
         """Verify the demo map is a six-node chain."""
         doc = create_default_doc()
