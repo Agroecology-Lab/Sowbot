@@ -25,7 +25,8 @@
 
 **Document control**
 - Status: living document, Phase 1 (dev platform)
-- Scope: whole-vehicle emergency motor-stop function, ISO 13849-1. Does not cover implement, PTO, or manipulator safety, see §7.
+- Scope: whole-vehicle emergency motor-stop function, ISO 13849-1.
+  Does not cover implement, PTO, or manipulator safety, see §7.
 - Owner: TBD (assign)
 - v0.7.0 changes: ArduPilot on LEVIA-H7 is the current controller path and ESP32/Lizard is legacy (§5, §9, O30 dropped); Phase 1 stated as not complete, supervised use only, until O7, O8 and O14 close (§0, §9); H2 no longer relies on worm-gear self-locking (O13); SW180 coil duty, EDM aux contacts and motor-controller behaviour on battery disconnect added (O34 to O36); MAVLink bridge now commands zero on stale `cmd_vel` (§5, O33); localisation, GNSS monitoring, `GPS_INPUT` accuracy, dashboard access and field-validation items added (O37 to O42).
 - v0.6.9 changes: controller path set to ESP32 (now) then ArduPilot on LEVIA-H7 (§5); independent dual-channel geofence on 2× STEVAL-SILPLC01 added as planned (§0, §1 H5, §2, §5, §6, O24 to O32); cerebri and FRDM-A-S32K358 not selected (§5, O23).
@@ -36,19 +37,27 @@
 
 The formal safety function is the hardwired 24V E-stop loop (§2, Core), comprising the physical E-stops, the ASO Sentir bumpers, the human-detection radar (Inxpect S101A ×3 + C203A), and the 48V traction interlock (Albright SW180 ×2) they drive.
 
-Everything else in this document (ROS 2 nodes, `sentor`, controller firmware, non-radar perception, geofencing, reversing alarm/beacon) is supervisory or defence-in-depth, **not** part of the rated safety function, and does not enter the PLd calculation in §6. The motion alarm/beacon supports the P1 risk-graph parameter (§6) but is not part of the stop function.
+Everything else in this document (ROS 2 nodes, `sentor`, controller firmware, non-radar perception, geofencing, reversing alarm/beacon) is supervisory or defence-in-depth, **not** part of the rated safety function, and does not enter the PLd calculation in §6.
+The motion alarm/beacon supports the P1 risk-graph parameter (§6) but is not part of the stop function.
 
 Controller hardware and firmware choice (ArduPilot on LEVIA-H7, legacy ESP32/Lizard) does not move the safety boundary.
 
-**Current status of the rated function: not complete.** The 24V loop is still being built (O7), the radar is not validated on the vehicle (O14) and the motion beacon that supports the P1 argument is not wired (O8). Until those three close, treat the vehicle as supervised-only: a competent person within reach of a physical E-stop, nobody working near it, and no safety claim made for it in any document.
+**Current status of the rated function: not complete.**
+The 24V loop is still being built (O7), the radar is not validated on the vehicle (O14) and the motion beacon that supports the P1 argument is not wired (O8).
+Before any operation, the hard-wired 24V loop, including the physical E-stop path, must be built and tested (O7).
+If that loop is unavailable, operation requires a separately validated independent stop method; otherwise operation is prohibited.
+Until O7, O8 and O14 close, any permitted operation is supervised-only: a competent person within reach of a physical E-stop (or the separately validated stop control), nobody working near it, and no safety claim made for it in any document.
 
-Planned change: an independent dual-channel geofence (2× STEVAL-SILPLC01, §2 Planned, §5) is intended as a separate safety function acting on the 48V isolation. It is not built, not assessed, and not in the §6 calculation. Until O25 is closed, all geofencing remains supervisory: keep it out of every safety claim, and operate inside a physical boundary or under direct supervision.
+Planned change: an independent dual-channel geofence (2× STEVAL-SILPLC01, §2 Planned, §5) is intended as a separate safety function acting on the 48V isolation.
+It is not built, not assessed, and not in the §6 calculation.
+Until O25 is closed, all geofencing remains supervisory: keep it out of every safety claim, and operate inside a physical boundary or under direct supervision.
 
 ---
 
 ## 1. Hazard identification
 
-Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as identified.
+Supports the S2/F2/P1 risk graph parameters in §6.
+Not exhaustive, add rows as identified.
 
 | ID | Hazard | Cause | Exposure | Current mitigation | Residual risk |
 |---|---|---|---|---|---|
@@ -96,7 +105,8 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 ───────┴──────────────────────┴──────────────────────────────── GND (24V)
 ```
 
-Planned geofence entry point into this loop: OPEN (O24). Not shown.
+Planned geofence entry point into this loop: OPEN (O24).
+Not shown.
 
 ### 48V TRACTION POWER BUS
 ```
@@ -136,7 +146,9 @@ Planned geofence entry point into this loop: OPEN (O24). Not shown.
 
 ### Planned - independent geofence (not in current Core)
 
-Not in the BOM totals above. No prices recorded. Architecture in §5.
+Not in the BOM totals above.
+No prices recorded.
+Architecture in §5.
 
 | # | Component | Source | Role | Key spec (ST product page unless noted) | Status |
 |---|---|---|---|---|---|
@@ -158,7 +170,8 @@ Not in the BOM totals above. No prices recorded. Architecture in §5.
 | ArduPilot fence/failsafe state to `/safety/level` | TO DO | Input once the §5 bridge is live, O19, O22 |
 | GNSS fix quality and heading validity monitors | DONE, report only | `/gnss/fix` and `/gnss/heading` in `sowbot_monitor.yaml`. Nothing consumes `/warning/heartbeat` yet, so the response to RTK float or single fix is undefined (O38) |
 
-Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. They are not part of the rated safety function.
+Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory.
+They are not part of the rated safety function.
 
 ---
 
@@ -173,7 +186,9 @@ Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. The
 
 ## 5. Controller path
 
-Current path: ArduPilot Rover on LEVIA-H7, in bring-up. ESP32/Lizard is legacy: it stays in the tree for existing hardware and gets no new features. Both are supervisory per §0.
+Current path: ArduPilot Rover on LEVIA-H7, in bring-up.
+ESP32/Lizard is legacy: it stays in the tree for existing hardware and gets no new features.
+Both are supervisory per §0.
 
 | Item | Status | Notes |
 |---|---|---|
@@ -184,13 +199,23 @@ Current path: ArduPilot Rover on LEVIA-H7, in bring-up. ESP32/Lizard is legacy: 
 | `devkit_mavlink_bridge` (ROS 2 to MAVLink) | WIP, outbound half only | `cmd_vel` (Twist) to `SET_POSITION_TARGET_LOCAL_NED`, sent every 0.1 s. Sends an explicit zero when `cmd_vel` is older than 0.5 s (`cmd_vel_timeout_s`) or absent; before this it re-sent the last command indefinitely and kept resetting ArduPilot's `GUID_TIMEOUT`. ArduPilot's own default `GUID_TIMEOUT` of 3.0 s is about 4.8 m of travel at 1.6 m/s: try ~1 s and measure the real stop (O33). Baud via `MAVLINK_BAUD`. Inbound half (FusionCore pose to `GPS_INPUT`) not implemented, blocked on confirming FusionCore's output topic/type/rate; accuracy-field rules recorded in `gps_input_handler.py` (O39) |
 | Cerebri on Zephyr & [FRDM-A-S32K358](https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-A-S32K358) (dual 32-bit Arm Cortex-M7 cores in lockstep, ASIL D) | NOT SELECTED. Not the controller-path target | [Agroecology-Lab/cerebri](https://github.com/Agroecology-Lab/cerebri). Its control-loop modules (`estimate.c`/EKF, `velocity.c`, `position.c`, `mixing.c`, `fsm.c`) are functionally superseded by FusionCore (estimation) and ArduPilot GUIDED mode (motion execution, mode/mission FSM). No identified remaining role pending a decision (O23). Not deleted or formally deprecated; do not resume `fsm.c`/`mixing.c`/`velocity.c`/`position.c` work before O23 is resolved. S32K358 is no longer the geofence target (see below, O32) |
 
-**Defence-in-depth geofencing:** FusionCore fused pose, then ArduPilot Rover's native GUIDED-mode fence logic (boundary definition, breach action, EKF/GPS failsafe handling), then bridged into `/safety/level` per §3. This is **not** a certified or rated function: no MISRA, lockstep, or IEC 61508/ISO 26262 certification applies. ArduPilot's fence and failsafe logic is mature, widely deployed, open-source, but not independently certified to any standard in §6. Suitability rests on field verification (O22).
+**Defence-in-depth geofencing:** FusionCore fused pose, then ArduPilot Rover's native GUIDED-mode fence logic (boundary definition, breach action, EKF/GPS failsafe handling), then bridged into `/safety/level` per §3.
+This is **not** a certified or rated function: no MISRA, lockstep, or IEC 61508/ISO 26262 certification applies.
+ArduPilot's fence and failsafe logic is mature, widely deployed, open-source, but not independently certified to any standard in §6.
+Suitability rests on field verification (O22).
 
-Per §0: this entire layer, whichever components it comprises, is out of scope for the PLd calculation. Its value is defence-in-depth (EKF-based fault detection, geofencing, mission execution), not certifiability of the rated stop function, which the hardwired 24V loop provides independently. It does not affect the §6 rating.
+Per §0: this entire layer, whichever components it comprises, is out of scope for the PLd calculation.
+Its value is defence-in-depth (EKF-based fault detection, geofencing, mission execution), not certifiability of the rated stop function, which the hardwired 24V loop provides independently.
+It does not affect the §6 rating.
 
 ### Independent geofence (planned)
 
-Status: PLANNED, later. Not started. Sits alongside the ArduPilot fence above, not in place of it. It is the largest cost and the least certain item: ST's assessment covers the board hardware, not application firmware (O26); GeofenceSafely is not yet ported to the H7 (O32); GNSS is an unrated input (O27). Cite it in no safety claim until O25 closes. Source: [samuk/GeofenceSafely](https://github.com/samuk/GeofenceSafely) README.
+Status: PLANNED, later.
+Not started.
+Sits alongside the ArduPilot fence above, not in place of it.
+It is the largest cost and the least certain item: ST's assessment covers the board hardware, not application firmware (O26); GeofenceSafely is not yet ported to the H7 (O32); GNSS is an unrated input (O27).
+Cite it in no safety claim until O25 closes.
+Source: [samuk/GeofenceSafely](https://github.com/samuk/GeofenceSafely) README.
 
 ```
 RTK GNSS A ──► STEVAL-SILPLC01 A ──┐ output A
@@ -204,22 +229,29 @@ RTK GNSS B ──► STEVAL-SILPLC01 B ──┤ output B
 
 Design requirements (GeofenceSafely README):
 - Bare-metal MISRA C, cppcheck MISRA addon and clang-tidy in CI.
-- GNSS in as UBX binary, not NMEA. Receiver treated as untrusted. Checks: UBX Fletcher checksum, message timeout, fix type and validity flags, accuracy estimates, jamming/spoofing indicators. Missing or stale message = outside the fence.
+- GNSS in as UBX binary, not NMEA.
+  Receiver treated as untrusted.
+  Checks: UBX Fletcher checksum, message timeout, fix type and validity flags, accuracy estimates, jamming/spoofing indicators.
+  Missing or stale message = outside the fence.
 - Channels cross-check each other's position over a separate link.
-- GNSS alone is a weak input for PLd if spoofing or multipath are in scope. An independent plausibility source (odometry or IMU) is to be considered (O27).
-- Fail-safe: loss of power, clock or software must de-energise the motor. Dynamic (toggling) enable, not a static level.
+- GNSS alone is a weak input for PLd if spoofing or multipath are in scope.
+  An independent plausibility source (odometry or IMU) is to be considered (O27).
+- Fail-safe: loss of power, clock or software must de-energise the motor.
+  Dynamic (toggling) enable, not a static level.
 - Two independent ways to cut 48V; either channel alone must trip (Category 3).
 - Read back actual shutoff state; test it periodically.
 - Geofence data stored as two CRC-protected copies, checked at boot and periodically.
 - Debug access locked in production.
 
-Hardware change from the README: README targets FRDM-A-S32K358 and lists S32K358 features (FCCU, STCU2 LBIST/MBIST, lockstep). These do not apply to the STM32H723 on the STEVAL-SILPLC01, where X-CUBE-STL-H7 provides the MCU self-test (O26, O32).
+Hardware change from the README: README targets FRDM-A-S32K358 and lists S32K358 features (FCCU, STCU2 LBIST/MBIST, lockstep).
+These do not apply to the STM32H723 on the STEVAL-SILPLC01, where X-CUBE-STL-H7 provides the MCU self-test (O26, O32).
 
 ---
 
 ## 6. Regulatory compliance
 
-No compliance claimed. Reference standards only until formal assessment or audit is done.
+No compliance claimed.
+Reference standards only until formal assessment or audit is done.
 
 | Standard | Domain | Relevance | Legal status | Extent of compliance required |
 |---|---|---|---|---|
@@ -241,9 +273,12 @@ The devkit as shipped is **"partly completed machinery"** under both regimes tra
 - **UK**: Supply of Machinery (Safety) Regulations 2008 (SI 2008/1597)
 - **EU**: Machinery Directive 2006/42/EC (until 20 January 2027), then Machinery Regulation (EU) 2023/1230
 
-This classification does not require a CE/UKCA mark or third-party certification at Phase 1, consistent with §9. It does require, before any unit ships: assembly instructions (Annex VI) and a Declaration of Incorporation (not a Declaration of Conformity) stating which essential health and safety requirements are met by the shipped components and that the unit must not be put into service until fully assembled (O16).
+This classification does not require a CE/UKCA mark or third-party certification at Phase 1, consistent with §9.
+It does require, before any unit ships: assembly instructions (Annex VI) and a Declaration of Incorporation (not a Declaration of Conformity) stating which essential health and safety requirements are met by the shipped components and that the unit must not be put into service until fully assembled (O16).
 
-The EU Machinery Regulation 2023/1230 replaces the Directive from 20 January 2027. For EU sales after that date, documentation must be built against the Regulation (allows digital assembly instructions/Declaration of Incorporation, adds cybersecurity requirements, requires software update logging). No UK divergence announced; monitor.
+The EU Machinery Regulation 2023/1230 replaces the Directive from 20 January 2027.
+For EU sales after that date, documentation must be built against the Regulation (allows digital assembly instructions/Declaration of Incorporation, adds cybersecurity requirements, requires software update logging).
+No UK divergence announced; monitor.
 
 ### Functional safety calculation (draft)
 
@@ -252,29 +287,45 @@ The EU Machinery Regulation 2023/1230 replaces the Directive from 20 January 202
 **Required PL (ISO 13849-1 Annex A risk graph):**
 - S2: severe, irreversible injury (H1)
 - F2: frequent to continuous exposure (H1)
-- P1: avoidance possible. Basis: audible and visual motion warning (§2 Supplemental 2) and low vehicle speed (0.1 to 1.6 m/s range, O20). The beacon is not yet wired (O8), so P1 is currently unsupported
+- P1: avoidance possible.
+  Basis: audible and visual motion warning (§2 Supplemental 2) and low vehicle speed (0.1 to 1.6 m/s range, O20).
+  The beacon is not yet wired (O8), so P1 is currently unsupported
 - Result: PLr d
-- Without a supported P1, P2 applies and PLr is e, which Core does not meet. P1 justification tracked in O9.
+- Without a supported P1, P2 applies and PLr is e, which Core does not meet.
+  P1 justification tracked in O9.
 
-Configurations without full Core are outside this calculation. No reduced PLr is claimed for them.
+Configurations without full Core are outside this calculation.
+No reduced PLr is claimed for them.
 
-**In-scope components:** §2 Core table (physical E-stops, bumper, radar ×3 + C203A, output contactors), per §0. The IDEM GLM tether enters the series chain only when connected for demonstration operation without radar, and is not part of the baseline calculation. FusionCore, ArduPilot, LEVIA-H7, ESP32/Lizard, the MAVLink bridge, any cerebri role (§5) and the planned geofence (until O25 is closed) are not in scope.
+**In-scope components:** §2 Core table (physical E-stops, bumper, radar ×3 + C203A, output contactors), per §0.
+The IDEM GLM tether enters the series chain only when connected for demonstration operation without radar, and is not part of the baseline calculation.
+FusionCore, ArduPilot, LEVIA-H7, ESP32/Lizard, the MAVLink bridge, any cerebri role (§5) and the planned geofence (until O25 is closed) are not in scope.
 
 **Architecture:**
 - Category 3: dual-channel inputs (E-stops 2×NC, bumper 4-wire), logic internal to the C203A, two series SW180 contactors on the 48V bus.
-- Ratings: E-stops, bumper, radar and C203A are stated as PLd in §2. The SW180 output stage has no stated PL and is assessed by calculation from B10d (O3, O5).
-- Diagnostic coverage (DCavg): stated range 60% to <90% (Low), pending SW180 aux-microswitch EDM verification (O6). Not a fixed number; needs pinning down before the SISTEMA run.
-- Common cause failure (CCF): Annex F scoring applies (≥65 points required); addressed via channel isolation, overvoltage protection, physical wiring separation. Score not computed (O4). Scoring must account for radar and bumper sharing the C203A logic unit.
+- Ratings: E-stops, bumper, radar and C203A are stated as PLd in §2.
+  The SW180 output stage has no stated PL and is assessed by calculation from B10d (O3, O5).
+- Diagnostic coverage (DCavg): stated range 60% to <90% (Low), pending SW180 aux-microswitch EDM verification (O6).
+  Not a fixed number; needs pinning down before the SISTEMA run.
+- Common cause failure (CCF): Annex F scoring applies (≥65 points required); addressed via channel isolation, overvoltage protection, physical wiring separation.
+  Score not computed (O4).
+  Scoring must account for radar and bumper sharing the C203A logic unit.
 
-**Combination rule:** total PFHd and PL ceiling are set by the worst-performing element in the series chain (E-stops, C203A [bumper + radar inputs], dual SW180s). No element may rate below the overall target. The combined system PLd is not confirmed until the SISTEMA run (O5).
+**Combination rule:** total PFHd and PL ceiling are set by the worst-performing element in the series chain (E-stops, C203A [bumper + radar inputs], dual SW180s).
+No element may rate below the overall target.
+The combined system PLd is not confirmed until the SISTEMA run (O5).
 
-**Planned geofence:** separate safety function, not part of the H1 calculation above. Needs its own S/F/P, PLr, architecture and SISTEMA run (O25). If it drives the SW180 coils, its effect on the shared output stage is assessed there (O24).
+**Planned geofence:** separate safety function, not part of the H1 calculation above.
+Needs its own S/F/P, PLr, architecture and SISTEMA run (O25).
+If it drives the SW180 coils, its effect on the shared output stage is assessed there (O24).
 
 ---
 
 ## 7. Non-traction actuators (OPEN, scope flag)
 
-This roadmap covers the traction/motor-stop function only. Any actuator outside that scope (implement, lift, arm, PTO-equivalent) has no hazard analysis or safety architecture defined here and must not be assumed covered by §2's rating. Add a dedicated section before any such actuator is fielded.
+This roadmap covers the traction/motor-stop function only.
+Any actuator outside that scope (implement, lift, arm, PTO-equivalent) has no hazard analysis or safety architecture defined here and must not be assumed covered by §2's rating.
+Add a dedicated section before any such actuator is fielded.
 
 ---
 
@@ -341,12 +392,13 @@ Audience: university labs, ag-tech researchers, software startups.
 | Compliance claim in docs or marketing | NONE, correctly |
 | Standards used as design reference | YES, informal |
 | Liability position | User's own risk, stated in README |
-| Rated stop function | NOT COMPLETE: O7, O8, O14 open. Supervised use only until they close |
+| Rated stop function | NOT COMPLETE: O7, O8, O14 open. Operation requires the built and tested 24V loop, including the physical E-stop path, or a separately validated independent stop method; otherwise prohibited. Any permitted operation remains supervised-only, with a competent person within reach of the validated stop control, nobody working near it, and no safety claim (§0) |
 | Controller path | ArduPilot on LEVIA-H7, in bring-up (O31). ESP32/Lizard legacy |
 | Field validation | Progression and metrics in `docs/field-validation.md` (O42) |
 | Independent geofence (2× STEVAL-SILPLC01) | PLANNED, later. Not started (O24 to O29, O32). Until then, physical boundaries or direct supervision |
 
-No certification work needed at this phase. Reference the standards, do not claim them.
+No certification work needed at this phase.
+Reference the standards, do not claim them.
 
 ### Phase 2: OEM modular subsystems
 Audience: Academics/startups integrating Sowbot's drive/safety core.

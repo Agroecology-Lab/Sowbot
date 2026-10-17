@@ -9,7 +9,8 @@ Simulation does not count towards any step below: Gazebo does not model track sl
 
 - Move to the next step only when every exit criterion of the current one is met and written down.
 - Each run records the date, commit hash, parameters (`cmd_vel_timeout_s`, `GUID_TIMEOUT`, Nav2 speed limits) and the metrics below.
-- Until the rated stop function is complete (safety_roadmap.md O7, O8, O14), every step is supervised-only: a person within reach of a physical E-stop, nobody else in the working area.
+- Before any operation, the hard-wired 24V loop, including the physical E-stop path, must be built and tested (safety_roadmap.md O7), or a separately validated independent stop method must be available; otherwise operation is prohibited.
+- Until the rated stop function is complete (safety_roadmap.md O7, O8, O14), every permitted step is supervised-only: a competent person within reach of a physical E-stop (or the separately validated stop control), nobody else in the working area, and no safety claim made.
 - Set `SOWBOT_UI_PASSWORD` and keep the robot's network private for any run with the dashboard enabled.
 
 ## Metrics to record
@@ -60,6 +61,7 @@ Exit criteria (proposed): metrics recorded for at least several hours of running
 Purpose: working conditions with crop present.
 
 - Cross-track error and interventions per hour in the crop, with `sowbot_row_follow` row-loss handling exercised.
-- Radar and bumper validation on the vehicle with people in the test positions, per the manufacturer procedure (O14).
+- Radar and bumper validation on the vehicle using manufacturer-approved surrogate targets in the test positions, per the manufacturer procedure (O14).
+- Tests involving people are excluded from this stage and reserved for a separately controlled procedure after the stop function is complete.
 
 Exit criteria (proposed): the field metrics are published in the README Field results section; the open items blocking Phase 1 are closed or explicitly accepted in writing.

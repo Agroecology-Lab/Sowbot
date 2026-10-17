@@ -22,7 +22,9 @@ Requirements to build in from the start (safety_roadmap.md O39):
     status of the GNSS input; fall back to 0 (no fix) when either is stale.
   * horiz_accuracy, vert_accuracy and speed_accuracy come from FusionCore's
     covariance (square root of the relevant variance), not from constants.
-    hdop/vdop follow from the same numbers.
+  * hdop/vdop must use receiver-provided DOP values, never FusionCore's
+    covariance. When unavailable, mark each field unknown (UINT16_MAX)
+    and set its GPS_INPUT_IGNORE_FLAG_HDOP or GPS_INPUT_IGNORE_FLAG_VDOP.
   * ignore_flags must mark fields FusionCore does not provide (for example
     vertical velocity on a force_2d filter) so EKF3 does not trust a zero.
   * stop sending, or send fix_type 0, when FusionCore output is older than

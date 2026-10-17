@@ -9,9 +9,10 @@
 <!-- Code Coverage -->
 [![Codecov](https://codecov.io/gh/Agroecology-Lab/Sowbot/branch/caatinga-dev/graph/badge.svg)](https://codecov.io/gh/Agroecology-Lab/Sowbot/branch/caatinga-dev)
 
-An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and STM32-based hardware control.
+An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics.
+This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and STM32-based hardware control.
 
-[Quick start](#quick-start) 
+[Quick start](#quick-start)
 
 [Docs](https://agroecology-lab.github.io/Sowbot_Data/python_api.html)
 ```
@@ -37,8 +38,8 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 |    LEVIA-H7 running ArduRover, GUIDED mode (bring-up)   |
 |    SUPERVISORY: not the rated stop function             |
 |---------------------------------------------------------|
-| - Motion execution       - EKF3, GPS_INPUT from         |
-| - Geofence (GUIDED)         FusionCore                  |
+| - Motion execution       - EKF3; planned GPS_INPUT     |
+| - Geofence (GUIDED)         from FusionCore            |
 | - Failsafes: GCS/GPS     - Arming state machine         |
 |   loss, EKF variance     - Pre-arm checks               |
 +---------------------------+-----------------------------+
@@ -63,7 +64,9 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 +---------------------------------------------------------+
 ```
 
-Controller status: ArduPilot on LEVIA-H7 is the current controller path and is in bring-up (the board is unvalidated). ESP32/Lizard is legacy. The 24V loop, not the controller, is the rated stop function.
+Controller status: ArduPilot on LEVIA-H7 is the current controller path and is in bring-up (the board is unvalidated).
+ESP32/Lizard is legacy.
+The 24V loop, not the controller, is the rated stop function.
 
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk/hardware) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
 
@@ -71,11 +74,12 @@ Development is led by the <a href="https://agroecologylab.org.uk" target="_blank
 
 We have a [Online version of swath planner](https://agroecology-lab.github.io/feldfreund_devkit_ros/)
 
-**Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). 
+**Collaborators welcome.**
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Milestone — multi-row mission following validated in Gazebo:**
 
-[![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU) 
+[![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU)
 
 (click above image to play video)
 
@@ -119,11 +123,15 @@ Related [Safety Roadmap](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga
 | D1 | UK open-field dataset | Field imagery and GNSS logs from UK agroecological farm conditions. CC licence. | Planned | 2 | 2026 |
 | D2 | Caatinga biome dataset | Semi-arid row-crop imagery from caatingarobotics. Validated on T527 AIPU. | Active | 5 | 2026 |
 
-<sub>TRL = Technology Readiness Level (1–9, ESA/NASA scale): 1–2 concept/formulation, 3 proof of concept, 4 validated in lab/simulation, 5 validated in relevant (non-lab) environment, 6 demonstrated in relevant environment, 7 operational prototype, 8 qualified system, 9 field-proven. Self-assessed per feature, not a formal review — adjust as needed.</sub>
+<sub>TRL = Technology Readiness Level (1–9, ESA/NASA scale): 1–2 concept/formulation, 3 proof of concept, 4 validated in lab/simulation, 5 validated in relevant (non-lab) environment, 6 demonstrated in relevant environment, 7 operational prototype, 8 qualified system, 9 field-proven.
+Self-assessed per feature, not a formal review — adjust as needed.</sub>
 
 ### Field results
 
-None published yet. Simulation results are not evidence for the tracked hardware (Gazebo does not model slip). Once hardware runs start, each will report: cross-track error (RMS and maximum), share of time in RTK fixed, interventions per hour, and measured stopping distance. The progression from bench to supervised rows, with exit criteria for each step, is in [docs/field-validation.md](docs/field-validation.md).
+None published yet.
+Simulation results are not evidence for the tracked hardware (Gazebo does not model slip).
+Once hardware runs start, each will report: cross-track error (RMS and maximum), share of time in RTK fixed, interventions per hour, and measured stopping distance.
+The progression from bench to supervised rows, with exit criteria for each step, is in [docs/field-validation.md](docs/field-validation.md).
 
 ### Collaboration
 
@@ -131,33 +139,39 @@ This project is built on and aims to maintain upstream compatibility with [zaube
 
 High Level navigation is developed from the work of [Lincoln Centre for Autonomous Systems (LCAS)](https://lcas.lincoln.ac.uk) as part of the [Agri-OpenCore](https://agri-opencore.org) open ROS 2 ecosystem for agricultural robotic
 
-Simulation configuration is partially derived from work by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), 
+Simulation configuration is partially derived from work by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics),
 
 
-# ⚠️ CRITICAL SAFETY WARNING: 
+# ⚠️ CRITICAL SAFETY WARNING:
 
- This software is under active development and may be broken at any given moment. For a stable reference implementation see the upstream Zauberzeug project.
+ This software is under active development and may be broken at any given moment.
+For a stable reference implementation see the upstream Zauberzeug project.
 
 **THIS SOFTWARE COULD CONTROL PHYSICAL HARDWARE CAPABLE OF PRODUCING SIGNIFICANT KINETIC FORCE.**
 
-1. **EXPERIMENTAL STATUS**: This branch ('caatinga-dev') contains experimental code generated and 
-   refined with AI assistance. It has NOT undergone full-scale field validation.
-2. **STATUTORY NOTICE (UK)**: Usage of this software is at the user's sole risk. While 
-   standard open-source licenses apply, users are reminded that operating agricultural 
+1. **EXPERIMENTAL STATUS**: This branch ('caatinga-dev') contains experimental code generated and
+   refined with AI assistance.
+   It has NOT undergone full-scale field validation.
+2. **STATUTORY NOTICE (UK)**: Usage of this software is at the user's sole risk.
+   While
+   standard open-source licenses apply, users are reminded that operating agricultural
    robotics requires a professional duty of care.
-3. **MANDATORY HARDWARE SAFETY**: Under no circumstances should this software be used 
-   to control a robot of any size without an independent safety subsystem. Software-based stops (such as /estop/soft) are NOT a substitute for 
+3. **MANDATORY HARDWARE SAFETY**: Under no circumstances should this software be used
+   to control a robot of any size without an independent safety subsystem.
+   Software-based stops (such as /estop/soft) are NOT a substitute for
    Category 0 or 1 hardware safety stops.
 4. **CURRENT STATUS**: the hardwired 24V stop loop is still being built and the radar is not yet validated
-   on the vehicle (see [safety_roadmap.md](safety_roadmap.md), O7, O8, O14). Until those close, treat the
-   robot as supervised-only, with a person within reach of a physical E-stop.
-5. **NO LIABILITY**: To the extent permitted by the laws of England and Wales, the 
-   contributors exclude all liability for property damage, crop loss, or indirect 
+   on the vehicle (see [safety_roadmap.md](safety_roadmap.md), O7, O8, O14).
+   Operation requires the hard-wired 24V loop, including the physical E-stop path, to be built and tested, or a separately validated independent stop method; otherwise operation is prohibited.
+   Until O7, O8 and O14 close, any permitted operation is supervised-only, with a competent person within reach of a physical E-stop (or the separately validated stop control), nobody working near it, and no safety claim made.
+5. **NO LIABILITY**: To the extent permitted by the laws of England and Wales, the
+   contributors exclude all liability for property damage, crop loss, or indirect
    consequential damages.
 
 ### Health Warning
 
-This repo may contain traces of LLM slop, We've done our best to mitigate this. If you are allergic to slop, please help us refactor.
+This repo may contain traces of LLM slop, We've done our best to mitigate this.
+If you are allergic to slop, please help us refactor.
 
 ## Quick Start
 
@@ -168,7 +182,7 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 
 ### 0. Install dependencies
 
-#### Linux 
+#### Linux
 - [Git](https://github.com/git-guides/install-git)
 - [Docker](https://docs.docker.com/engine/install/debian/#install-using-the-repository)
 - ```sudo apt install python3-serial setserial v4l-utils```
@@ -194,15 +208,20 @@ cd Sowbot
 
 
 ### 2. Build & Launch
-Use the management script to build the ROS 2 workspace and launch the robot stack. This script automatically handles hardware discovery and port permissions:
+Use the management script to build the ROS 2 workspace and launch the robot stack.
+This script automatically handles hardware discovery and port permissions:
 ```bash
 ./manage.py full-build
 xhost +local:docker
-./manage.py 
+./manage.py
 ```
 Access http://localhost to access the WebUI
 
-**The dashboard has a joystick and a soft e-stop and listens on port 80 of the robot.** Set `SOWBOT_UI_PASSWORD` in `.env` to require a password (HTTP Basic, user name ignored). Without it, anyone on the robot's network can drive it. Basic auth is not encrypted, so also keep the robot's Wi-Fi private. The container runs privileged on the host network.
+**The dashboard has a joystick and a soft e-stop and listens on port 80 of the robot.**
+Set `SOWBOT_UI_PASSWORD` in `.env` to require a password (HTTP Basic, user name ignored).
+Without it, anyone on the robot's network can drive it.
+Basic auth is not encrypted, so also keep the robot's Wi-Fi private.
+The container runs privileged on the host network.
 
 
 
@@ -221,12 +240,13 @@ If you'd like to use Gazebo then add a +sim argument to your build instruction
 ```bash
 ./manage.py full-build +sim
 xhost +local:docker
-./manage.py 
+./manage.py
 ```
 
 #### Optical flow sensor (PMW3901 / PAA5100)
 
-[`optical_flow_ros`](https://github.com/adityakamath/optical_flow_ros) is built into the image (Dockerfile Stage 8, pinned by `OPTICAL_FLOW_ROS_COMMIT`). Its pip dependencies (`pmw3901`, `gpiod`, `gpiodevice`) are installed at pinned versions in Stage 5.2b.
+[`optical_flow_ros`](https://github.com/adityakamath/optical_flow_ros) is built into the image (Dockerfile Stage 8, pinned by `OPTICAL_FLOW_ROS_COMMIT`).
+Its pip dependencies (`pmw3901`, `gpiod`, `gpiodevice`) are installed at pinned versions in Stage 5.2b.
 
 Run inside the container:
 ```bash
@@ -240,7 +260,8 @@ Do not use upstream's `optical_flow_launch.py`: it broadcasts `odom` -> `base_li
   Put local driver settings there, not in the cloned source.
 - The launch remaps `odom` to `flow_odom` and publishes `/diagnostics`.
 - `flow_odom` is not consumed by FusionCore (its inputs are hardcoded to `/gnss/fix` and `/odom/wheels`).
-- Upstream tested on Raspberry Pi (SPI). Not tested here on the supported SBCs.
+- Upstream tested on Raspberry Pi (SPI).
+  Not tested here on the supported SBCs.
 - Requires `/dev/spidev*` on the host; the container runs privileged with `/dev` mounted.
 
 Known limitations of the pinned driver, not fixed here:
@@ -255,7 +276,8 @@ Known limitations of the pinned driver, not fixed here:
 ## Management & Tools
 
 ### manage.py
-The primary entry point for the system. While it runs the full stack by default, it supports several optional arguments for development:
+The primary entry point for the system.
+While it runs the full stack by default, it supports several optional arguments for development:
 
 | Command | Logic / Argument | Resulting Action |
 |:---|:---|:---|
@@ -289,15 +311,18 @@ tmule -c tmule/row_follow_sim.yaml launch
 tmux attach -t row_follow_sim
 ```
 
-That starts `./manage.py --sim` (nav stack + Nav2 + UI), Gazebo (`sowbot_sim.launch.py`) and the crop-row CV node (`crop_row_nav.launch.py`), each in its own tmux window. `launch` returns immediately and leaves the session detached, so attach to watch the panes come up (and to type the `nav_stack` sudo password).
+That starts `./manage.py --sim` (nav stack + Nav2 + UI), Gazebo (`sowbot_sim.launch.py`) and the crop-row CV node (`crop_row_nav.launch.py`), each in its own tmux window.
+`launch` returns immediately and leaves the session detached, so attach to watch the panes come up (and to type the `nav_stack` sudo password).
 
 Stop the stack with `tmule -c tmule/row_follow_sim.yaml stop`; re-attach later with `tmux attach -t row_follow_sim`.
 
-> If a runtime container is **already running**, the `nav_stack` window will fail on a `docker run` name collision. Either `docker stop sowbot_runtime` first, or launch just the windows that reuse the container: `tmule -c tmule/row_follow_sim.yaml launch -w gazebo`.
+> If a runtime container is **already running**, the `nav_stack` window will fail on a `docker run` name collision.
+> Either `docker stop sowbot_runtime` first, or launch just the windows that reuse the container: `tmule -c tmule/row_follow_sim.yaml launch -w gazebo`.
 
 #### tmux basics
 
-The stack runs in a *detached* tmux session named `row_follow_sim`, so closing your terminal does not kill it — **detaching is not stopping**. The session holds one window per sub-system (plus a stray `0: bash` that tmux always creates):
+The stack runs in a *detached* tmux session named `row_follow_sim`, so closing your terminal does not kill it — **detaching is not stopping**.
+The session holds one window per sub-system (plus a stray `0: bash` that tmux always creates):
 
 ```
 0: bash   1: nav_stack   2: gazebo   3: crop_row
@@ -321,7 +346,8 @@ tmux attach -t row_follow_sim        # attach
 tmux kill-session -t row_follow_sim  # nuke the session
 ```
 
-Scrolling back (`Ctrl-b` `[`) is the one you'll reach for most — it's how you read ROS output that has already scrolled past. For mouse-wheel scrolling instead, add `set -g mouse on` to `~/.tmux.conf`.
+Scrolling back (`Ctrl-b` `[`) is the one you'll reach for most — it's how you read ROS output that has already scrolled past.
+For mouse-wheel scrolling instead, add `set -g mouse on` to `~/.tmux.conf`.
 
 Scenario configs live in [`tmule/`](tmule/) — see [`tmule/README.md`](tmule/README.md) to tweak launch arguments or add your own scenario.
 
@@ -349,19 +375,24 @@ python3 agbot-diagnostic.py full
 ## Sketch of MVP 2026 architecture
 
 ### 1. The Flight Controller (RT Microcontroller)
-* **Hardware:** [LEVIA-H7](https://github.com/piecol/LEVIA-H7) (STM32H743). Unvalidated, in bring-up.
+* **Hardware:** [LEVIA-H7](https://github.com/piecol/LEVIA-H7) (STM32H743).
+  Unvalidated, in bring-up.
 * **Software:** ArduPilot Rover, GUIDED mode.
 * **Role:** Motion execution and supervisory failsafes (geofence, GCS/GPS loss, EKF variance).
 * **I/O:** MAVLink serial from the Limbic SBC via `devkit_mavlink_bridge`; CAN for motor drivers (driver choice open).
-* **Not the rated stop function.** Stopping on a bumper, radar or E-stop is done by the hardwired 24V loop, independent of this controller (see [safety_roadmap.md](safety_roadmap.md)).
-* **Legacy:** ESP32 + Lizard DSL (3.3V UART via the `teleop_lizard` bridge, see [docs/lizard-firmware-setup.md](docs/lizard-firmware-setup.md)). Kept for existing hardware, no new features.
+* **Not the rated stop function.**
+  Stopping on a bumper, radar or E-stop is done by the hardwired 24V loop, independent of this controller (see [safety_roadmap.md](safety_roadmap.md)).
+* **Legacy:** ESP32 + Lizard DSL (3.3V UART via the `teleop_lizard` bridge, see [docs/lizard-firmware-setup.md](docs/lizard-firmware-setup.md)).
+  Kept for existing hardware, no new features.
 
 ### 2. The Limbic System (Executive)
 * **Hardware:** Avaota A1 #1 (Allwinner T527).
 * **Software:** ROS 2 Jazzy + `topological_navigation` (AOC branch).
 * **Role:** Navigation Executive.
-* **Function:** Runs the Topological Navigation stack. UBLOX sensors Manages the move_base sequence and Action on Condition (AOC) logic.
-* **I/O:** Connects to u-blox via USB/UART using `ublox_dgnss` node. Translates graph goals into velocity commands for the flight controller.
+* **Function:** Runs the Topological Navigation stack.
+  UBLOX sensors Manages the move_base sequence and Action on Condition (AOC) logic.
+* **I/O:** Connects to u-blox via USB/UART using `ublox_dgnss` node.
+  Translates graph goals into velocity commands for the flight controller.
 
 **<1GbE interconnect between 2&3>**
 
@@ -370,13 +401,15 @@ python3 agbot-diagnostic.py full
 * **Software:** Dockerised ROS 2 Jazzy.
 * **Role:** Asynchronous Perception.
 * **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
-* **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
+* **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`.
+  Publishes environment states and "Conditions" to the Zenoh network.
 
                           |
 
 ## Sketch of possible eventual ~2027 architecture
 
-Research only (TRL 1 to 2 in the roadmap above), not a commitment. It would replace ArduPilot on the controller, which is the current path.
+Research only (TRL 1 to 2 in the roadmap above), not a commitment.
+It would replace ArduPilot on the controller, which is the current path.
 
 ### 1. The Real-Time Controller (Hardware Abstraction)
 * **Hardware:** [STM32 H7 MCU](https://oshwhub.com/6676a/stm32h745zit6_core).
@@ -407,7 +440,8 @@ Research only (TRL 1 to 2 in the roadmap above), not a commitment. It would repl
 * **Software:** Dockerised ROS 2 Jazzy & Dockerised CV packages
 * **Role:** Asynchronous Perception.
 * **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
-* **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
+* **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`.
+  Publishes environment states and "Conditions" to the Zenoh network.
 
 
 ## Licenses & papers
@@ -436,4 +470,5 @@ Research only (TRL 1 to 2 in the roadmap above), not a commitment. It would repl
 
 ## Upstream documentation
 
-The original Feldfreund DevKit text (components, UI, camera and AXIS setup) is kept in [docs/upstream-feldfreund-readme.md](docs/upstream-feldfreund-readme.md). Parts of it do not apply to Sowbot, see the note at the top of that file.
+The original Feldfreund DevKit text (components, UI, camera and AXIS setup) is kept in [docs/upstream-feldfreund-readme.md](docs/upstream-feldfreund-readme.md).
+Parts of it do not apply to Sowbot, see the note at the top of that file.

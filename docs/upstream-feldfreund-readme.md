@@ -1,13 +1,17 @@
 # Upstream Feldfreund DevKit ROS README
 
-> **Not the Sowbot instructions.** This is the README text inherited from
+> **Not the Sowbot instructions.**
+> This is the README text inherited from
 > [zauberzeug/feldfreund_devkit_ros](https://github.com/zauberzeug/feldfreund_devkit_ros), kept for
-> reference. Several parts do not describe this stack: it names the Septentrio GNSS driver (Sowbot uses
+> reference.
+> Several parts do not describe this stack: it names the Septentrio GNSS driver (Sowbot uses
 > dual u-blox F9P), Jetson settings (`/dev/ttyTHS0`, `-j orin`), a Zauberzeug clone URL and
-> `./docker.sh u`. Its Lizard/ESP32 material is legacy here, the current controller path is ArduPilot on
-> LEVIA-H7. For building and running Sowbot use the Quick Start in the main [README](../README.md).
+> `./docker.sh u`.
+> Its Lizard/ESP32 material is legacy here, the current controller path is ArduPilot on
+> LEVIA-H7.
+> For building and running Sowbot use the Quick Start in the main [README](../README.md).
 
-## Feldfreund DevKit ROS 
+## Feldfreund DevKit ROS
 (Below from original Zauberzeug forked repo)
 
 Feldfreund DevKit ROS is a comprehensive ROS2 package that handles the communication and configuration of various Feldfreund components:
@@ -25,7 +29,7 @@ All launch files and configuration files (except for the UI) are stored in the `
 
 The DevKit driver (based on [ATB Potsdam's field_friend_driver](https://github.com/ATB-potsdam-automation/field_friend_driver)) manages the communication with the ESP32 microcontroller running [Lizard](https://lizard.dev/) firmware - a domain-specific language for defining hardware behavior on embedded systems.
 
-For the separate local Lizard firmware checkout, build, and flash workflow, see [Local Lizard Firmware Setup](docs/lizard-firmware-setup.md).
+For the separate local Lizard firmware checkout, build, and flash workflow, see [Local Lizard Firmware Setup](lizard-firmware-setup.md).
 
 The package provides:
 
@@ -49,15 +53,20 @@ Available ROS2 topics:
 
 The camera system supports both USB cameras and AXIS cameras, managed through a unified launch system in `camera_system.launch.py` that handles USB cameras, AXIS cameras, and the Foxglove Bridge for remote viewing.
 
-The USB camera system provides video streaming through ROS2 topics using the `usb_cam` ROS2 package. Camera parameters can be configured through `config/camera.yaml`.
+The USB camera system provides video streaming through ROS2 topics using the `usb_cam` ROS2 package.
+Camera parameters can be configured through `config/camera.yaml`.
 
-The AXIS camera system integrates with the [ROS2 AXIS camera driver](https://github.com/ros-drivers/axis_camera/tree/humble-devel) to support multiple IP cameras with individual streams. Each camera can be configured through `config/axis_camera.yaml`, with credentials managed through `config/secrets.yaml` (template provided in `config/secrets.yaml.template`). The cameras' authentication mode (basic or digest) might need to be configured - see [AXIS Camera Authentication](#axis-camera-authentication) section for details.
+The AXIS camera system integrates with the [ROS2 AXIS camera driver](https://github.com/ros-drivers/axis_camera/tree/humble-devel) to support multiple IP cameras with individual streams.
+Each camera can be configured through `config/axis_camera.yaml`, with credentials managed through `config/secrets.yaml` (template provided in `config/secrets.yaml.template`).
+The cameras' authentication mode (basic or digest) might need to be configured - see [AXIS Camera Authentication](#axis-camera-authentication) section for details.
 
-The visualization system integrates with [Foxglove Studio](https://foxglove.dev/) for remote camera viewing, supporting compressed image transport. The Foxglove Bridge is accessible via WebSocket connection on port 8765.
+The visualization system integrates with [Foxglove Studio](https://foxglove.dev/) for remote camera viewing, supporting compressed image transport.
+The Foxglove Bridge is accessible via WebSocket connection on port 8765.
 
 ### GNSS System
 
-The GNSS system uses the [Septentrio GNSS driver](https://github.com/septentrio-gnss/septentrio_gnss_driver) with the default `config/gnss.yaml` configuration. Available topics:
+The GNSS system uses the [Septentrio GNSS driver](https://github.com/septentrio-gnss/septentrio_gnss_driver) with the default `config/gnss.yaml` configuration.
+Available topics:
 
 - `/pvtgeodetic`: Position, velocity, and time in geodetic coordinates
 - `/poscovgeodetic`: Position covariance in geodetic coordinates
@@ -69,7 +78,8 @@ The GNSS system uses the [Septentrio GNSS driver](https://github.com/septentrio-
 
 ### DevKit UI
 
-The example UI provides a robot control interface built with NiceGUI, featuring a joystick control similar to turtlesim. It gives you access to and visualization of all topics made available by the DevKit driver, including:
+The example UI provides a robot control interface built with NiceGUI, featuring a joystick control similar to turtlesim.
+It gives you access to and visualization of all topics made available by the DevKit driver, including:
 
 - Robot movement control through a joystick interface
 - Real-time visualization of GNSS data
@@ -164,7 +174,8 @@ ros2 launch devkit_bringup devkit.launch.py
 
 ## AXIS Camera Authentication
 
-The AXIS cameras can be configured to use either digest or basic authentication. To check and configure the authentication mode:
+The AXIS cameras can be configured to use either digest or basic authentication.
+To check and configure the authentication mode:
 
 1. Check current authentication settings:
 
@@ -172,13 +183,21 @@ The AXIS cameras can be configured to use either digest or basic authentication.
 curl --digest -u root:pw "http://192.168.42.3/axis-cgi/admin/param.cgi?action=list&group=Network.HTTP" | cat
 ```
 
-2. Switch authentication mode (e.g., from digest to basic):
+2. Keep Digest authentication for HTTP endpoints:
 
 ```bash
-curl --digest -u root:pw "http://192.168.42.3/axis-cgi/admin/param.cgi?action=update&Network.HTTP.AuthenticationPolicy=basic" | cat
+curl --digest -u root:pw "http://192.168.42.3/axis-cgi/admin/param.cgi?action=update&Network.HTTP.AuthenticationPolicy=digest" | cat
 ```
 
-Replace `root:pw` with your camera's credentials and `192.168.42.3` with your camera's IP address. The authentication mode can be set to either `basic` or `digest`. Note that you should always use the `--digest` flag in these commands even when switching to basic auth, as the camera's current setting might be using digest authentication.
+Basic authentication is only appropriate for an HTTPS endpoint with a valid, trusted certificate:
+
+```bash
+curl --digest -u root:pw "https://192.168.42.3/axis-cgi/admin/param.cgi?action=update&Network.HTTP.AuthenticationPolicy=basic" | cat
+```
+
+Replace `root:pw` with your camera's credentials and `192.168.42.3` with your camera's IP address.
+Keep `digest` for HTTP; use `basic` only with HTTPS.
+These update commands use `--digest` to authenticate against a camera currently configured for Digest, including when switching the HTTPS endpoint to Basic.
 
 ## Quickstart guide
 
@@ -221,7 +240,8 @@ Check the UI at `http://<ROBOT-IP>:80` to control and monitor your robot.
 
 ## Future features
 
-This repository is still work in progress. Please feel free to contribute or reach out to us, if you need any unimplemented feature.
+This repository is still work in progress.
+Please feel free to contribute or reach out to us, if you need any unimplemented feature.
 
 - Complete tf2 frames
 - Handle camera calibrations
