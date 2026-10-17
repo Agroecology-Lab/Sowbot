@@ -139,7 +139,7 @@ class TestToQosProfile(unittest.TestCase):
                 spec = replace(qos.SENSOR_QOS, **{field: 'unknown_policy'})
                 with self.assertRaises(KeyError) as raised:
                     to_qos_profile(spec)
-                self.assertEqual(raised.exception.args, ('UNKNOWN_POLICY',))
+                self.assertEqual(raised.exception.args, ('unknown_policy',))
                 factory.assert_not_called()
 
     def test_duration_and_profile_constructor_errors_propagate_unchanged(self):
