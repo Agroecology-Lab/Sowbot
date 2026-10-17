@@ -15,47 +15,56 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 
 [Docs](https://agroecology-lab.github.io/Sowbot_Data/python_api.html)
 ```
-+-------------------------------------------------------+
-|               ROS 2 DUAL SBC Open Core                |
-| +----------------------+     +----------------------+ |
-| |       NEO SBC        | Gig |      LIMBIC SBC      | |
-| | - Camera Streams     | Eth | - NiceGUI Dashboard  | |
-| |   (YOLO / ExG)       |<===>| - Nav2/LCAS TopoNav  | |
-| | - Visual Servoing    |     | - devkit_mavlink node| |
-| | - Crop Processing    |     | * Plan Services      | |
-| | - High-Throughput    |     | * Telemetry Relay    | |
-| |   Perception         |     | * MAVLink Translation| |
-| +----------------------+     +----------------------+ |
-+---------------------------v---------------------------+
++---------------------------------------------------------+
+|               ROS 2 DUAL SBC Open Core                  |
+| +----------------------+     +----------------------+   |
+| |       NEO SBC        | Gig |      LIMBIC SBC      |   |
+| | - Camera Streams     | Eth | - NiceGUI Dashboard  |   |
+| |   (YOLO / ExG)       |<===>| - Nav2/LCAS TopoNav  |   |
+| | - Visual Servoing    |     | - FusionCore UKF     |   |
+| | - Crop Processing    |     | - devkit_mavlink     |   |
+| | - High-Throughput    |     |   (cmd_vel to MAVLink|   |
+| |   Perception         |     |   zero if stale)     |   |
+| +----------------------+     | - Dual F9P RTK (USB) |   |
+|                              +----------+-----------+   |
++---------------------------v-----------------------------+
                             |
-                      Serial MAVLink
-                   (UART / TTL 921600)
+                    Serial MAVLink (UART)
+        baud: MAVLINK_BAUD here, SERIALn_BAUD on the FC
                             |
-+---------------------------v---------------------------+
-|              ARDUPILOT FLIGHT CONTROLLER              |
-|          (Levia running ArduRover Firmware)           |
-|-------------------------------------------------------|
-| - Geofence: EKF3 Fusion   - Failsafes: Heartbeat loss,|
-| - Arming State Machine      Geofence, Estop           |
-| - Pre-Arm Checks          - Direct I/O: Safety Switch,|
-|                             Bumpers                   |
-+------------+---------------------------------+--------+
-             |                                 |
-     DroneCAN/CANsimple                  Dual u-blox
-         (CAN Bus)                       F9P RTK GNSS
-             |
-+------------v-------------+
-| ODrive/DroneCAN Motor    |
-| Controllers              |
-+------------+-------------+
-             |
-+------------v------------------------------------------+
-|                 PHYSICAL ROBOT FRAME                  |
-|-------------------------------------------------------|
-| - Safety Subsystem (Level 0)                          |
-| - Differential Drive tracked platform                 |
-+-------------------------------------------------------+
++---------------------------v-----------------------------+
+|              ARDUPILOT FLIGHT CONTROLLER                |
+|    LEVIA-H7 running ArduRover, GUIDED mode (bring-up)   |
+|    SUPERVISORY: not the rated stop function             |
+|---------------------------------------------------------|
+| - Motion execution       - EKF3, GPS_INPUT from         |
+| - Geofence (GUIDED)         FusionCore                  |
+| - Failsafes: GCS/GPS     - Arming state machine         |
+|   loss, EKF variance     - Pre-arm checks               |
++---------------------------+-----------------------------+
+                            |
+                    DroneCAN / CAN bus
+              (motor driver choice open, O31)
+                            |
++---------------------------v-----------------------------+
+|            MOTOR CONTROLLERS (48V traction)             |
+|---------------------------------------------------------|
+| Differential-drive tracked platform                     |
+| Traction power passes through the SW180 contactors      |
+| of the hardwired safety loop below                      |
++---------------------------------------------------------+
+
++---------------------------------------------------------+
+|      HARDWIRED 24V SAFETY LOOP (rated stop function)    |
+| E-stops, bumpers, Inxpect radar + C203A -> 2x SW180     |
+| in series on the 48V bus. Independent of ROS,           |
+| ArduPilot and the SBCs. Not yet complete: see           |
+| safety_roadmap.md (O7, O8, O14)                         |
++---------------------------------------------------------+
 ```
+
+Controller status: ArduPilot on LEVIA-H7 is the current controller path and is in bring-up (the board is unvalidated). ESP32/Lizard is legacy. The 24V loop, not the controller, is the rated stop function.
+
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk/hardware) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
 
 Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
@@ -87,17 +96,18 @@ Related [Safety Roadmap](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga
 | F5 | Diagnostics TUI | `agbot-diagnostic.py` terminal status view of all hardware topics. Run inside container via `login.sh`. | Done | 6 | 2025 |
 | **MVP FIELD** | | | | | **2026** |
 | M1 | Agri Open Core platform integration | Demonstrates AOC platform abstraction on affordable ARM hardware accessible to smallholders. | Done | 3 | 2026 |
-| M2 | Topological navigation + Nav2 | LCAS `topological_navigation` (`aoc_refactor` branch) building in Dockerfile. RViz visualisation confirmed working. Self-contained `navigation2.py` with A\* route planning, explicit state machine, and `row_traversal` / `NavigateToPose` / `goal_align` edge actions. `fake_nav2_server` with `/limbic_row_follow` stub enables full pipeline testing in sim. `sim_nav.launch.py` now routes through real Nav2. **Multi-row mission following (entry/exit node pairs across boustrophedon rows) validated end-to-end in Gazebo.** Pending: Jazzy field validation on hardware. | ~85% Done | 4 | 2026 |
-| M2a | fusioncore Nav2 bridge | `fusioncore_node` launched via `devkit.launch.py`. Nav2 topic remapping shim wired. Pending: end-to-end test on live hardware. | ~75% Done | 4 | 2026 |
-| M3 | Open-field row-crop scenario | Live node-drop in UI. F2C row plan generator implemented in `PlanApplicationService` (corners → swaths → topo rows via `run_f2c()`). YAML written to `/workspace/maps/`, `switch_topological_map` with fallback. Topo map auto-generated at container start. Multi-row traversal across generated swaths confirmed in sim. [Web version of planner available](https://agroecology-lab.github.io/feldfreund_devkit_ros/) Pending: tmap2 authoring from real field survey; F2C obstacle costmap integration. | ~70% Done | 4 | 2026 |
-| M4 | RTK-GNSS localisation | Full pipeline implemented: dual F9P, shims, UKF fusion, NTRIP. Lever-arm offsets in `fusioncore.yaml` are zeroed placeholders (commented `# measured` TODOs). Pending: antenna lever-arm measurement, live hardware test. | ~75% Done | 3 | 2026 |
-| M5 | Dual-SBC ROS 2 stack | `manage.py` detects crossover interface, builds `CYCLONEDDS_URI` peer config and injects into Docker. `neo.launch.py` and `devkit.launch.py` finalised for Limbic+Neo split. DDS peer path is the active one. | ~90% Done | 3 | 2026 |
-| M6 | Gazebo simulation | `sowbot_sim.launch.py` + `sim_nav.launch.py` fully restructured. `kill_fake_nav2_on_clock` implemented. `use_sim_time=True` now threaded through topo stack. **Multi-row mission following demonstrated end-to-end (see video above).** | Done | 4 | 2026 |
-| M7 | Sentor safety monitoring | `sowbot_monitor.yaml` fully authored (e-stop, bumpers, battery, camera, odom, neo_vision heartbeat, node monitors). `sentor_node.py` wired into `devkit.launch.py`. Pending: smoke-test on live hardware; battery voltage cutoff needs field confirmation (`# TODO: CONFIRM` in YAML). | ~75% Done | 3 | 2026 |
-| M8 | Visual crop-row navigation | `sowbot_row_follow` package implemented. ExG+Otsu, visual servo, `limbic_row_follow_node.py` as Nav2 action server. Cancel and heartbeat-loss safety. TSM row-swap hold with 6-second debounce implemented. Tested and iterated against a lettuce crop in the UK. | ~80% Done | 4 | 2026 |
+| M2 | Topological navigation + Nav2 | LCAS `topological_navigation` (`aoc_refactor` branch) building in Dockerfile. RViz visualisation confirmed working. Self-contained `navigation2.py` with A\* route planning, explicit state machine, and `row_traversal` / `NavigateToPose` / `goal_align` edge actions. `fake_nav2_server` with `/limbic_row_follow` stub enables full pipeline testing in sim. `sim_nav.launch.py` now routes through real Nav2. **Multi-row mission following (entry/exit node pairs across boustrophedon rows) validated end-to-end in Gazebo.** Pending: Jazzy field validation on hardware. | Sim only. Blocked: hardware field validation | 4 | 2026 |
+| M2a | fusioncore Nav2 bridge | `fusioncore_node` launched via `devkit.launch.py`. Nav2 topic remapping shim wired. Pending: end-to-end test on live hardware. | Blocked: live hardware test | 4 | 2026 |
+| M3 | Open-field row-crop scenario | Live node-drop in UI. F2C row plan generator implemented in `PlanApplicationService` (corners → swaths → topo rows via `run_f2c()`). YAML written to `/workspace/maps/`, `switch_topological_map` with fallback. Topo map auto-generated at container start. Multi-row traversal across generated swaths confirmed in sim. [Web version of planner available](https://agroecology-lab.github.io/feldfreund_devkit_ros/) Pending: tmap2 authoring from real field survey; F2C obstacle costmap integration. | Sim only. Blocked: real-field tmap2 survey, F2C obstacle costmap | 4 | 2026 |
+| M4 | RTK-GNSS localisation | Full pipeline implemented: dual F9P, shims, UKF fusion, NTRIP. Lever-arm offsets in `fusioncore.yaml` are zeroed placeholders (commented `# measured` TODOs). Pending: antenna lever-arm measurement, live hardware test. Do not quote accuracy before the lever arms are measured. | Blocked: lever-arm measurement, live hardware test | 3 | 2026 |
+| M5 | Dual-SBC ROS 2 stack | `manage.py` detects crossover interface, builds `CYCLONEDDS_URI` peer config and injects into Docker. `neo.launch.py` and `devkit.launch.py` finalised for Limbic+Neo split. DDS peer path is the active one. | Implemented. No hardware test recorded | 3 | 2026 |
+| M6 | Gazebo simulation | `sowbot_sim.launch.py` + `sim_nav.launch.py` fully restructured. `kill_fake_nav2_on_clock` implemented. `use_sim_time=True` now threaded through topo stack. Gazebo does not model track slip, so these results do not carry over to the tracked hardware. **Multi-row mission following demonstrated end-to-end (see video above).** | Done | 4 | 2026 |
+| M7 | Sentor safety monitoring | `sowbot_monitor.yaml` fully authored (e-stop, bumpers, battery, camera, odom, neo_vision heartbeat, node monitors). `sentor_node.py` wired into `devkit.launch.py`. Pending: smoke-test on live hardware; battery voltage cutoff needs field confirmation (`# TODO: CONFIRM` in YAML). GNSS fix and heading monitors report only; no response is defined yet. | Blocked: hardware smoke test, battery cutoff | 3 | 2026 |
+| M8 | Visual crop-row navigation | `sowbot_row_follow` package implemented. ExG+Otsu, visual servo, `limbic_row_follow_node.py` as Nav2 action server. Cancel and heartbeat-loss safety. TSM row-swap hold with 6-second debounce implemented. Tested and iterated against a lettuce crop in the UK. | Tested on lettuce. No metrics published | 4 | 2026 |
+| M9 | ArduPilot on LEVIA-H7 controller path | Replaces ESP32/Lizard. `devkit_mavlink_bridge` outbound half works and commands zero when `cmd_vel` is stale; inbound FusionCore to `GPS_INPUT` is not built. LEVIA-H7 is unvalidated and has no confirmed ArduPilot hwdef (safety_roadmap.md O31). | WIP, bring-up | 2 | 2026 |
 | **PRODUCTION** | | | | | **~2027** |
-| P1 | Phase 1: dev platform (current) | ESP32 + Lizard DSL remains the controller for this phase. Audience: university labs, ag-tech researchers, software startups. No compliance claimed, standards used as informal design reference only, user's own risk per README. Product status [Partly completed machinery](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/safety_roadmap.md#product-classification) | Done | 4 | 2026 |
-| P2 | Phase 2: OEM modular subsystems (Ardupilot migration) | Replaces ESP32/Lizard DSL with [Ardupilot on Levia STM32 H7](https://github.com/piecol/LEVIA-H7).  Audience: startups integrating Sowbot's core. No third-party certification needed yet, formal internal assessment only. Can offer [PLd hardware subsystem](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/safety_roadmap.md) | Research | 2 | 2027 |
+| P1 | Phase 1: dev platform (current) | Controller: ArduPilot on LEVIA-H7 (M9); ESP32/Lizard is legacy. Supervised-only until the 24V stop loop, radar validation and beacon are done (safety_roadmap.md O7, O8, O14). Audience: university labs, ag-tech researchers, software startups. No compliance claimed, standards used as informal design reference only, user's own risk per README. Product status [Partly completed machinery](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/safety_roadmap.md#product-classification) | In progress. Blocked: O7, O8, O14 | 4 | 2026 |
+| P2 | Phase 2: OEM modular subsystems | Packages the Phase 1 stack ([Ardupilot on Levia STM32 H7](https://github.com/piecol/LEVIA-H7), M9) for integrators. Audience: startups integrating Sowbot's core. No third-party certification needed yet, formal internal assessment only. Can offer [PLd hardware subsystem](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/safety_roadmap.md) | Research | 2 | 2027 |
 | P3 | Phase 3: commercial sale to farmers [(Safety sub-systems hardened)](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/safety_roadmap.md) | Full ISO 18497 compliance, ISO 13849 PLc certification (or equivalent), third-party safety audit, field trial history, and an insurance/liability structure. All required before sale, none yet scoped. | Planned | 1 | 2027+ |
 | P4 | CANopen bus | ISO 11898 FDCAN at 500 kbit/s / 2 Mbit/s. lely-core CANopen master on T527 native M_CAN. DSP402 drive profile. | Research | 2 | 2027 |
 | P5 | RT kernel + core isolation | PREEMPT_RT on Limbic T527. `isolcpus=4-7`, RTK EKF on core 2 (SCHED_FIFO 60), AOC nav on cores 4-6, watchdog on core 5. GbE/CAN IRQ pinned to core 0. | Planned | 2 | 2027 |
@@ -110,6 +120,10 @@ Related [Safety Roadmap](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga
 | D2 | Caatinga biome dataset | Semi-arid row-crop imagery from caatingarobotics. Validated on T527 AIPU. | Active | 5 | 2026 |
 
 <sub>TRL = Technology Readiness Level (1–9, ESA/NASA scale): 1–2 concept/formulation, 3 proof of concept, 4 validated in lab/simulation, 5 validated in relevant (non-lab) environment, 6 demonstrated in relevant environment, 7 operational prototype, 8 qualified system, 9 field-proven. Self-assessed per feature, not a formal review — adjust as needed.</sub>
+
+### Field results
+
+None published yet. Simulation results are not evidence for the tracked hardware (Gazebo does not model slip). Once hardware runs start, each will report: cross-track error (RMS and maximum), share of time in RTK fixed, interventions per hour, and measured stopping distance. The progression from bench to supervised rows, with exit criteria for each step, is in [docs/field-validation.md](docs/field-validation.md).
 
 ### Collaboration
 
@@ -187,6 +201,8 @@ xhost +local:docker
 ./manage.py 
 ```
 Access http://localhost to access the WebUI
+
+**The dashboard has a joystick and a soft e-stop and listens on port 80 of the robot.** Set `SOWBOT_UI_PASSWORD` in `.env` to require a password (HTTP Basic, user name ignored). Without it, anyone on the robot's network can drive it. Basic auth is not encrypted, so also keep the robot's Wi-Fi private. The container runs privileged on the host network.
 
 
 
@@ -332,19 +348,20 @@ python3 agbot-diagnostic.py full
 
 ## Sketch of MVP 2026 architecture
 
-### 1. The Lizard Brain (RT Microcontroller)
-* **Hardware:** ESP32 MCU.
-* **Software:** Lizard DSL.
-* **Role:** Hard Real-Time Execution.
-* **Function:** Motor PID control and physical safety (bumpers/cliffs).
-* **I/O:** 3.3V UART receiving $v, \omega$ via the `teleop_lizard` ROS 2 bridge.
+### 1. The Flight Controller (RT Microcontroller)
+* **Hardware:** [LEVIA-H7](https://github.com/piecol/LEVIA-H7) (STM32H743). Unvalidated, in bring-up.
+* **Software:** ArduPilot Rover, GUIDED mode.
+* **Role:** Motion execution and supervisory failsafes (geofence, GCS/GPS loss, EKF variance).
+* **I/O:** MAVLink serial from the Limbic SBC via `devkit_mavlink_bridge`; CAN for motor drivers (driver choice open).
+* **Not the rated stop function.** Stopping on a bumper, radar or E-stop is done by the hardwired 24V loop, independent of this controller (see [safety_roadmap.md](safety_roadmap.md)).
+* **Legacy:** ESP32 + Lizard DSL (3.3V UART via the `teleop_lizard` bridge, see [docs/lizard-firmware-setup.md](docs/lizard-firmware-setup.md)). Kept for existing hardware, no new features.
 
 ### 2. The Limbic System (Executive)
 * **Hardware:** Avaota A1 #1 (Allwinner T527).
 * **Software:** ROS 2 Jazzy + `topological_navigation` (AOC branch).
 * **Role:** Navigation Executive.
 * **Function:** Runs the Topological Navigation stack. UBLOX sensors Manages the move_base sequence and Action on Condition (AOC) logic.
-* **I/O:** Connects to u-blox via USB/UART using `ublox_dgnss` node. Translates graph goals into velocity commands for the Lizard Brain.
+* **I/O:** Connects to u-blox via USB/UART using `ublox_dgnss` node. Translates graph goals into velocity commands for the flight controller.
 
 **<1GbE interconnect between 2&3>**
 
@@ -359,7 +376,9 @@ python3 agbot-diagnostic.py full
 
 ## Sketch of possible eventual ~2027 architecture
 
-### 1. The Lizard Brain (Hardware Abstraction)
+Research only (TRL 1 to 2 in the roadmap above), not a commitment. It would replace ArduPilot on the controller, which is the current path.
+
+### 1. The Real-Time Controller (Hardware Abstraction)
 * **Hardware:** [STM32 H7 MCU](https://oshwhub.com/6676a/stm32h745zit6_core).
 * **Software:** copper-rs.
 * **Role:** Hard Real-Time Execution.
@@ -378,7 +397,7 @@ python3 agbot-diagnostic.py full
 | Core 0    | OS / I/O            | Handles kernel house-keeping, SSH, and the 1GbE driver interrupts.                  |
 | Core 1    | Zenoh / Neo-link    | Dedicated to the Zenoh router and serializing incoming "Nice-to-Have" data.         |
 | Cores 2-6 | The Pilot (Nav)     | This is where the RTK EKF, Path Planner, and Task Graph live.                       |
-| Core 7    | The Bridge (Lizard) | Dedicated to SocketCAN and the high-frequency heartbeat to the STM32 (Lizard).      |
+| Core 7    | The Bridge (controller) | Dedicated to SocketCAN and the high-frequency heartbeat to the STM32.            |
 
 
 **<1GbE interconnect between 2&3>**
@@ -393,16 +412,16 @@ python3 agbot-diagnostic.py full
 
 ## Licenses & papers
 
-# Sowbot / feldfreund_devkit_ros — Dependency Licence Audit
+# Sowbot — Dependency Licence Audit
 
 | Component | Source | Licence | Commercial use | Academic Paper | Notes |
 |---|---|---|---|---|---|
-| **feldfreund_devkit_ros** (root) | your repo | MIT (©Zauberzeug GmbH & Agroecology Lab) | ✅ | *None (Local Project)* | Derivative of upstream field-friend; retain Zauberzeug notice |
+| **Sowbot** (this repo, formerly feldfreund_devkit_ros) | Agroecology-Lab/Sowbot | MIT (©Zauberzeug GmbH & Agroecology Lab) | ✅ | *None (Local Project)* | Derivative of upstream field-friend; retain Zauberzeug notice |
 | **devkit_driver** | local | MIT (©ATB) | ✅ | *None (Utility Driver)* | Retain ATB copyright notice |
 | **devkit_ui** | local | MIT (©Agroecology Lab) | ✅ | *None (UI Extension)* | |
-| **devkit_bringup** | local | MIT | ✅ | *None (Config/Launch)* | Corrected from `proprietary` |
-| **sowbot_row_follow** | caatingarobotics | BSD-2-Clause | ✅ | [de Silva et al., 2024](https://arxiv.org/abs/2209.14003) | LICENSE file fixed to match header/metadata; updated to use the Transition State Model (TSM) for visual crop row navigation; ©PRBonn + ©Agroecology Lab |
-| **caatingarobotics** *(devkit_simulation, caatinga_nav, caatinga_vision)* | github.com/samuk | Apache-2.0 | ✅ | *None (Fork Infrastructure)* | Your fork (row_follow is the BSD-2 exception, above) |
+| **devkit_bringup** | local | MIT | ✅ | *None (Config/Launch)* | |
+| **sowbot_row_follow** | caatingarobotics | BSD-2-Clause | ✅ | [de Silva et al., 2024](https://arxiv.org/abs/2209.14003) | Triangle Scan Method (TSM) for visual crop row navigation; ©PRBonn + ©Agroecology Lab |
+| **caatingarobotics** *(devkit_simulation, caatinga_nav, caatinga_vision)* | [samuk/caatingarobotics](https://github.com/samuk/caatingarobotics) (cloned in the Dockerfile); upstream work by [joaodemouragy-hash/caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics) | Apache-2.0 | ✅ | *None (Fork Infrastructure)* | row_follow is the BSD-2-Clause exception, above |
 | **topological_navigation** | LCAS (`aoc_refactor`) | Apache-2.0 (©LCAS) | ✅ | [Fentanes et al., 2015](https://www.researchgate.net/publication/282752920_Now_or_later_Predicting_and_maximising_success_of_navigation_actions_from_long-term_experience) | High-level planner; derived from the EU STRANDS long-term autonomy project framework |
 | **fusioncore** | manankharwar | Apache-2.0 | ✅ | [Kharwar, 2026](https://arxiv.org/abs/2605.25239) | GNSS fusion; patched in-build; retain NOTICE if present |
 | **Forest3D** | unitsSpaceLab | GPL (©UNITS Space Lab) | Do not ship in final product | [Cottiga,S., Bourr, K., & Seriani, S. (2026)](https://kbourr.com/#publications)| Sim-only — 3D forestry /agriculture simulation environment |
@@ -411,7 +430,7 @@ python3 agbot-diagnostic.py full
 | **ros2graph_explorer** | nilseuropa | BSD-3-Clause | ✅ | *None (Debug Tool)* | Dev/debug graph inspector |
 | **optical_flow_ros** | adityakamath | Apache-2.0 | ✅ | *None (Hardware Driver)* | PMW3901 / PAA5100 optical flow sensor driver |
 | **Fields2Cover v2.0.0** | Fields2Cover | BSD-3-Clause | ✅ | [Mier et al., 2023](https://doi.org/10.1109/LRA.2023.3248439) | Built from source; pulls OR-tools (Apache-2.0) + GDAL (MIT) |
-| **lizard** | Agroecology-Lab | MIT (©Zauberzeug GmbH) | ✅ | *None (Firmware Tool)* | ESP32 tooling; retain Zauberzeug notice |
+| **lizard** | Agroecology-Lab | MIT (©Zauberzeug GmbH) | ✅ | *None (Firmware Tool)* | ESP32 tooling (legacy controller path); retain Zauberzeug notice |
 | **YOLOX 0.3.0** + yolox_nano weights | Megvii | Apache-2.0 | ✅ | [Ge et al., 2021](https://arxiv.org/abs/2107.08430) | Confirm weights terms for commercial use |
 | **PyTorch (CPU)** | Meta | BSD-3-Clause | ✅ | [Paszke et al., 2019](https://papers.nips.cc/paper/9015-pytorch-an-imperative-style-high-performance-deep-learning-library) | Core machine learning runtime engine |
 
