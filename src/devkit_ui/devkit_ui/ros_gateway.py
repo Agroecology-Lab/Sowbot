@@ -127,6 +127,11 @@ class RosGateway:
         from rclpy.action import ActionClient  # pylint: disable=import-outside-toplevel
         return ActionClient(self._node, action_type, name)
 
+    def get_bool_parameter(self, name: str, default: bool = False) -> bool:
+        """Declare the node parameter name with default and return its value as a bool."""
+        self._node.declare_parameter(name, default)
+        return bool(self._node.get_parameter(name).value)
+
     def get_logger(self):
         """Return the wrapped node's logger."""
         return self._node.get_logger()

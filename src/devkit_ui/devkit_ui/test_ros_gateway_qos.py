@@ -266,5 +266,24 @@ class TestGatewayCreation(unittest.TestCase):
         callback.assert_not_called()
 
 
+class TestBoolParameter(unittest.TestCase):
+    def setUp(self):
+        """Wrap a mock node whose parameter value is settable."""
+        self.node = Mock()
+        self.gateway = RosGateway(self.node)
+
+    def test_declares_with_default_and_returns_value_as_bool(self):
+        """Verify the parameter is declared with its default and read back as a bool."""
+        self.node.get_parameter.return_value = SimpleNamespace(value=True)
+        self.assertIs(self.gateway.get_bool_parameter('sim', False), True)
+        self.node.declare_parameter.assert_called_once_with('sim', False)
+        self.node.get_parameter.assert_called_once_with('sim')
+
+    def test_false_value_is_returned_as_false(self):
+        """Verify a false parameter value stays false."""
+        self.node.get_parameter.return_value = SimpleNamespace(value=False)
+        self.assertIs(self.gateway.get_bool_parameter('sim'), False)
+
+
 if __name__ == '__main__':
     unittest.main()

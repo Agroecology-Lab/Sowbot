@@ -2,8 +2,10 @@
 
 The aim of #116 is to get logic out of `NiceGuiNode` (`ui_node.py`) into layers.
 On `caatinga-dev` it was 4,195 lines.
-On `ui-116-run-plan-sim-system` (head `caa70b9`) it is 1,589.
-On `ui-116-Plan-service-fixes` it is 838.
+On `ui-116-run-plan-sim-system` (head `caa70b9`) it was 1,589.
+On `ui-116-Plan-service-fixes` it was 838.
+On `caatinga-dev` at `c69b649` (after #174 and #175) it is 360.
+With the #168 and #169 change it is 354, and `NiceGuiNode` no longer subclasses `rclpy.node.Node`.
 
 <table>
 <tr><th>PR</th><th>Change</th></tr>
@@ -30,6 +32,12 @@ It returns plain data and keeps no draft.
 The Plan tab is <code>PlanPage</code>, with its cards under <code>pages/plan/</code>: boundary map, controls, repair dialog, mission queue, mission store.
 A planning result that arrives after Clear is discarded.
 A seventh import-linter contract keeps the node, pages and view models off the F2C planner, <code>row_planning</code> and <code>plan_import</code></td></tr>
+<tr><td>#175 NavPage (#164, #167)</td><td>The Run tab is <code>NavPage</code>.
+The node wrappers move into view models: <code>persist_and_reload</code> and <code>patch_node_role</code> are in <code>TopologyApplicationService</code>, and <code>MapAuthoringViewModel</code> holds the map-authoring actions</td></tr>
+<tr><td>#168, #169 (PR number to add)</td><td>Topic QoS is declared as <code>QosSpec</code> values in <code>qos.py</code>, which has no rclpy import, and <code>RosGateway</code> converts them to <code>QoSProfile</code>.
+No module outside <code>RosGateway</code> imports <code>rclpy</code>, and the five ignores in the <code>rclpy-via-gateway</code> contract are gone.
+<code>NiceGuiNode</code> is a plain class built on a <code>RosGateway</code>; <code>ros_main</code> creates the <code>Node</code>.
+The <code>sim</code> parameter is read through <code>RosGateway.get_bool_parameter</code></td></tr>
 </table>
 
 #155 (optical flow in Docker) and #157 (vendored skills) are unrelated to the refactor.
@@ -44,10 +52,10 @@ The dotted arrows labelled "callback" and "live doc getter" are runtime callback
 
 ```mermaid
 flowchart TB
-  subgraph P1["Phase 1: same NiceGUI ROS node (NiceGuiNode, ui_node.py, 838 lines)"]
+  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 354 lines)"]
     subgraph UI["View (NiceGUI)"]
       Content["content(): four tabs"]
-      RunTab["Run tab<br/>_run_content (method on node, ~110 lines)"]
+      NavPage["NavPage (class)"]
       PlanPage["PlanPage (class)"]
       SimPage["SimPage (class)"]
       SystemPage["SystemPage (class)"]
@@ -66,6 +74,7 @@ flowchart TB
     subgraph VM["ViewModel (UI state and user intent)"]
       GlobalVM["GlobalViewModel"]
       RunVM["RunViewModel<br/>(drive, row discovery, navigation)"]
+      AuthoringVM["MapAuthoringViewModel<br/>(drop node, F2C save, repair, delete row)"]
       TopoVM["TopologyViewModel<br/>(mirrors the live TopoDoc, map archive)"]
       TelemetryVM["TelemetryViewModel"]
       RobotBrainVM["RobotBrainViewModel"]
@@ -109,16 +118,16 @@ flowchart TB
       TopoMapStore["TopoMapStore<br/>(map file I/O)"]
       MissionStore["MissionStore<br/>(YAML or SQLite, scheduling, run recording)"]
       ObstacleManager["ObstacleManager<br/>(obstacles.yaml, /obstacles publisher)"]
-      RosGateway["RosGateway<br/>(wraps the rclpy Node: publishers, subscriptions,<br/>clients, timers, clock, tf)"]
+      RosGateway["RosGateway<br/>(wraps the rclpy Node: publishers, subscriptions,<br/>clients, timers, clock, tf, parameters;<br/>turns QosSpec into QoSProfile)"]
     end
   end
 
-  Content --> RunTab
+  Content --> NavPage
   Content --> PlanPage
   Content --> SimPage
   Content --> SystemPage
-  RunTab --> RunCards
-  RunTab --> ObsCards
+  NavPage --> RunCards
+  NavPage --> ObsCards
   PlanPage --> PlanCards
   PlanCards --> ObsCards
   SimPage --> SimCards
@@ -127,7 +136,8 @@ flowchart TB
   RunCards --> RunVM
   RunCards --> GlobalVM
   RunCards --> TopoVM
-  RunTab --> TelemetryVM
+  NavPage --> TelemetryVM
+  NavPage --> AuthoringVM
   PlanCards --> PlanVM
   PlanCards --> MissionVM
   PlanVM -.->|"reads map"| TopoVM
@@ -142,7 +152,11 @@ flowchart TB
   SysCards -.-> ProcReg
   SysCards -.-> Medkit
 
-  RunTab -.-> TopologyEdit
+  AuthoringVM --> TopologyEdit
+  AuthoringVM --> TopologyApp
+  AuthoringVM --> TelemetryApp
+  AuthoringVM --> TopoVM
+  AuthoringVM --> RunVM
 
   GlobalVM --> DriveApp
   RunVM --> DriveApp
@@ -198,11 +212,10 @@ flowchart TB
   classDef infra fill:#e5e7eb,stroke:#374151,color:#111827,stroke-width:1px
   classDef proc fill:#f3f4f6,stroke:#374151,color:#111827,stroke-width:1px
 
-  class Content,PlanPage,SimPage,SystemPage,RunCards,PlanCards,SimCards,SysCards,ObsCards view
-  class RunTab todo
+  class Content,NavPage,PlanPage,SimPage,SystemPage,RunCards,PlanCards,SimCards,SysCards,ObsCards view
   class Medkit todo
   class ProcReg proc
-  class GlobalVM,RunVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM vm
+  class GlobalVM,RunVM,AuthoringVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM vm
   class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,SimAssets,SimWorld app
   class DriveDom,NavDom,RowDiscDom,RobotBrainDom,TelemetryDom,TopologyDom,MissionDom dom
   class RowBuilder,RowPlanning,F2CPkg pure
@@ -218,9 +231,8 @@ flowchart TB
   style INFRA fill:#f3f4f6,stroke:#374151,color:#111827
 ```
 
-The Run tab is still a method on `NiceGuiNode`, which is why it is drawn as a red dashed box.
-The Plan, Sim and System tabs are page classes.
-The Run tab reaches `TopologyEditService` through node wrappers instead of a ViewModel.
+The Run, Plan, Sim and System tabs are page classes.
+`NavPage` reaches `TopologyEditService` through `MapAuthoringViewModel`.
 The Plan page reaches only ViewModels; the node passes it three callbacks (run, cancel and delete row), so the mission executor is not drawn as a dependency of the page.
 
 ## Decision: drop "Facade" as a layer name
@@ -249,8 +261,9 @@ Owned by application services.
 <tr><td>Algorithms</td><td>Pure module</td><td>row_planning, topo_row_builder, plan_import.
 No state, no ROS.
 F2C is the separate <code>devkit_f2c_planner</code> package</td></tr>
-<tr><td>ROS</td><td>RosGateway</td><td>Creates publishers, subscriptions, clients and timers.
-Five modules still import <code>rclpy.qos</code> directly (see below)</td></tr>
+<tr><td>ROS</td><td>RosGateway</td><td>Creates publishers, subscriptions, clients and timers, and reads node parameters.
+The only module under the UI layers that imports <code>rclpy</code>.
+Topic QoS is a <code>QosSpec</code> from <code>qos.py</code>, converted by the gateway</td></tr>
 <tr><td>Processes</td><td>process_registry</td><td>Registry of long-running tool processes (RViz, Gazebo, explorer, grapher, neo), shared by every browser session.
 No NiceGUI or ROS imports</td></tr>
 <tr><td>Phase 2 edge</td><td>Adapter</td><td>RestAdapter, MqttAdapter, ReticulumAdapter.
@@ -300,10 +313,9 @@ Each exception is listed in `.importlinter` with a `TODO(#116)` and the check fa
 <tr><th>Proposed</th><th>Built</th></tr>
 <tr><td>Facade layer (comment of 15 and 20 August: <code>NavFacade</code>, <code>MissionFacade</code>, <code>TopologyFacade</code>, <code>SystemFacade</code>)</td><td>Dropped.
 <code>ApplicationService</code> is the boundary (comment of 9 October)</td></tr>
-<tr><td>Three ViewModels: <code>NavViewModel</code>, <code>MissionViewModel</code>, <code>SystemViewModel</code>, plus <code>GlobalViewModel</code></td><td>Nine: <code>Global</code>, <code>Run</code>, <code>Topology</code>, <code>Telemetry</code>, <code>RobotBrain</code>, <code>Plan</code>, <code>Mission</code>, <code>Obstacle</code>, <code>Sim</code></td></tr>
+<tr><td>Three ViewModels: <code>NavViewModel</code>, <code>MissionViewModel</code>, <code>SystemViewModel</code>, plus <code>GlobalViewModel</code></td><td>Ten: <code>Global</code>, <code>Run</code>, <code>MapAuthoring</code>, <code>Topology</code>, <code>Telemetry</code>, <code>RobotBrain</code>, <code>Plan</code>, <code>Mission</code>, <code>Obstacle</code>, <code>Sim</code></td></tr>
 <tr><td>Pages: Nav, Mission, System</td><td>Four tabs: Run, Plan, Sim, System.
-Plan, Sim and System are page classes.
-Run is still a node method</td></tr>
+All four are page classes: <code>NavPage</code>, <code>PlanPage</code>, <code>SimPage</code>, <code>SystemPage</code></td></tr>
 <tr><td><code>NavigationService</code>, <code>MissionService</code>, <code>TopologyService</code>, <code>SystemService</code></td><td>Drive, Navigation, RowDiscovery, RobotBrain, Telemetry, Topology, TopologyEdit, Plan and Mission application services, each with a domain service, plus <code>SimAssetService</code> and <code>SimWorldService</code> (no ROS)</td></tr>
 <tr><td><code>PlanningService (F2C)</code> / <code>PlanningDomainService</code></td><td><code>PlanApplicationService</code>, with no domain service of its own.
 F2C is the <code>devkit_f2c_planner</code> package, called from <code>PlanApplicationService</code>.
@@ -323,17 +335,14 @@ No adapters in the code</td></tr>
 
 Tracked in #116 and `.importlinter`:
 
-- **Run tab** is still a method on `NiceGuiNode` (`_run_content`, about 110 lines) and reaches `TopologyEditService` through node wrappers.
 - **Plan page state** is per browser session (`PlanPageState`, `MissionQueue`), but `PlanViewModel.save_status` is shared by every session.
   `PlanPage` takes `_run_mission`, `cancel_mission` and `confirm_delete_row` as callbacks from the node.
 - **Plan page threading**: `PlanViewModel.plan` blocks, so the controls card calls it through `nicegui.run.io_bound`.
   Any other adapter has to run it on a worker thread too.
 - **Mission start glue**: `_run_mission` and `_send_goal_sync` are still on the node, around `MissionDomainService.start`.
-- **Node leftovers**: the `_persist_and_reload` thread wrapper, and the `/current_node` subscription with its `rclpy.qos` import.
+- **Node leftovers**: the `/current_node` subscription is still created in `NiceGuiNode`, through the gateway.
 - **Obstacles**: `ObstacleViewModel` calls `ObstacleManager` directly.
   An `ObstacleApplicationService` is needed.
 - **Medkit**: still started with `subprocess` in `pages/system/tools_card.py`.
-- **`rclpy.qos` imports**: `row_discovery_domain_service`, `telemetry_domain_service`, `topology_domain_service`, `obstacles` and `qos` still import `rclpy`.
-  The QoS profiles should move into `RosGateway`.
 - **Process control**: the other tool cards (Gazebo, row follow, RViz, explorer, grapher) start processes through `process_registry` from the page.
   A ViewModel and application service would complete the rule.
