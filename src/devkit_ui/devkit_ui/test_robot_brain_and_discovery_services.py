@@ -159,8 +159,8 @@ class TestRowDiscovery(unittest.TestCase):
     def test_status_subscription_uses_the_shared_latest_sensor_spec(self):
         """Discovery status must use best-effort depth one through the gateway."""
         self.ros.create_subscription.assert_called_once_with(
-            discovery_module.String, '/row_discovery/status', self.domain._on_status,
-            discovery_module.SENSOR_QOS)  # pylint: disable=protected-access
+            discovery_module.String, '/row_discovery/status', self.domain._on_status,  # pylint: disable=protected-access
+            discovery_module.SENSOR_QOS)
         spec = self.ros.create_subscription.call_args.args[-1]
         self.assertIs(spec, discovery_module.SENSOR_QOS)
         self.assertEqual((spec.depth, spec.reliability), (1, 'best_effort'))
