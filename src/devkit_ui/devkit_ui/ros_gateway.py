@@ -71,13 +71,18 @@ def to_qos_profile(qos: int | QosSpec | QoSProfile) -> int | QoSProfile:
         ReliabilityPolicy,
     )
     # pylint: enable=import-outside-toplevel
-    kwargs = {'depth': qos.depth, 'reliability': ReliabilityPolicy[qos.reliability.upper()]}
+    # Explicit members, so the mapping does not depend on how rclpy's policy enums handle lookup by name.
+    reliability = {'reliable': ReliabilityPolicy.RELIABLE, 'best_effort': ReliabilityPolicy.BEST_EFFORT}
+    durability = {'volatile': DurabilityPolicy.VOLATILE, 'transient_local': DurabilityPolicy.TRANSIENT_LOCAL}
+    history = {'keep_last': HistoryPolicy.KEEP_LAST, 'keep_all': HistoryPolicy.KEEP_ALL}
+    liveliness = {'automatic': LivelinessPolicy.AUTOMATIC, 'manual_by_topic': LivelinessPolicy.MANUAL_BY_TOPIC}
+    kwargs = {'depth': qos.depth, 'reliability': reliability[qos.reliability]}
     if qos.durability is not None:
-        kwargs['durability'] = DurabilityPolicy[qos.durability.upper()]
+        kwargs['durability'] = durability[qos.durability]
     if qos.history is not None:
-        kwargs['history'] = HistoryPolicy[qos.history.upper()]
+        kwargs['history'] = history[qos.history]
     if qos.liveliness is not None:
-        kwargs['liveliness'] = LivelinessPolicy[qos.liveliness.upper()]
+        kwargs['liveliness'] = liveliness[qos.liveliness]
     if qos.liveliness_lease_sec is not None:
         kwargs['liveliness_lease_duration'] = Duration(seconds=qos.liveliness_lease_sec)
     return QoSProfile(**kwargs)
