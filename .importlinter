@@ -83,14 +83,6 @@ source_modules =
 forbidden_modules =
     rclpy
 allow_indirect_imports = True
-unmatched_ignore_imports_alerting = error
-ignore_imports =
-    # TODO(#116): move rclpy.qos profiles behind RosGateway
-    devkit_ui.domain_services.row_discovery_domain_service -> rclpy
-    devkit_ui.domain_services.telemetry_domain_service -> rclpy
-    devkit_ui.domain_services.topology_domain_service -> rclpy
-    devkit_ui.obstacles -> rclpy
-    devkit_ui.qos -> rclpy
 
 [importlinter:contract:planning-via-plan-service]
 name = Field planning and plan import go through the Plan service

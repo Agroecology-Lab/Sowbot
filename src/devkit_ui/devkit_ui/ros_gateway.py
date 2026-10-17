@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 from rclpy.node import Node
 
+from devkit_ui.qos import QosSpec
+
 if TYPE_CHECKING:
     from rclpy.clock import Clock
     from rclpy.publisher import Publisher
@@ -49,6 +51,33 @@ class _RosLogHandler(logging.Handler):
             self.handleError(record)
 
 
+def to_qos_profile(qos: int | QosSpec | QoSProfile) -> int | QoSProfile:
+    """Return qos as something rclpy accepts: a QosSpec becomes a QoSProfile, anything else is returned unchanged."""
+    if not isinstance(qos, QosSpec):
+        return qos
+    # Imported here so modules that only need topics and services load without rclpy.qos.
+    # pylint: disable=import-outside-toplevel
+    from rclpy.qos import (
+        DurabilityPolicy,
+        Duration,
+        HistoryPolicy,
+        LivelinessPolicy,
+        QoSProfile,
+        ReliabilityPolicy,
+    )
+    # pylint: enable=import-outside-toplevel
+    kwargs = {'depth': qos.depth, 'reliability': ReliabilityPolicy[qos.reliability.upper()]}
+    if qos.durability is not None:
+        kwargs['durability'] = DurabilityPolicy[qos.durability.upper()]
+    if qos.history is not None:
+        kwargs['history'] = HistoryPolicy[qos.history.upper()]
+    if qos.liveliness is not None:
+        kwargs['liveliness'] = LivelinessPolicy[qos.liveliness.upper()]
+    if qos.liveliness_lease_sec is not None:
+        kwargs['liveliness_lease_duration'] = Duration(seconds=qos.liveliness_lease_sec)
+    return QoSProfile(**kwargs)
+
+
 class TransformUnavailable(Exception):
     """A TF lookup failed because the transform is missing, disconnected or out of range."""
 
@@ -62,13 +91,14 @@ class RosGateway:
         self._wall_clock: Clock | None = None
         self._tf_buffer = None
 
-    def create_publisher(self, msg_type, topic: str, qos: int | QoSProfile) -> Publisher:
+    def create_publisher(self, msg_type, topic: str, qos: int | QosSpec | QoSProfile) -> Publisher:
         """Create a publisher on the wrapped node with the supplied type, topic, and QoS."""
-        return self._node.create_publisher(msg_type, topic, qos)
+        return self._node.create_publisher(msg_type, topic, to_qos_profile(qos))
 
-    def create_subscription(self, msg_type, topic: str, callback, qos: int | QoSProfile) -> Subscription:
+    def create_subscription(
+            self, msg_type, topic: str, callback, qos: int | QosSpec | QoSProfile) -> Subscription:
         """Create a subscription on the wrapped node with the supplied callback and QoS."""
-        return self._node.create_subscription(msg_type, topic, callback, qos)
+        return self._node.create_subscription(msg_type, topic, callback, to_qos_profile(qos))
 
     def create_client(self, srv_type, name: str):
         """Create a service client on the wrapped node."""

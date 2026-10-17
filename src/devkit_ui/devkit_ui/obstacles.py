@@ -50,7 +50,8 @@ from datetime import UTC, datetime
 
 import yaml
 from geometry_msgs.msg import Point32, PolygonStamped
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+
+from devkit_ui.qos import LATCHED_QOS
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -59,14 +60,9 @@ OBSTACLES_FILE = '/workspace/maps/obstacles.yaml'
 _NAME_RE    = re.compile(r'^[A-Z0-9_]+$')
 _NAME_CLEAN = re.compile(r'[^A-Z0-9_]')
 
-# Latched profile — matches TMAP_QOS in ui_node so a costmap layer that
+# Latched profile, the same as the topology map's, so a costmap layer that
 # subscribes late still receives the current obstacle set on connect.
-_OBS_QOS = QoSProfile(
-    depth=1,
-    reliability=ReliabilityPolicy.RELIABLE,
-    durability=DurabilityPolicy.TRANSIENT_LOCAL,
-    history=HistoryPolicy.KEEP_LAST,
-)
+_OBS_QOS = LATCHED_QOS
 
 # WGS84 semi-major axis (m). Equirectangular projection is good to
 # ~0.3% anywhere on the planet — comfortably inside metre-scale tolerance.
