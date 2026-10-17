@@ -1,4 +1,5 @@
 """Drive commands and telemetry presentation without a running ROS graph."""
+import importlib
 import sys
 import unittest
 from types import ModuleType, SimpleNamespace
@@ -37,7 +38,7 @@ with patch.dict(sys.modules, {
     'rclpy': ModuleType('rclpy'),
     'rclpy.node': rclpy_node,
 }):
-    from devkit_ui import qos
+    qos = importlib.import_module('devkit_ui.qos')
     from devkit_ui.domain_services.drive_domain_service import DriveDomainService
     from devkit_ui.ros_gateway import RosGateway
 

@@ -66,6 +66,16 @@ class TestObstacleManagerGateway(unittest.TestCase):
         self.assertEqual(self.mgr.obstacles, ())
         self.assertEqual((self.mgr.version, self.mgr.status), (0, ''))
 
+    def test_obstacle_publisher_uses_the_shared_latched_spec(self) -> None:
+        """A late costmap subscriber must receive the latest reliable obstacle set."""
+        with patch.object(obstacles.threading, 'Thread'):
+            self.mgr.start()
+        spec = self.ros.create_publisher.call_args.args[-1]
+        self.assertIs(spec, obstacles.LATCHED_QOS)
+        self.assertEqual(
+            (spec.depth, spec.reliability, spec.durability, spec.history),
+            (1, 'reliable', 'transient_local', 'keep_last'))
+
     def test_publish_failure_is_logged_through_gateway(self) -> None:
         """Verify a publish error is logged through the gateway."""
         with patch.object(obstacles.threading, 'Thread'):
