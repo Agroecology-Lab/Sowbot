@@ -35,8 +35,8 @@ A seventh import-linter contract keeps the node, pages and view models off the F
 <tr><td>#175 NavPage (#164, #167)</td><td>The Run tab is <code>NavPage</code>.
 The node wrappers move into view models: <code>persist_and_reload</code> and <code>patch_node_role</code> are in <code>TopologyApplicationService</code>, and <code>MapAuthoringViewModel</code> holds the map-authoring actions</td></tr>
 <tr><td>#168, #169 (PR number to add)</td><td>Topic QoS is declared as <code>QosSpec</code> values in <code>qos.py</code>, which has no rclpy import, and <code>RosGateway</code> converts them to <code>QoSProfile</code>.
-No module outside <code>RosGateway</code> imports <code>rclpy</code>, and the five ignores in the <code>rclpy-via-gateway</code> contract are gone.
-<code>NiceGuiNode</code> is a plain class built on a <code>RosGateway</code>; <code>ros_main</code> creates the <code>Node</code>.
+<code>RosGateway</code> handles ROS access for UI services, and the five ignores in the <code>rclpy-via-gateway</code> contract are gone.
+<code>NiceGuiNode</code> is a plain class built on a <code>RosGateway</code>; <code>ui_node.py</code> retains ROS startup imports, and <code>ros_main</code> creates and spins the <code>Node</code>.
 The <code>sim</code> parameter is read through <code>RosGateway.get_bool_parameter</code></td></tr>
 </table>
 
@@ -262,7 +262,7 @@ Owned by application services.
 No state, no ROS.
 F2C is the separate <code>devkit_f2c_planner</code> package</td></tr>
 <tr><td>ROS</td><td>RosGateway</td><td>Creates publishers, subscriptions, clients and timers, and reads node parameters.
-The only module under the UI layers that imports <code>rclpy</code>.
+Handles ROS access for UI services; <code>ui_node.py</code> retains ROS startup imports and creates and spins the <code>Node</code> in <code>ros_main</code>.
 Topic QoS is a <code>QosSpec</code> from <code>qos.py</code>, converted by the gateway</td></tr>
 <tr><td>Processes</td><td>process_registry</td><td>Registry of long-running tool processes (RViz, Gazebo, explorer, grapher, neo), shared by every browser session.
 No NiceGUI or ROS imports</td></tr>
@@ -283,7 +283,7 @@ import-linter enforces this in CI (`make lint-imports`, `.importlinter`) with se
 3. ViewModels do not reach domain services, stores or ROS.
 4. Services are UI-neutral.
 5. Domain services do not import application services.
-6. Only RosGateway touches rclpy.
+6. The `rclpy-via-gateway` contract forbids direct `rclpy` imports in pages, view models, application and domain services, `missions`, `obstacles` and `qos`; `RosGateway` provides ROS access for UI services, while `ui_node.py` retains ROS startup imports and creates and spins the `Node` in `ros_main`.
 7. Field planning and plan import go through the Plan service: `ui_node`, the pages and the view models do not import `devkit_f2c_planner`, `row_planning` or `plan_import`.
 
 Each exception is listed in `.importlinter` with a `TODO(#116)` and the check fails if one becomes stale.
