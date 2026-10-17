@@ -52,7 +52,12 @@ class _RosLogHandler(logging.Handler):
 
 
 def to_qos_profile(qos: int | QosSpec | QoSProfile) -> int | QoSProfile:
-    """Return qos as something rclpy accepts: a QosSpec becomes a QoSProfile, anything else is returned unchanged."""
+    """Return qos as something rclpy accepts: a QosSpec becomes a QoSProfile, anything else is returned unchanged.
+
+    Optional spec fields set to None retain rclpy defaults; liveliness_lease_sec is in seconds.
+    Unknown policy names raise KeyError.
+    Errors importing rclpy or constructing durations and profiles propagate.
+    """
     if not isinstance(qos, QosSpec):
         return qos
     # Imported here so modules that only need topics and services load without rclpy.qos.
@@ -92,12 +97,24 @@ class RosGateway:
         self._tf_buffer = None
 
     def create_publisher(self, msg_type, topic: str, qos: int | QosSpec | QoSProfile) -> Publisher:
-        """Create a publisher on the wrapped node with the supplied type, topic, and QoS."""
+        """Create a publisher on the wrapped node with the supplied type, topic, and QoS.
+
+        qos may be an integer queue depth, a QosSpec to convert, or an existing QoSProfile
+        to pass through.
+        Return the node's publisher handle.
+        QoS conversion and publisher creation errors propagate.
+        """
         return self._node.create_publisher(msg_type, topic, to_qos_profile(qos))
 
     def create_subscription(
             self, msg_type, topic: str, callback, qos: int | QosSpec | QoSProfile) -> Subscription:
-        """Create a subscription on the wrapped node with the supplied callback and QoS."""
+        """Create a subscription on the wrapped node with the supplied callback and QoS.
+
+        qos may be an integer queue depth, a QosSpec to convert, or an existing QoSProfile
+        to pass through.
+        Return the node's subscription handle.
+        QoS conversion and subscription creation errors propagate.
+        """
         return self._node.create_subscription(msg_type, topic, callback, to_qos_profile(qos))
 
     def create_client(self, srv_type, name: str):
