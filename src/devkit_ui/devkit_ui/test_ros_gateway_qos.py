@@ -2,6 +2,7 @@
 import enum
 import importlib
 import sys
+import typing
 import unittest
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
@@ -88,6 +89,38 @@ class TestToQosProfile(unittest.TestCase):
             'liveliness_lease_duration': ('duration', 1.0)})
 
 
+def _literal_values(annotation) -> list:
+    """Return the values of a Literal annotation, optionally wrapped in Optional."""
+    if typing.get_origin(annotation) is typing.Literal:
+        return list(typing.get_args(annotation))
+    return [value for arg in typing.get_args(annotation) for value in _literal_values(arg)]
+
+
+class TestEveryDeclaredPolicyIsMapped(unittest.TestCase):
+    def setUp(self):
+        """Provide the rclpy.qos stand-in for the duration of each test."""
+        patcher = patch.dict(sys.modules, {'rclpy.qos': _rclpy_qos_stub()})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_each_literal_value_converts_to_the_member_of_the_same_name(self):
+        """Verify no value QosSpec allows is missing from the gateway's mapping."""
+        hints = typing.get_type_hints(qos.QosSpec)
+        for field in ('reliability', 'durability', 'history', 'liveliness'):
+            values = _literal_values(hints[field])
+            self.assertTrue(values, field)
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    spec = qos.QosSpec(depth=1, **{'reliability': 'reliable', field: value})
+                    member = getattr(to_qos_profile(spec), field)
+                    self.assertEqual(member.name, value.upper())
+
+    def test_unknown_policy_name_raises_key_error(self):
+        """Verify a value outside the declared policies fails loudly instead of being ignored."""
+        with self.assertRaises(KeyError):
+            to_qos_profile(qos.QosSpec(depth=1, reliability='bogus'))
+
+
 class TestGatewayCreation(unittest.TestCase):
     def setUp(self):
         """Wrap a mock node and provide the rclpy.qos stand-in."""
@@ -119,23 +152,56 @@ class TestGatewayCreation(unittest.TestCase):
         self.assertEqual(self.node.create_publisher.call_args.args[2], 1)
 
 
+class _ParameterNode:
+    """Declare and read parameters like rclpy: declaring a name twice raises."""
+
+    def __init__(self):
+        """Start with no declared parameters."""
+        self.values = {}
+        self.declared = []
+
+    def has_parameter(self, name):
+        """Return whether name has been declared."""
+        return name in self.values
+
+    def declare_parameter(self, name, value):
+        """Declare name with value, raising if it is already declared."""
+        if name in self.values:
+            raise RuntimeError(f'parameter {name} already declared')
+        self.values[name] = value
+        self.declared.append((name, value))
+
+    def get_parameter(self, name):
+        """Return the stored parameter wrapped like rclpy's Parameter."""
+        return SimpleNamespace(value=self.values[name])
+
+
 class TestBoolParameter(unittest.TestCase):
     def setUp(self):
-        """Wrap a mock node whose parameter value is settable."""
-        self.node = Mock()
+        """Wrap a node that behaves like rclpy for parameter declaration."""
+        self.node = _ParameterNode()
         self.gateway = RosGateway(self.node)
 
-    def test_declares_with_default_and_returns_value_as_bool(self):
-        """Verify the parameter is declared with its default and read back as a bool."""
-        self.node.get_parameter.return_value = SimpleNamespace(value=True)
-        self.assertIs(self.gateway.get_bool_parameter('sim', False), True)
-        self.node.declare_parameter.assert_called_once_with('sim', False)
-        self.node.get_parameter.assert_called_once_with('sim')
+    def test_declares_with_default_and_returns_it_as_bool(self):
+        """Verify an undeclared parameter is declared with its default and returned as a bool."""
+        self.assertIs(self.gateway.get_bool_parameter('sim', False), False)
+        self.assertEqual(self.node.declared, [('sim', False)])
 
-    def test_false_value_is_returned_as_false(self):
-        """Verify a false parameter value stays false."""
-        self.node.get_parameter.return_value = SimpleNamespace(value=False)
+    def test_default_is_false(self):
+        """Verify the default default is false."""
         self.assertIs(self.gateway.get_bool_parameter('sim'), False)
+
+    def test_second_call_reads_the_declared_value_without_redeclaring(self):
+        """Verify asking twice for the same parameter does not raise and declares it once."""
+        self.assertIs(self.gateway.get_bool_parameter('sim', True), True)
+        self.assertIs(self.gateway.get_bool_parameter('sim', False), True)
+        self.assertEqual(self.node.declared, [('sim', True)])
+
+    def test_value_declared_elsewhere_is_kept(self):
+        """Verify a parameter declared before the call keeps its value rather than taking the default."""
+        self.node.declare_parameter('sim', True)
+        self.assertIs(self.gateway.get_bool_parameter('sim', False), True)
+        self.assertEqual(self.node.declared, [('sim', True)])
 
 
 if __name__ == '__main__':
