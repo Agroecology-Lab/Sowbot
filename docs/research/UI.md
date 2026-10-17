@@ -262,7 +262,7 @@ Owned by application services.
 No state, no ROS.
 F2C is the separate <code>devkit_f2c_planner</code> package</td></tr>
 <tr><td>ROS</td><td>RosGateway</td><td>Creates publishers, subscriptions, clients and timers, and reads node parameters.
-The only module under the UI layers that imports <code>rclpy</code>.
+Handles ROS access for UI services; <code>ui_node.py</code> retains ROS startup imports and creates and spins the <code>Node</code> in <code>ros_main</code>.
 Topic QoS is a <code>QosSpec</code> from <code>qos.py</code>, converted by the gateway</td></tr>
 <tr><td>Processes</td><td>process_registry</td><td>Registry of long-running tool processes (RViz, Gazebo, explorer, grapher, neo), shared by every browser session.
 No NiceGUI or ROS imports</td></tr>
@@ -283,7 +283,7 @@ import-linter enforces this in CI (`make lint-imports`, `.importlinter`) with se
 3. ViewModels do not reach domain services, stores or ROS.
 4. Services are UI-neutral.
 5. Domain services do not import application services.
-6. Only RosGateway touches rclpy.
+6. The `rclpy-via-gateway` contract forbids direct `rclpy` imports in pages, view models, application and domain services, `missions`, `obstacles` and `qos`; `RosGateway` provides ROS access for UI services, while `ui_node.py` retains ROS startup imports and creates and spins the `Node` in `ros_main`.
 7. Field planning and plan import go through the Plan service: `ui_node`, the pages and the view models do not import `devkit_f2c_planner`, `row_planning` or `plan_import`.
 
 Each exception is listed in `.importlinter` with a `TODO(#116)` and the check fails if one becomes stale.

@@ -133,8 +133,13 @@ class RosGateway:
         return ActionClient(self._node, action_type, name)
 
     def get_bool_parameter(self, name: str, default: bool = False) -> bool:
-        """Declare the node parameter name with default and return its value as a bool."""
-        self._node.declare_parameter(name, default)
+        """Return the node parameter name as a bool, declaring it with default if it is not declared yet.
+
+        Safe to call more than once for the same name: rclpy raises when a parameter is declared twice,
+        so an existing declaration, for example from a launch override, is read and left unchanged.
+        """
+        if not self._node.has_parameter(name):
+            self._node.declare_parameter(name, default)
         return bool(self._node.get_parameter(name).value)
 
     def get_logger(self):

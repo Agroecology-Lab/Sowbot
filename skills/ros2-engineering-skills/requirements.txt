@@ -1,2 +1,0 @@
-# Runtime dependency for YAML validation and portable installation.
-PyYAML>=6,<7
