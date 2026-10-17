@@ -120,48 +120,6 @@ High Level navigation is developed from the work of [Lincoln Centre for Autonomo
 Simulation configuration is partially derived from work by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), 
 
 
-# Rewrite-from-Scratch Cost Estimate
-
-Estimate for reimplementing the full stack pulled in by `feldfreund_devkit_ros/docker/Dockerfile` (caatinga-dev), instead of building on ROS 2 Jazzy + Nav2 + third-party packages.
-
-## Foundational infra
-
-| Component | Rewrite hrs |
-|---|---|
-| ROS 2 core + Nav2 | 120,000–250,000 |
-
-## Packages pulled in & developed in house
-
-| Package | What it does | Rewrite hrs |
-|---|---|---|
-| Gazebo Harmonic (`INSTALL_SIM`) | Physics engine + rendering + SDF | 15,000–70,000 |
-| `topological_navigation` (LCAS) | Topo-nav stack | 4,000–8,000 |
-| Fields2Cover | Coverage path planning | 2,500–5,000 |
-| YOLOX | Real-time object detector arch | 4,000–10,000 |
-| NiceGUI (web cockpit) | Web UI framework | 4,000–8,000 |
-| `ublox_dgnss` | RTK GNSS driver | 1,200–2,500 |
-| `septentrio_gnss_driver` | RTK GNSS driver | 1,200–2,500 |
-| `vision_opencv` (cv_bridge, image_geometry) | ROS↔OpenCV bridge | 1,000–2,500 |
-| `fusioncore` | UKF GNSS/IMU fusion | 800–2,000 |
-| Lizard | ESP32 firmware bridge | 800–1,500 |
-| `virtual_maize_field` | Gazebo row-crop world gen | 400–1,200 |
-| Forest3D | Procedural terrain gen | 400–1,200 |
-| `sentor`, `mongodb_store`, `ros2graph_explorer`, `ros2grapher` | Monitoring/dev-tool glue | 600–1,800 |
-| `sowbot_row_follow` TSM vision pipeline | Line fitting, ExG masking, multi-row detection, gating | 800–1,800 |
-| `sowbot_row_follow` state machine + action server | FOLLOW_ROW transitions, control loop integration | 550–1,300 |
-| `sowbot_row_follow` field tuning/debugging | Reaching current maturity | 400–1,000 |
-
-**Subtotal, non-core: ~37,750–120,100 hrs**
-
-## Total
-
-**~157,750–370,100 engineering hours (≈76–183 person-years)**
-
-Excludes OpenCV, GDAL, Boost, Eigen, PyTorch — rewriting those too pushes this into the millions of hours and isn't a serious option.
-
-At a $120/hr fully-loaded US engineering rate, that's **≈$18.9M–$44.4M**.
-
-
 # ⚠️ CRITICAL SAFETY WARNING: 
 
  This software is under active development and may be broken at any given moment. For a stable reference implementation see the upstream Zauberzeug project.
