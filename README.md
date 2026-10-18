@@ -56,6 +56,11 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 | - Differential Drive tracked platform                 |
 +-------------------------------------------------------+
 ```
+[Full architectural diagram](https://github.com/Agroecology-Lab/Sowbot/blob/dev/docs/research/UI.md#diagram-as-built)
+[![Alternate LLM generated architectural diagram](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros/diagram.png)](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros?utm_source=readme&utm_medium=picture)
+
+
+
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk/hardware) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
 
 Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
@@ -69,9 +74,6 @@ We have a [Online version of swath planner](https://agroecology-lab.github.io/fe
 [![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU) 
 
 (click above image to play video)
-
-
-[![Architecture diagram of agroecology-lab/feldfreund_devkit_ros](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros/diagram.png)](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros?utm_source=readme&utm_medium=picture)
 
 ## Sowbot Roadmap
 
