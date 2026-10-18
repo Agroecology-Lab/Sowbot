@@ -1,6 +1,7 @@
 # Field validation progression
 
-Status: proposed, not yet agreed. Tracked as O42 in [safety_roadmap.md](../safety_roadmap.md).
+Status: proposed, not yet agreed.
+Tracked as O42 in [safety_roadmap.md](../safety_roadmap.md).
 Numbers marked *proposed* are starting points to argue about, not requirements.
 
 Simulation does not count towards any step below: Gazebo does not model track slip, so sim results say little about the tracked hardware.
@@ -22,7 +23,7 @@ Simulation does not count towards any step below: Gazebo does not model track sl
 | Interventions per hour | Every human take-over, soft or hard stop, per hour of autonomous running |
 | Stopping distance | Metres from the stop event to standstill, at 0.5 m/s and 1.6 m/s, for each stop source below |
 | Command-loss latency | Time from the last `cmd_vel` to the controller commanding zero |
-| Heading validity | Fraction of time `/gnss/heading` is published and below the variance threshold |
+| Heading validity | Fraction of time `/gnss/heading` is published and below the variance threshold, with a current `/gnss/heading_valid` report of true (cached headings excluded) |
 
 ## Steps
 
@@ -52,7 +53,8 @@ Purpose: real ground, slip and GNSS conditions, with no crop to damage.
 
 - Cross-track error over several row passes at working speed.
 - Row-end turns, wet and dry ground if possible, GNSS under canopy edges.
-- Geofence behaviour: boundary approach across the speed range (O22 b). Operate inside a physical boundary or under direct supervision, the geofence is not a safety function.
+- Geofence behaviour: boundary approach across the speed range (O22 b).
+  Operate inside a physical boundary or under direct supervision, the geofence is not a safety function.
 
 Exit criteria (proposed): metrics recorded for at least several hours of running; no unexplained intervention; the fence breach action confirmed to be a stop or hold (O22 a).
 

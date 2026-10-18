@@ -65,7 +65,7 @@ Not exhaustive, add rows as identified.
 | H2 | Rollaway after stop | Stop on slope, no parking brake | Not yet assessed (CONFIRM operating slope range) | Worm gear drive (assumed 40:1) may hold the tracks when unpowered. Not relied on: self-locking is unreliable under vibration | OPEN. Ratio assumed, not confirmed against gearbox datasheet; no positive parking brake in BOM. Needs a decision: fit a brake or set a slope limit (O13) |
 | H3 | Undetected E-stop hardware degradation | Contactor welding, relay failure over time | Continuous | SW180 aux microswitches for external device monitoring (EDM) of the two series contactors | Covered by DCavg in §6 only if the aux contacts are mechanically linked to the main contacts (O35) and the C203A feedback input is confirmed (O6); final CCF/SISTEMA figures pending |
 | H4 | False negative on human detection | Radar coverage gaps; sensor failure | Continuous once deployed near people | Inxpect S101A ×3 + C203A control unit (Core, in-scope per §0) | OPEN. Mounting geometry for the 3-sensor layout not defined (O20). Moving-vehicle suitability confirmed by manufacturer instruction manual; mobile-application validation procedure still to be run on-vehicle (O14). Min. set distance (1 m) is close to the worst-case detection-envelope sizing from H1 |
-| H5 | Boundary excursion (uncontained operation) | GNSS/positioning fault or degradation (multipath, jamming, blackout, heading unobservability), FusionCore/ArduPilot fence misconfiguration, EKF-origin fault on boot | Continuous once deployed autonomously outside a physically fenced area | ArduPilot Rover GUIDED-mode geofence, fed by FusionCore fused pose via `GPS_INPUT` (see §5); supervisory only, not in the PLd chain per §0. Planned: independent dual-channel geofence (2× STEVAL-SILPLC01, own RTK input per channel) acting on the 48V isolation (§5, O24 to O29); separate safety function, PLr not yet determined (O25) | OPEN. Governed by ISO 18497-3 (design reference, see §6); requires ISO 12100 hazard treatment and ISO 18497-4 verification (worst-case speed, GNSS-degradation scenarios) before Phase 3, see O22. FusionCore's documented limits: yaw unobservable from IMU+encoder+GPS alone without magnetometer/dual-antenna heading; long GPS blackout accumulates heading error beyond ~5-7 min. Planned geofence: GNSS is an unrated input, diagnostic argument open (O27) |
+| H5 | Boundary excursion (uncontained operation) | GNSS/positioning fault or degradation (multipath, jamming, blackout, heading unobservability), FusionCore/ArduPilot fence misconfiguration, EKF-origin fault on boot | Continuous once deployed autonomously outside a physically fenced area | Planned ArduPilot Rover GUIDED-mode geofence, to be fed by FusionCore fused pose via `GPS_INPUT` once configuration and inbound integration are complete (see §5, O22 d, O39); supervisory only, not in the PLd chain per §0. Planned: independent dual-channel geofence (2× STEVAL-SILPLC01, own RTK input per channel) acting on the 48V isolation (§5, O24 to O29); separate safety function, PLr not yet determined (O25) | OPEN. Governed by ISO 18497-3 (design reference, see §6); requires ISO 12100 hazard treatment and ISO 18497-4 verification (worst-case speed, GNSS-degradation scenarios) before Phase 3, see O22. FusionCore's documented limits: yaw unobservable from IMU+encoder+GPS alone without magnetometer/dual-antenna heading; long GPS blackout accumulates heading error beyond ~5-7 min. Planned geofence: GNSS is an unrated input, diagnostic argument open (O27) |
 
 ---
 
@@ -167,8 +167,8 @@ Architecture in §5.
 | Battery voltage cutoff threshold | TO DO | marked `# TODO: CONFIRM` in `sowbot_monitor.yaml`, no value set (O1) |
 | `ros2_medkit` black-box logging | DONE | |
 | Aggregation layer + `/safety/level` | TO DO | O17 to O19 |
-| ArduPilot fence/failsafe state to `/safety/level` | TO DO | Input once the §5 bridge is live, O19, O22 |
-| GNSS fix quality and heading validity monitors | DONE, report only | `/gnss/fix` and `/gnss/heading` in `sowbot_monitor.yaml`. Nothing consumes `/warning/heartbeat` yet, so the response to RTK float or single fix is undefined (O38) |
+| ArduPilot fence/failsafe state to `/safety/level` | PLANNED, blocked | Requires `GPS1_TYPE=14` and completion of the §5 inbound path; state bridging is still to be implemented (O19, O22, O39) |
+| GNSS fix quality and heading validity monitors | DONE, report only | `/gnss/fix`, `/gnss/heading` and `/gnss/heading_valid` in `sowbot_monitor.yaml`. Cached single-antenna headings report invalid even while `/gnss/heading` continues. Nothing consumes `/warning/heartbeat` yet, so the response to RTK float or single fix is undefined (O38) |
 
 Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory.
 They are not part of the rated safety function.
@@ -195,11 +195,12 @@ Both are supervisory per §0.
 | ESP32 + Lizard DSL | LEGACY. No new features | Hard real-time, ESP-IDF quality. The DroneCAN-on-ESP32 plan is dropped (O30) |
 | ArduPilot Rover (GUIDED mode) on LEVIA-H7 ([piecol/LEVIA-H7](https://github.com/piecol/LEVIA-H7), STM32H743) | CURRENT, bring-up. Board unvalidated | Replaces the RTU Master Controller as ArduPilot host; remaining RTU role to be confirmed (O31). Motion execution, geofence, failsafes (EKF variance, GCS/GPS loss). Board per its README: six-layer, 8 motor outputs, dual ICM-42688-P, DPS368, IST8310, one CAN interface (selectable 120 Ω termination), UART RC input, I²C and SPI expansion, USB-C, up to 6S input, CERN-OHL-S-2.0. README states the design is unvalidated, bring-up and flight testing pending. README names the MatekH743 ArduPilot hwdef as its reference; a LEVIA-specific hwdef is not confirmed (O31) |
 | ArduPilot-side open items carried over (from RTU) | OPEN | `GPS1_TYPE=14` not set; EKF-origin-on-boot behaviour with `GPS_INPUT` as sole GPS source not resolved; physical MAVLink port now to be identified on LEVIA-H7 (O22 d, O31). See `devkit_mavlink_bridge` ([Agroecology-Lab/Sowbot](https://github.com/Agroecology-Lab/Sowbot), `caatinga-dev` branch) and `research/ardurover.md` in `Sowbot_Data` for the full TODO list |
-| FusionCore (third-party, [manankharwar/fusioncore](https://github.com/manankharwar/fusioncore)), 23-state UKF fusing IMU, wheel encoders, GPS, visual SLAM | WIP, integration | Localisation/estimation layer. Not our code; Apache 2.0, published (arXiv 2605.25239). Feeds fused pose to ArduPilot as `GPS_INPUT` (GPS1_TYPE=14). Documented limits relevant to H5: yaw unobservable from IMU+encoder+GPS alone without magnetometer/dual-antenna heading; GPS blackout beyond ~5-7 min accumulates heading error. Antenna lever-arm offsets in `fusioncore.yaml` are zeroed: measure them before quoting any accuracy (O37) |
+| FusionCore (third-party, [manankharwar/fusioncore](https://github.com/manankharwar/fusioncore)), 23-state UKF fusing IMU, wheel encoders, GPS, visual SLAM | WIP, integration; `GPS_INPUT` feed PLANNED, blocked | Localisation/estimation layer. Not our code; Apache 2.0, published (arXiv 2605.25239). Planned fused-pose feed to ArduPilot as `GPS_INPUT`; blocked until `GPS1_TYPE=14` is configured and the inbound path is implemented after confirming the output topic/type/rate (O22 d, O39). Documented limits relevant to H5: yaw unobservable from IMU+encoder+GPS alone without magnetometer/dual-antenna heading; GPS blackout beyond ~5-7 min accumulates heading error. Antenna lever-arm offsets in `fusioncore.yaml` are zeroed: measure them before quoting any accuracy (O37) |
 | `devkit_mavlink_bridge` (ROS 2 to MAVLink) | WIP, outbound half only | `cmd_vel` (Twist) to `SET_POSITION_TARGET_LOCAL_NED`, sent every 0.1 s. Sends an explicit zero when `cmd_vel` is older than 0.5 s (`cmd_vel_timeout_s`) or absent; before this it re-sent the last command indefinitely and kept resetting ArduPilot's `GUID_TIMEOUT`. ArduPilot's own default `GUID_TIMEOUT` of 3.0 s is about 4.8 m of travel at 1.6 m/s: try ~1 s and measure the real stop (O33). Baud via `MAVLINK_BAUD`. Inbound half (FusionCore pose to `GPS_INPUT`) not implemented, blocked on confirming FusionCore's output topic/type/rate; accuracy-field rules recorded in `gps_input_handler.py` (O39) |
 | Cerebri on Zephyr & [FRDM-A-S32K358](https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-A-S32K358) (dual 32-bit Arm Cortex-M7 cores in lockstep, ASIL D) | NOT SELECTED. Not the controller-path target | [Agroecology-Lab/cerebri](https://github.com/Agroecology-Lab/cerebri). Its control-loop modules (`estimate.c`/EKF, `velocity.c`, `position.c`, `mixing.c`, `fsm.c`) are functionally superseded by FusionCore (estimation) and ArduPilot GUIDED mode (motion execution, mode/mission FSM). No identified remaining role pending a decision (O23). Not deleted or formally deprecated; do not resume `fsm.c`/`mixing.c`/`velocity.c`/`position.c` work before O23 is resolved. S32K358 is no longer the geofence target (see below, O32) |
 
-**Defence-in-depth geofencing:** FusionCore fused pose, then ArduPilot Rover's native GUIDED-mode fence logic (boundary definition, breach action, EKF/GPS failsafe handling), then bridged into `/safety/level` per §3.
+**Defence-in-depth geofencing (planned, blocked):** FusionCore fused pose to `GPS_INPUT`, then ArduPilot Rover's native GUIDED-mode fence logic (boundary definition, breach action, EKF/GPS failsafe handling), then fence/failsafe state to `/safety/level` per §3.
+The feed and state bridge remain planned until `GPS1_TYPE=14` and the inbound-path open items are complete (O19, O22, O39).
 This is **not** a certified or rated function: no MISRA, lockstep, or IEC 61508/ISO 26262 certification applies.
 ArduPilot's fence and failsafe logic is mature, widely deployed, open-source, but not independently certified to any standard in §6.
 Suitability rests on field verification (O22).
@@ -257,24 +258,35 @@ Reference standards only until formal assessment or audit is done.
 |---|---|---|---|---|
 | ISO 18497-1:2024 | Partially automated/semi-autonomous/autonomous ag machinery, design principles and vocabulary | Supersedes ISO 18497:2018. General design/verification/validation/information-for-use principles | Voluntary (harmonised standard route to EHSR conformity) | Primary standard for this product class. Required in substance before Phase 3 Declaration of Conformity; informal reference only at Phase 1 |
 | ISO 18497-2:2024 | Design principles for obstacle protection systems | Governs H4 (radar/bumper human detection) | Voluntary (harmonised standard route to EHSR conformity) | Same footing as Part 1. Design-principle reference now, substantive compliance expected before Phase 3 |
-| ISO 18497-3:2024 | Autonomous operating zones | Governs operating-area containment/geofencing design; tracked as H5 (§1), implemented via FusionCore + ArduPilot fence (§5); independent dual-channel geofence planned (§5) | Voluntary (harmonised standard route to EHSR conformity) | Design reference at Phase 1. Boundary excursion is a significant hazard under ISO 12100, designed per Part 3 §4.2 and verified per Part 4. Hazard treatment write-up, field verification (O22) and residual-risk disclosure in Annex VI documents (O16) required before Phase 3 |
+| ISO 18497-3:2024 | Autonomous operating zones | Governs operating-area containment/geofencing design; tracked as H5 (§1), planned via FusionCore + ArduPilot fence (§5); independent dual-channel geofence planned (§5) | Voluntary (harmonised standard route to EHSR conformity) | Design reference at Phase 1. Boundary excursion is a significant hazard under ISO 12100, designed per Part 3 §4.2 and verified per Part 4. Hazard treatment write-up, field verification (O22) and residual-risk disclosure in Annex VI documents (O16) required before Phase 3 |
 | ISO 18497-4:2024 | Verification methods and validation principles | Phase 3 conformity assessment evidence; also the verification method Part 3 §4.2 calls for | Voluntary (harmonised standard route to EHSR conformity) | Not actioned. Becomes relevant when Phase 3 must demonstrate compliance to an assessor, and for geofence verification under O22 |
 | ISO 25119 / AgPL | Tractor and ag electronics functional safety | AgPL target for motor-stop interlocks | Voluntary, written for tractors/conventional ag electronics, not robots | Design reference only. Not a certification target |
 | ISO 13849-1 / PL | Machinery safety, control systems | PLd target for the E-stop, radar, bumper and contactor circuit | Voluntary (harmonised standard route to EHSR conformity) | Load-bearing for the §6 calculation regardless of phase. Full SISTEMA run (CCF ≥65, DCavg, PFHd) required before any Declaration of Conformity; not required for Declaration of Incorporation. Planned geofence is a separate safety function with its own PLr and SISTEMA run (O25) |
 | ISO 3691-4 | AGV obstacle detection | Clearance rules, braking distance, detection envelope sizing | Voluntary, written for AGVs/industrial trucks, not field robots | Methodology reference only (e.g. S = KT+C sizing). Not the governing standard for this product class |
 | IEC 61508 | Functional safety, E/E/PE systems | Reference for safety-controller integration (C203A, SIL 2), the STEVAL-SILPLC01 assessment basis (ST states IEC 61508, EN 62061, EN ISO 13849-1/-2) and any controller-path role decided under O23 | Voluntary | Design reference. Not independently audited at Phase 1 |
 | ISO 21448 (SOTIF) | Safety of the intended functionality | Vision/radar degradation: mud, dust, glare, crop clutter (see H4) | Voluntary | Design reference only. No formal SOTIF process required at Phase 1 |
-| UK SMSR 2008 / EU Machinery Directive 2006/42/EC | Machinery placing-on-market | Product classification, partly completed machinery status | Statutory | Mandatory now. Requires Annex VI assembly instructions + Declaration of Incorporation before any unit ships (O16). No CE/UKCA marking or third-party certification required at this classification |
+| UK SMSR 2008 / EU Machinery Directive 2006/42/EC | Machinery placing-on-market | Classification of the actual shipped configuration (O16) | Statutory | Mandatory now, including Phase 1. Partly completed machinery requires Annex VI assembly instructions + Declaration of Incorporation; complete machinery requires conformity assessment, Declaration of Conformity, instructions and applicable marking before shipment (see below) |
 | EU Machinery Regulation (EU) 2023/1230 | Machinery placing-on-market | Successor to 2006/42/EC; software as safety component, source code/control logic in technical documentation | Statutory, applies from 20 Jan 2027 | Mandatory for EU sales from 20 Jan 2027 (Northern Ireland: confirm applicable date). GB continues CE recognition and is aligning SMSR 2008 technically |
 
 ### Product classification
 
-The devkit as shipped is **"partly completed machinery"** under both regimes tracked:
+Phase 1 shipment configuration and intended incorporation boundary are **not yet defined** (O16).
+Before shipment, record the supplied chassis/traction, controllers, sensors, safety hardware and enabled software, the intended rover application, and exactly what machinery the recipient must incorporate it into and complete.
+Development status, missing safety measures or an absent implement do not by themselves establish partly completed machinery status.
+
+Classify that recorded configuration under both regimes tracked:
 - **UK**: Supply of Machinery (Safety) Regulations 2008 (SI 2008/1597)
 - **EU**: Machinery Directive 2006/42/EC (until 20 January 2027), then Machinery Regulation (EU) 2023/1230
 
-This classification does not require a CE/UKCA mark or third-party certification at Phase 1, consistent with §9.
-It does require, before any unit ships: assembly instructions (Annex VI) and a Declaration of Incorporation (not a Declaration of Conformity) stating which essential health and safety requirements are met by the shipped components and that the unit must not be put into service until fully assembled (O16).
+If it cannot itself perform the intended rover application and is intended only for incorporation into other machinery, document the basis for **partly completed machinery** status.
+That classification requires relevant technical documentation, assembly instructions (Annex VI) and a Declaration of Incorporation before shipment, identifying the essential health and safety requirements applied and fulfilled.
+The declaration must state that the unit must not be put into service until the final machinery into which it is incorporated has been declared in conformity with the applicable machinery legislation (O16).
+This classification does not require CE/UKCA marking under machinery legislation or third-party certification; assess any other applicable legislation separately.
+
+If the supplied configuration can itself perform the intended rover application, treat it as **complete machinery**, including at Phase 1.
+Before placing it on the market or putting it into service, complete the applicable conformity assessment, technical file, Declaration of Conformity, instructions and marking: CE for the EU; CE or UKCA under the applicable GB route.
+Determine whether that assessment route requires a third party; the Phase 1 label does not waive these obligations.
+Shipment remains blocked until O16 records the configuration, classification and required documentation.
 
 The EU Machinery Regulation 2023/1230 replaces the Directive from 20 January 2027.
 For EU sales after that date, documentation must be built against the Regulation (allows digital assembly instructions/Declaration of Incorporation, adds cybersecurity requirements, and requires tracing logs for intervention data and safety-software versions where applicable).
@@ -311,7 +323,8 @@ FusionCore, ArduPilot, LEVIA-H7, ESP32/Lizard, the MAVLink bridge, any cerebri r
   Score not computed (O4).
   Scoring must account for radar and bumper sharing the C203A logic unit.
 
-**Combination rule:** total PFHd and PL ceiling are set by the worst-performing element in the series chain (E-stops, C203A [bumper + radar inputs], dual SW180s).
+**Combination rule:** total PFHd is the sum of the PFHd contributions of all series elements in the safety function (E-stops, C203A [bumper + radar inputs], dual SW180s), counting each contribution once.
+The overall PL is limited by both the lowest subsystem PL and the PL corresponding to the combined PFHd, together with the applicable architectural and systematic requirements.
 No element may rate below the overall target.
 The combined system PLd is not confirmed until the SISTEMA run (O5).
 
@@ -350,7 +363,7 @@ Ordered roughly by build sequence.
 | O13 | Rollaway on slope (H2): confirm the gear ratio against the gearbox datasheet and the operating slope range, then decide between a positive parking brake and a stated slope limit. Do not rely on worm-gear self-locking, it is unreliable under vibration | §1 H2 | OPEN |
 | O14 | Install and validate Inxpect S101A ×3 + C203A on-vehicle using the manufacturer's mobile-application procedure (manual §8.4.2); confirm S101A detection response time for H1 | §4, §1 H1, H4 | TO DO |
 | O15 | IDEM GLM tether: confirm rope length needed; obtain B10d/MTTFd/PFHd | Demo-mode operation only | TO DO, low priority |
-| O16 | Prepare Declaration of Incorporation and assembly instructions (Annex VI) for partly-completed-machinery shipment, per §6 Product classification. Includes H5 boundary-excursion residual-risk disclosure (O22) | Any unit shipment | TO DO |
+| O16 | Record the Phase 1 shipped hardware/software configuration, intended rover application and incorporation boundary; establish classification per §6. For partly completed machinery, prepare relevant technical documentation, Annex VI assembly instructions and a Declaration of Incorporation prohibiting putting the unit into service until the final machinery containing it has been declared in conformity with applicable machinery legislation. For complete machinery, complete conformity assessment, technical file, Declaration of Conformity, instructions and applicable marking before shipment or putting into service. Include H5 boundary-excursion residual-risk disclosure (O22) | Any unit shipment | OPEN, shipment blocked pending configuration and classification |
 | O17 | Adopt `diagnostic_aggregator` between `sentor`'s per-topic output and a single ordered `/safety/level`, replacing the flat `/safety/heartbeat` + `/warning/heartbeat` pair | §3 | TO DO |
 | O18 | Define per-monitor de-escalation policy (auto-clear vs. manual re-arm), extending O11 to every monitor feeding `/safety/level` | §3, O11 | TO DO |
 | O19 | Wire mission executor and Nav2 lifecycle to threshold on `/safety/level` rather than each subscribing to raw E-stop/bumper/node-liveliness topics. Integration point for ArduPilot fence/failsafe state (O22) | §3 | TO DO |
@@ -385,6 +398,9 @@ Ordered roughly by build sequence.
 ### Phase 1: dev platform (current focus, in progress, not complete)
 Audience: university labs, ag-tech researchers, software startups.
 
+The shipped configuration and intended incorporation boundary must be recorded under O16 before classifying a Phase 1 unit (§6).
+A configuration that can itself perform the intended rover application follows the complete-machinery conformity, documentation and marking route before shipment or putting into service.
+
 | Item | Status |
 |---|---|
 | PLd calculation | Draft in progress, §6 |
@@ -395,9 +411,10 @@ Audience: university labs, ag-tech researchers, software startups.
 | Rated stop function | NOT COMPLETE: O7, O8, O14 open. Operation requires the built and tested 24V loop, including the physical E-stop path, or a separately validated independent stop method; otherwise prohibited. While any of O7, O8 or O14 remains open, any permitted operation is supervised-only: the competent operator must remain within reach of the validated stop control, only that operator may be in the hazard area, and no safety claim may be made (§0) |
 | Controller path | ArduPilot on LEVIA-H7, in bring-up (O31). ESP32/Lizard legacy |
 | Field validation | Progression and metrics in `docs/field-validation.md` (O42) |
+| Shipment configuration and classification | OPEN, blocks shipment: define supplied hardware/software and incorporation boundary, then complete the applicable machinery documentation and marking (O16, §6) |
 | Independent geofence (2× STEVAL-SILPLC01) | PLANNED, later. Not started (O24 to O29, O32). Until then, physical boundaries or direct supervision |
 
-No certification work needed at this phase.
+Conformity obligations depend on the shipped configuration and applicable assessment route (§6, O16).
 Reference the standards, do not claim them.
 
 ### Phase 2: OEM modular subsystems

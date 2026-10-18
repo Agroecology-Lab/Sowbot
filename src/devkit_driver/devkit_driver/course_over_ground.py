@@ -6,6 +6,7 @@ Converts ublox_dgnss NAV-PVT → sensor_msgs/Imu for FusionCore.
 
 Subscribes : /rover/ubx_nav_pvt   (ublox_ubx_msgs/UBXNavPVT)
 Publishes  : /gnss/heading        (sensor_msgs/Imu)
+             /gnss/heading_valid  (std_msgs/Bool, false for cached/rejected headings)
 
 Single-receiver fallback for relposned_heading_shim: when there is no second
 F9P and no dual-antenna baseline, this shim derives heading from the receiver's
@@ -30,6 +31,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
+from std_msgs.msg import Bool
 from ublox_ubx_msgs.msg import UBXNavPVT  # pylint: disable=import-error
 
 # Below this ground speed (mm/s), CoG heading is too noisy to trust as fresh.
@@ -65,6 +67,7 @@ class CourseOverGround(Node):
         self._dual_antenna = self.get_parameter('dual_antenna').value
 
         self._pub = self.create_publisher(Imu, '/gnss/heading', 10)
+        self._valid_pub = self.create_publisher(Bool, '/gnss/heading_valid', 10)
         self._sub = self.create_subscription(
             UBXNavPVT, '/rover/ubx_nav_pvt',
             self._cb, 10)
@@ -86,17 +89,20 @@ class CourseOverGround(Node):
         # GNSS solution must be valid before we trust any of its fields
         if not msg.gnss_fix_ok or msg.invalid_llh:
             self._reject_count += 1
+            self._valid_pub.publish(Bool(data=False))
             return
 
         # Speed gate — below this CoG noise dominates the signal
         if msg.g_speed < _MIN_SPEED_MMPS:
             self._reject_count += 1
+            self._valid_pub.publish(Bool(data=False))
             return
 
         # Accuracy gate — receiver's own σ on heading
         head_acc_deg = msg.head_acc * 1e-5
         if head_acc_deg > _MAX_HEAD_ACC_DEG:
             self._reject_count += 1
+            self._valid_pub.publish(Bool(data=False))
             return
 
         # head_mot: deg × 1e-5, True North, NED
@@ -135,6 +141,7 @@ class CourseOverGround(Node):
         out.linear_acceleration_covariance[0] = -1.0
 
         self._pub.publish(out)
+        self._valid_pub.publish(Bool(data=True))
         self._pub_count += 1
         self._last_good   = out
         self._last_good_t = self.get_clock().now().nanoseconds * 1e-9
@@ -152,12 +159,14 @@ class CourseOverGround(Node):
         if self._dual_antenna:
             return
         if self._last_good is None:
+            self._valid_pub.publish(Bool(data=False))
             return
 
         now_s = self.get_clock().now().nanoseconds * 1e-9
         # Don't double-publish if a fresh message just went out
         if now_s - self._last_good_t < (1.0 / _STALE_REPUB_HZ):
             return
+        self._valid_pub.publish(Bool(data=False))
         if now_s - self._last_good_t > _STALE_TIMEOUT_S:
             return
 

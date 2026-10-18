@@ -218,8 +218,12 @@ monitors:
   #
   # NavSatFix.status is set by rtk_navsatfix_shim:
   #   -1 no fix / PVT missing, 0 GPS, 1 SBAS = RTK FLOAT, 2 GBAS = RTK FIXED.
-  # The heading shim only publishes while both F9P validity flags are set, so a
-  # silent /gnss/heading is itself the "heading invalid" signal.
+  # Dual-antenna relposned_heading_shim gates heading on both F9P validity flags
+  # and baseline length. Single-antenna course_over_ground can republish cached
+  # headings for up to 10 seconds, so publication alone does not prove validity.
+  # The active source publishes /gnss/heading_valid: false on rejected inputs
+  # and cached headings, true on accepted fresh inputs. Monitor that marker as
+  # well as heading silence and variance; marker silence is also a fault.
 
   - name: "/gnss/fix"
     message_type: "sensor_msgs/msg/NavSatFix"
@@ -243,6 +247,25 @@ monitors:
         tags: ["gnss_rtk_float"]
     execute: []
     timeout: 5.0
+    default_notifications: false
+
+  - name: "/gnss/heading_valid"
+    message_type: "std_msgs/msg/Bool"
+    rate: 1
+    N: 5
+    signal_when:
+      condition: "published"
+      timeout: 2.0
+      safety_critical: false
+      autonomy_critical: true
+    signal_lambdas:
+      - expression: "lambda x: not x.data"
+        timeout: 2.0
+        safety_critical: false
+        autonomy_critical: true
+        tags: ["heading_invalid"]
+    execute: []
+    timeout: 2.0
     default_notifications: false
 
   - name: "/gnss/heading"
