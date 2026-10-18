@@ -156,6 +156,43 @@ class TelemetryDomainTestCase(unittest.TestCase):
 
 
 class TestWiring(unittest.TestCase):
+    def test_hardware_and_sim_subscriptions_receive_the_correct_shared_specs(self):
+        """Keep sensor, safety and odometry QoS distinct on every telemetry input."""
+        for is_sim in (False, True):
+            with self.subTest(is_sim=is_sim):
+                ros = Mock()
+                TelemetryDomainService(ros, is_sim=is_sim, fake_gps_datum=DATUM)
+                expected = {
+                    '/gnss/fix': telemetry_module.SENSOR_QOS,
+                    'battery_state': 1,
+                    'bumper/front_top': telemetry_module.SAFETY_QOS,
+                    'bumper/front_bottom': telemetry_module.SAFETY_QOS,
+                    'bumper/back': telemetry_module.SAFETY_QOS,
+                    'estop/front': telemetry_module.SAFETY_QOS,
+                    'estop/back': telemetry_module.SAFETY_QOS,
+                    '/fusion/odom': telemetry_module.ODOM_QOS,
+                    '/odom': telemetry_module.ODOM_QOS,
+                    '/odometry/global': telemetry_module.ODOM_QOS,
+                }
+                if is_sim:
+                    expected[TelemetryDomainService.FAKE_GPS_TOPIC] = telemetry_module.SENSOR_QOS
+                calls = ros.create_subscription.call_args_list
+                self.assertEqual(len(calls), len(expected))
+                self.assertEqual({entry.args[1] for entry in calls}, set(expected))
+                for entry in calls:
+                    topic, spec = entry.args[1], entry.args[-1]
+                    with self.subTest(topic=topic):
+                        self.assertIs(spec, expected[topic])
+
+    def test_sim_publisher_uses_the_same_sensor_spec_as_its_subscription(self):
+        """Both ends of the fallback GPS topic must preserve best-effort delivery."""
+        ros = Mock()
+        TelemetryDomainService(ros, is_sim=True, fake_gps_datum=DATUM)
+        ros.create_publisher.assert_called_once_with(
+            telemetry_module.NavSatFix, TelemetryDomainService.FAKE_GPS_TOPIC,
+            telemetry_module.SENSOR_QOS)
+        self.assertIs(ros.create_publisher.call_args.args[-1], telemetry_module.SENSOR_QOS)
+
     def test_hardware_subscribes_without_sim_shim(self):
         """Verify hardware mode has no fake-GPS topic, publisher or timer."""
         ros = FakeRos()
