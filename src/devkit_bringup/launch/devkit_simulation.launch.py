@@ -6,7 +6,6 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -25,18 +24,11 @@ def generate_launch_description():
         )
     )
 
-    foxglove_bridge = Node(
-        package='foxglove_bridge',
-        executable='foxglove_bridge',
-        name='foxglove_bridge',
-        parameters=[{
-            'port': 8765,
-            'address': '0.0.0.0',
-            'tls': False,
-            'compression': 'jpeg',
-            'jpeg_quality': 75,
-            'max_qos_depth': 10,
-        }],
+    # Loopback and view-only unless foxglove_address / foxglove_allow_control say otherwise
+    foxglove_bridge = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_dir, 'launch', 'foxglove_bridge.launch.py')
+        )
     )
 
     return LaunchDescription([

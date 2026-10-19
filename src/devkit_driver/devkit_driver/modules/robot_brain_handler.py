@@ -1,7 +1,8 @@
 from rclpy.node import Node
-from rosys import background_tasks
 from rosys.hardware import RobotBrain
 from std_msgs.msg import Empty
+
+from ..loop import run_on_rosys_loop
 
 
 class RobotBrainHandler:
@@ -19,16 +20,21 @@ class RobotBrainHandler:
             Empty, 'esp/configure', self._handle_configure, 10)
 
     def _handle_enable(self, _: Empty) -> None:
-        background_tasks.create(self._robot_brain.enable_esp())
+        """Schedule ESP enablement on the RoSys event loop."""
+        run_on_rosys_loop(self._robot_brain.enable_esp())
 
     def _handle_disable(self, _: Empty) -> None:
-        background_tasks.create(self._robot_brain.disable_esp())
+        """Schedule ESP disablement on the RoSys event loop."""
+        run_on_rosys_loop(self._robot_brain.disable_esp())
 
     def _handle_reset(self, _: Empty) -> None:
-        background_tasks.create(self._robot_brain.reset_esp())
+        """Schedule an ESP reset on the RoSys event loop."""
+        run_on_rosys_loop(self._robot_brain.reset_esp())
 
     def _handle_restart(self, _: Empty) -> None:
-        background_tasks.create(self._robot_brain.restart())
+        """Schedule a Robot Brain restart on the RoSys event loop."""
+        run_on_rosys_loop(self._robot_brain.restart())
 
     def _handle_configure(self, _: Empty) -> None:
-        background_tasks.create(self._robot_brain.configure())
+        """Schedule Robot Brain configuration on the RoSys event loop."""
+        run_on_rosys_loop(self._robot_brain.configure())

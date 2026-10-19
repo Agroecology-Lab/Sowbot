@@ -52,9 +52,38 @@ class TestForceSimWarning(unittest.TestCase):
         self.assertNotIn('IGNORED', out)
 
     def test_no_warning_when_hardware_runs_for_real(self):
-        out = _run_output('GPS_PORT_ROVER=/dev/ttyACM0\nMCU_PORT=/dev/ttyACM1\n')
+        out = _run_output('GPS_PORT_ROVER=/dev/ttyACM0\nMCU_PORT=/dev/ttyACM1\nSOWBOT_UI_PASSWORD=secret\n')
         self.assertNotIn('IGNORED', out)
         self.assertIn('Sim: FALSE', out)
+
+
+class TestOpenDashboardGuard(unittest.TestCase):
+    """Hardware mode must not start an unauthenticated dashboard unless that is chosen explicitly."""
+
+    HARDWARE = 'GPS_PORT_ROVER=/dev/ttyACM0\nMCU_PORT=/dev/ttyACM1\n'
+
+    def setUp(self):
+        """Keep a caller's FORCE_SIM setting from altering the test scenarios."""
+        environment = patch.dict(os.environ, {'FORCE_SIM': ''})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def test_hardware_without_a_password_is_refused(self):
+        with self.assertRaises(SystemExit) as raised:
+            _run_output(self.HARDWARE)
+        self.assertEqual(raised.exception.code, 1)
+
+    def test_hardware_with_a_password_starts(self):
+        self.assertIn('Sim: FALSE', _run_output(self.HARDWARE + 'SOWBOT_UI_PASSWORD=secret\n'))
+
+    def test_open_dashboard_must_be_chosen_explicitly(self):
+        self.assertIn('Sim: FALSE', _run_output(self.HARDWARE + 'SOWBOT_UI_ALLOW_OPEN=1\n'))
+        with self.assertRaises(SystemExit):
+            _run_output(self.HARDWARE + 'SOWBOT_UI_ALLOW_OPEN=0\n')
+
+    def test_simulation_needs_no_password(self):
+        self.assertIn('Sim: TRUE', _run_output('GPS_PORT_ROVER=virtual\nMCU_PORT=virtual\n'))
+        self.assertIn('Sim: TRUE', _run_output(self.HARDWARE + 'FORCE_SIM=1\n'))
 
 
 @pytest.mark.parametrize('source', ['file', 'environment', 'cli'])

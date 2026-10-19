@@ -22,12 +22,28 @@ class JoystickControlCard(ui.card):
             ui.label('Joystick').classes('sec-label')
 
             with ui.row().classes('items-center gap-6'):
-                ui.joystick(
+                joystick = ui.joystick(
                     color='#1a7f37',
                     size=130,
                     on_move=lambda e: run_vm.move_joystick(float(e.y), float(e.x)),
                     on_end=lambda _: run_vm.stop_joystick()
                 )
+                joystick.on('start', run_vm.heartbeat_joystick, js_handler=f'''() => {{
+                    const stick = getElement({joystick.id});
+                    clearInterval(stick.inputHeartbeat);
+                    stick.inputHeartbeat = setInterval(() => {{
+                        if (!stick.$el.isConnected || document.hidden || !window.socket?.connected) {{
+                            clearInterval(stick.inputHeartbeat);
+                            return;
+                        }}
+                        emit();
+                    }}, 100);
+                }}''')
+                joystick.on('end', js_handler=f'''() => {{
+                    clearInterval(getElement({joystick.id}).inputHeartbeat);
+                }}''')
+                # NOTE: the bridge zeroes any cmd_vel older than ~0.5 s, so keep a held stick alive.
+                ui.timer(0.1, run_vm.repeat_joystick)
 
                 with ui.column().classes('gap-3 items-center'):
                     # Emergency stop

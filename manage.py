@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import ipaddress
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -151,6 +153,47 @@ class DevkitManager:
         else:
             self._log(f"USB reset failed: {result.stderr.strip()}", "WARN")
 
+    def _wake_mcu(self, port: str) -> None:
+        """Set the MCU serial port to 115200 baud, then send it one byte without blocking.
+
+        The port is passed as an argument, never interpolated into a shell command.
+        """
+        if subprocess.run(['stty', '-F', port, '115200'], check=False).returncode != 0:
+            self._log(f"stty failed on {port}; MCU not woken.", "WARN")
+            return
+        subprocess.Popen(['sh', '-c', 'echo s > "$1"', 'sh', port], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _unmeasured_lever_arm(self) -> bool | None:
+        """Return True if gnss.lever_arm_x/y/z in fusioncore.yaml are all zero, None if unreadable.
+
+        Zero is the shipped placeholder: positions would be reported for the antenna, not base_link.
+        Commented-out lines are ignored.
+        """
+        config = self.root_dir / 'src' / 'devkit_bringup' / 'config' / 'fusioncore.yaml'
+        try:
+            text = config.read_text()
+        except OSError:
+            return None
+        values = {}
+        for axis, raw in re.findall(r'^\s*gnss\.lever_arm_([xyz]):\s*(\S+)', text, flags=re.MULTILINE):
+            try:
+                values[axis] = float(raw)
+            except ValueError:
+                return None
+        if set(values) != {'x', 'y', 'z'}:
+            return None
+        return all(value == 0.0 for value in values.values())
+
+    def _unconfirmed_settings(self) -> list[str]:
+        """Return config lines in sowbot_monitor.yaml still marked `TODO: CONFIRM`."""
+        config = self.root_dir / 'src' / 'devkit_bringup' / 'config' / 'sowbot_monitor.yaml'
+        try:
+            lines = config.read_text().splitlines()
+        except OSError:
+            return []
+        return [line.strip() for line in lines if 'TODO: CONFIRM' in line]
+
     def _find_crossover_interface(self) -> str:
         """Returns the interface that owns a CROSSOVER_PEERS address, else None.
 
@@ -250,19 +293,25 @@ class DevkitManager:
         # -it requires both stdin and stdout to be a real TTY; fall back to -i
         # so non-interactive invocations (cron, CI, piped) don't hard-fail.
         interactive_flags = ['-it'] if sys.stdin.isatty() and sys.stdout.isatty() else ['-i']
-        driver_ui_port = self._get_env_config().get('DEVKIT_DRIVER_UI_PORT', '8090')
+        env_cfg = self._get_env_config()
+        driver_ui_port = env_cfg.get('DEVKIT_DRIVER_UI_PORT', '8090')
+        tools_host = self._tools_bind_host(env_cfg)
 
         cmd = [
             'docker', 'run', *interactive_flags, '--rm', '--name', self.container_name,
+            # Dashboard and camera stream: reachable from the network. The dashboard
+            # needs SOWBOT_UI_PASSWORD on hardware (see run()).
             '-p', '80:80',
-            '-p', '8080:8080',
             '-p', '8081:8081',
-            '-p', '127.0.0.1:6081:6081',
             '-p', f'{driver_ui_port}:{driver_ui_port}',
-            '-p', '8765:8765',
-            '-p', '6080:6080',
-            '-p', '8734:8734',
-            '-p', '8888:8888',
+            # Diagnostic and remote-desktop tools have no authentication: loopback unless
+            # TOOLS_BIND in .env names another address.
+            '-p', f'{tools_host}:8080:8080',
+            '-p', '127.0.0.1:6081:6081',
+            '-p', f'{tools_host}:8765:8765',
+            '-p', f'{tools_host}:6080:6080',
+            '-p', f'{tools_host}:8734:8734',
+            '-p', f'{tools_host}:8888:8888',
             '--privileged',
             '--env', 'RMW_IMPLEMENTATION=rmw_cyclonedds_cpp',
             '--env', 'PYTHONPATH=/root/.lizard:/workspace/install/lib/python3.12/site-packages',
@@ -289,7 +338,7 @@ class DevkitManager:
         # ros2graph_explorer, F2C) are git-cloned at build time and would be
         # shadowed by empty/host dirs.
         for pkg in ('devkit_driver', 'devkit_bringup',
-                    'devkit_ui', 'devkit_simulation'):
+                    'devkit_ui', 'devkit_simulation', 'devkit_mavlink_bridge'):
             src = self.root_dir / 'src' / pkg
             if src.is_dir():
                 cmd += ['-v', f'{src}:/workspace/src/{pkg}']
@@ -306,6 +355,17 @@ class DevkitManager:
             cmd += extra_flags
         cmd += [self.image_name, 'bash', '-c']
         return cmd
+
+    def _tools_bind_host(self, cfg: dict[str, str]) -> str:
+        """Address the unauthenticated tool ports bind to: TOOLS_BIND from .env, else loopback."""
+        value = (cfg.get('TOOLS_BIND') or '').strip()
+        if not value:
+            return '127.0.0.1'
+        try:
+            return str(ipaddress.ip_address(value))
+        except ValueError:
+            self._log(f"TOOLS_BIND={value!r} is not an IP address; binding tool ports to 127.0.0.1.", "WARN")
+            return '127.0.0.1'
 
     def _ros_source(self) -> str:
         """ROS sourcing preamble — used by all modes."""
@@ -403,6 +463,26 @@ class DevkitManager:
         # (lat/lon) offset, so this mismatch is intentional, not drift.
         datum_alt = cfg.get('FIELD_DATUM_ALT', '2.318')
 
+        if is_sim == 'false' and not cfg.get('SOWBOT_UI_PASSWORD') and cfg.get('SOWBOT_UI_ALLOW_OPEN') != '1':
+            self._log("Hardware mode, but SOWBOT_UI_PASSWORD is not set in .env: the dashboard joystick "
+                      "and soft e-stop would accept any client on the network. Set a password, or set "
+                      "SOWBOT_UI_ALLOW_OPEN=1 to accept that on a private network.", "ERROR")
+            sys.exit(1)
+
+        if is_sim == 'false':
+            unmeasured = self._unmeasured_lever_arm()
+            if unmeasured is None:
+                self._log("Could not read gnss.lever_arm_x/y/z from fusioncore.yaml: lever arms not checked.", "WARN")
+            elif unmeasured and cfg.get('ALLOW_UNMEASURED_LEVER_ARM') != '1':
+                self._log("Hardware mode, but gnss.lever_arm_x/y/z in fusioncore.yaml are still zero. Measure the "
+                          "antenna offset from base_link and set them, or set ALLOW_UNMEASURED_LEVER_ARM=1 in .env "
+                          "for bench work. Do not quote positioning accuracy until they are measured.", "ERROR")
+                sys.exit(1)
+            elif unmeasured:
+                self._log("ALLOW_UNMEASURED_LEVER_ARM=1: running with zero antenna lever arms.", "WARN")
+            for line in self._unconfirmed_settings():
+                self._log(f"Unconfirmed setting in sowbot_monitor.yaml: {line}", "WARN")
+
         # --sim is our own flag; don't forward it to ros2 launch.
         # Use startswith so variants like --sim, --sim., --sim=true all match.
         extra_args = [a for a in extra_args if not a.startswith('--sim')]
@@ -411,7 +491,7 @@ class DevkitManager:
             self._usb_reset_f9p(cfg.get('GPS_USB_PATH_ROVER', 'virtual'))
             if Path(mcu_port).exists():
                 self._log(f"Waking MCU on {mcu_port}")
-                os.system(f"stty -F {mcu_port} 115200 && (echo 's' > {mcu_port} &)")
+                self._wake_mcu(mcu_port)
 
         # World + topo generation is sim-only. On real hardware you want your
         # surveyed field map, not a freshly generated maize sim that would
@@ -423,8 +503,6 @@ class DevkitManager:
         # a vmf gt_map.csv via get_maize_topo.py, then build maize.world FROM
         # that map with the forest3d pipeline (topo_to_forest3d.py). The vmf
         # generated.world is no longer launched, so we no longer symlink it.
-        topo_world = ("/workspace/install/devkit_simulation/share/"
-                      "devkit_simulation/worlds/maize.world")
         world_gen = (
             # Map bootstrap: ensure a topo map exists (unchanged — still only
             # runs once, on first-ever boot).

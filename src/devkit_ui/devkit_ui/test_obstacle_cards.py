@@ -1,4 +1,5 @@
 """Exercise obstacle card callbacks without a browser or ROS runtime."""
+# pylint: disable=protected-access
 
 import sys
 import unittest
@@ -286,6 +287,22 @@ class TestObstacleCards(unittest.TestCase):
         self.mission_map.on.call_args.args[1](
             SimpleNamespace(args={'latlng': {'lat': lat, 'lng': lon}})
         )
+
+
+class TestRemoveLayer(unittest.TestCase):
+    def test_removes_the_layer_through_leaflet(self) -> None:
+        """Verify a healthy layer receives the remove call."""
+        layer = Mock()
+        obstacle_cards._remove_layer(layer)
+        layer.run_method.assert_called_once_with('remove')
+
+    def test_a_failing_remove_is_logged_not_raised(self) -> None:
+        """Verify a layer whose client is gone does not break the caller, and the failure is logged."""
+        layer = Mock()
+        layer.run_method.side_effect = RuntimeError('client gone')
+        with self.assertLogs(obstacle_cards.__name__, level='DEBUG') as logs:
+            obstacle_cards._remove_layer(layer)
+        self.assertIn('could not remove map layer', logs.output[0])
 
 
 if __name__ == '__main__':

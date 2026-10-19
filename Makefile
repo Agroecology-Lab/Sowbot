@@ -21,7 +21,7 @@ install-ci:
 
 ## mypy		Run mypy type checks.
 mypy:
-	mypy ./src/devkit_driver ./src/devkit_bringup ./src/devkit_ui --exclude 'setup\.py$$' --non-interactive --install-types
+	mypy ./src/devkit_driver ./src/devkit_bringup ./src/devkit_ui ./src/devkit_mavlink_bridge ./src/devkit_f2c_planner --exclude 'setup\.py$$' --non-interactive --install-types
 
 ## lint-imports	Check UI layer dependency rules.
 lint-imports:
@@ -33,18 +33,22 @@ pylint:
 		--disable=duplicate-code \
 		--disable=import-error \
 		./src/devkit_driver/devkit_driver \
-		./src/devkit_ui/devkit_ui
+		./src/devkit_ui/devkit_ui \
+		./src/devkit_mavlink_bridge/devkit_mavlink_bridge \
+		./src/devkit_f2c_planner/devkit_f2c_planner
 
 ## ruff		Run ruff code analysis.
 ruff:
 	find ./src/devkit_driver/devkit_driver -name '*.py' | xargs ruff check
 	find ./src/devkit_bringup/launch -name '*.py' | xargs ruff check
 	find ./src/devkit_ui/devkit_ui -name '*.py' | xargs ruff check
+	ruff check ./src/devkit_mavlink_bridge ./src/devkit_f2c_planner ./src/devkit_simulation ./src/devkit_driver/test manage.py tests
 
 ruff-fix:
 	find ./src/devkit_driver/devkit_driver -name '*.py' | xargs ruff check --fix
 	find ./src/devkit_bringup/launch -name '*.py' | xargs ruff check --fix
 	find ./src/devkit_ui/devkit_ui -name '*.py' | xargs ruff check --fix
+	ruff check --fix ./src/devkit_mavlink_bridge ./src/devkit_f2c_planner ./src/devkit_simulation ./src/devkit_driver/test manage.py tests
 
 ## pre-commit	Run pre-commit hooks on all files.
 pre-commit:
@@ -54,6 +58,9 @@ pre-commit:
 test:
 	cd src/devkit_ui && python -m unittest discover
 	cd src/devkit_f2c_planner && python -m unittest discover
+	cd src/devkit_mavlink_bridge && python -m unittest discover -s test
+	cd src/devkit_driver && python -m unittest discover -s test
+	python -m pytest -q tests
 
 ## check		Run all code checks (mypy, pre-commit, pylint).
 check: mypy pre-commit pylint test

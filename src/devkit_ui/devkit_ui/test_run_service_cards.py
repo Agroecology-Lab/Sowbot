@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.test_run_ui import fake_ui, nicegui
+from devkit_ui.view_models import run_view_model
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
@@ -39,18 +40,43 @@ class TestJoystickControlCard(unittest.TestCase):
 
         self.app.move_joystick.assert_called_once_with(0.0, 0.0)
 
-    def test_estop_click_updates_service_state_label_and_color(self):
-        """Verify estop clicks synchronize service state, button text, and button color."""
+    def test_client_heartbeat_keeps_a_fixed_gesture_active_until_release(self):
+        """Verify client heartbeat callbacks keep a held command alive through the page timer."""
+        joystick = fake_ui.find('joystick')
+        with patch.object(run_view_model.time, 'monotonic', return_value=1000.0) as clock:
+            joystick.kwargs['on_move'](SimpleNamespace(x='-0.25', y='0.75'))
+            for _ in range(6):
+                clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S / 2
+                joystick.handlers['start']()
+                fake_ui.timers[0].callback()
+
+            self.assertEqual(self.app.move_joystick.call_count, 7)
+            for command in self.app.move_joystick.call_args_list:
+                self.assertEqual(command.args, (0.75, -0.25))
+
+            joystick.kwargs['on_end'](None)
+            joystick.handlers['start']()
+            fake_ui.timers[0].callback()
+
+        self.assertEqual(self.app.move_joystick.call_count, 8)
+        self.app.move_joystick.assert_called_with(0.0, 0.0)
+
+    def test_estop_button_follows_the_drivers_confirmation_not_the_click(self):
+        """Verify a click only requests a stop; text and color change when the driver confirms."""
         self.assertEqual(self.card.estop_btn.text, 'E-Stop')
         self.assertEqual(self.card.estop_btn.properties, 'color=primary')
-        self.app.toggle_estop.side_effect = [True, False]
+        confirm = self.app.register_soft_estop_state_callback.call_args.args[0]
 
-        for expected, label, color in [(True, 'STOPPED', 'negative'), (False, 'E-Stop', 'primary')]:
-            with self.subTest(expected=expected):
-                current = self.global_vm.soft_estop_active
+        for confirmed, label, color in [(True, 'STOPPED', 'negative'), (False, 'E-Stop', 'primary')]:
+            with self.subTest(confirmed=confirmed):
+                before = self.global_vm.soft_estop_active
                 self.card.estop_btn.on_click(None)
-                self.app.toggle_estop.assert_called_with(current)
-                self.assertIs(self.global_vm.soft_estop_active, expected)
+                self.app.toggle_estop.assert_called_with(before)
+                self.assertEqual(self.card.estop_btn.refresh_binding(), 'STOPPED' if before else 'E-Stop')
+
+                confirm(confirmed)
+
+                self.assertIs(self.global_vm.soft_estop_active, confirmed)
                 self.assertEqual(self.card.estop_btn.refresh_binding(), label)
                 self.assertEqual(self.card.estop_btn.properties, f'color={color}')
 

@@ -21,7 +21,8 @@ TYPE_MASK_VEL_YAW_RATE = 1511  # 0x5E7 -- see module docstring.
 
 
 def twist_to_position_target(linear_x: float, angular_z: float,
-                              time_boot_ms: int) -> dict:
+                              time_boot_ms: int, target_system: int = 0,
+                              target_component: int = 0) -> dict:
     """Map a Twist's linear.x / angular.z onto SET_POSITION_TARGET_LOCAL_NED
     fields, ready to hand to pymavlink's
     mav.set_position_target_local_ned_send(**twist_to_position_target(...)).
@@ -29,15 +30,18 @@ def twist_to_position_target(linear_x: float, angular_z: float,
     Positional/attitude fields not used by this type_mask (x, y, z, afx,
     afy, afz, yaw) are zeroed -- they're ignored by the flight controller
     per TYPE_MASK_VEL_YAW_RATE, but pymavlink's encoder still expects them.
+
+    target_system and target_component address the flight controller; 0 means broadcast.
+    Pass the IDs learned from its HEARTBEAT once they are known.
     """
-    return dict(
-        time_boot_ms=time_boot_ms,
-        target_system=0,
-        target_component=0,
-        coordinate_frame=MAV_FRAME_BODY_NED,
-        type_mask=TYPE_MASK_VEL_YAW_RATE,
-        x=0.0, y=0.0, z=0.0,
-        vx=linear_x, vy=0.0, vz=0.0,
-        afx=0.0, afy=0.0, afz=0.0,
-        yaw=0.0, yaw_rate=angular_z,
-    )
+    return {
+        'time_boot_ms': time_boot_ms,
+        'target_system': target_system,
+        'target_component': target_component,
+        'coordinate_frame': MAV_FRAME_BODY_NED,
+        'type_mask': TYPE_MASK_VEL_YAW_RATE,
+        'x': 0.0, 'y': 0.0, 'z': 0.0,
+        'vx': linear_x, 'vy': 0.0, 'vz': 0.0,
+        'afx': 0.0, 'afy': 0.0, 'afz': 0.0,
+        'yaw': 0.0, 'yaw_rate': angular_z,
+    }

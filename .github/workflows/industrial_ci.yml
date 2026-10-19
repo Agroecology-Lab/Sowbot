@@ -2,7 +2,7 @@ name: Industrial CI
 
 on:
   push:
-    branches: [ caatinga-dev ]
+    branches: [ caatinga-dev, dev ]
   pull_request:
     # Was `branches: [ caatinga-dev ]` — PRs targeting any other branch got
     # zero industrial_ci coverage. Run on all PRs; caatinga-dev push stays
@@ -40,7 +40,8 @@ jobs:
             ccache-${{ github.job }}-
 
       - name: Run industrial_ci
-        uses: ros-industrial/industrial_ci@master
+        # Pinned to the commit `master` pointed at on 2026-10-18 (not a tagged release; latest tag is 0.10.0).
+        uses: ros-industrial/industrial_ci@125164b9f1883cdf1858897a7146d1bebf2be5c6
         env:
           ROS_DISTRO: jazzy
           ROS_REPO: main
@@ -66,11 +67,9 @@ jobs:
 
           # --- Not enabled yet: needs test code first, not just config ---
           #
-          # colcon test already runs automatically against every built
-          # package's test/ directory - no hook needed. It currently finds
-          # nothing in devkit_driver, devkit_mavlink_bridge or
-          # devkit_f2c_planner because those packages have zero test files.
-          # Once tests exist there, they'll start running here for free.
+          # The unit tests of devkit_driver, devkit_mavlink_bridge,
+          # devkit_f2c_planner and devkit_ui, and the tests/ directory, run in
+          # test.yml (`make test`), not here. This job only builds the workspace.
           #
           # AFTER_BUILD_TARGET_WORKSPACE:
           #   Once launch_testing tests exist: source install/setup.bash

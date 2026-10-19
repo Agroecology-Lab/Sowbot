@@ -5,6 +5,7 @@ relposned_heading_shim.py
 Converts ublox_dgnss NAV-RELPOSNED → sensor_msgs/Imu for FusionCore.
 Subscribes : /rover/ubx_nav_rel_pos_ned  (ublox_ubx_msgs/UBXNavRelPosNED)
 Publishes  : /gnss/heading               (sensor_msgs/Imu)
+             /gnss/heading_valid         (std_msgs/Bool, receiver flags + baseline gate)
 FusionCore subscribes to gnss.heading_topic as sensor_msgs/Imu, extracting
 yaw from the orientation quaternion. orientation_covariance[8] carries σ²
 of the yaw estimate. All other fields (linear_acceleration, angular_velocity,
@@ -20,6 +21,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
+from std_msgs.msg import Bool
 from ublox_ubx_msgs.msg import UBXNavRelPosNED  # pylint: disable=import-error
 
 # Minimum antenna separation in metres — below this the heading geometry is unreliable
@@ -28,8 +30,10 @@ _MIN_BASELINE_M = 0.3
 
 class RelPosnedHeadingShim(Node):
     def __init__(self):
+        """Connect dual-antenna GNSS input to heading and validity publishers."""
         super().__init__('relposned_heading_shim')
         self._pub = self.create_publisher(Imu, '/gnss/heading', 10)
+        self._valid_pub = self.create_publisher(Bool, '/gnss/heading_valid', 10)
         self._sub = self.create_subscription(
             UBXNavRelPosNED, '/rover/ubx_nav_rel_pos_ned',
             self._cb, 10)
@@ -39,14 +43,17 @@ class RelPosnedHeadingShim(Node):
         self.get_logger().info('relposned_heading_shim ready')
 
     def _cb(self, msg: UBXNavRelPosNED) -> None:
+        """Publish ENU heading and validity after checking receiver flags and antenna separation."""
         # Both validity flags must be set before trusting the heading
         if not msg.rel_pos_valid or not msg.rel_pos_heading_valid:
             self._reject_count += 1
+            self._valid_pub.publish(Bool(data=False))
             return
 
         # rel_pos_length is in cm in the ublox_dgnss ROS message
         if (msg.rel_pos_length / 100.0) < _MIN_BASELINE_M:
             self._reject_count += 1
+            self._valid_pub.publish(Bool(data=False))
             return
 
         # rel_pos_heading: degrees × 1e-5, True North, NED convention
@@ -91,6 +98,7 @@ class RelPosnedHeadingShim(Node):
         out.linear_acceleration_covariance[0] = -1.0
 
         self._pub.publish(out)
+        self._valid_pub.publish(Bool(data=True))
         self._pub_count += 1
 
     def _log_stats(self) -> None:

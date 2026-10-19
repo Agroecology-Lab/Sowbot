@@ -6,6 +6,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
+from devkit_ui.view_models import run_view_model
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 
@@ -54,12 +55,23 @@ class TestDriveServices(unittest.TestCase):
         self.app = DriveApplicationService(self.domain)
         self.run = RunViewModel(self.app)
         self.global_vm = GlobalViewModel(self.app)
+        # The driver's acknowledgement reaches the view model through the callback the service registered.
+        self.ack = lambda active: self.ros.create_subscription.call_args.args[2](SimpleNamespace(data=active))
+        self.clock = self.enterContext(patch(
+            'devkit_ui.view_models.run_view_model.time.monotonic', return_value=1000.0))
 
     def test_commands_use_separate_topics(self):
         """Verify velocity and soft estop use their own message types and topics."""
         self.assertEqual(self.ros.create_publisher.call_args_list, [
             call(FakeTwist, 'cmd_vel', 1), call(FakeBool, 'estop/soft', qos.SAFETY_QOS),
         ])
+
+    def test_driver_acknowledgement_is_subscribed_with_the_latched_profile(self):
+        """Verify the confirmed soft estop state arrives on estop/soft/state with the safety profile."""
+        self.ros.create_subscription.assert_called_once()
+        msg_type, topic, callback, profile = self.ros.create_subscription.call_args.args
+        self.assertEqual((msg_type, topic, profile), (FakeBool, 'estop/soft/state', qos.SAFETY_QOS))
+        self.assertTrue(callable(callback))
 
     def test_soft_estop_is_latched_reliable_and_matches_the_driver_profile(self):
         """Verify the soft estop keeps the latched safety profile the driver and bumper topics use."""
@@ -94,18 +106,31 @@ class TestDriveServices(unittest.TestCase):
         self.assertEqual((messages[0].linear.x, messages[0].angular.z), (0.8, -0.6))
         self.assertEqual((messages[1].linear.x, messages[1].angular.z), (0.0, 0.0))
 
-    def test_estop_toggles_both_directions_and_keeps_messages_independent(self):
-        """Verify successive estop toggles publish independent messages on the estop topic."""
+    def test_estop_requests_alternate_and_state_follows_only_the_acknowledgement(self):
+        """Verify toggles publish independent requests and the UI state changes only on confirmation."""
         self.assertFalse(self.global_vm.soft_estop_active)
         self.global_vm.toggle_estop()
+        self.assertFalse(self.global_vm.soft_estop_active)
+
+        self.ack(True)
         self.assertTrue(self.global_vm.soft_estop_active)
         self.global_vm.toggle_estop()
+        self.assertTrue(self.global_vm.soft_estop_active)
+
+        self.ack(False)
         self.assertFalse(self.global_vm.soft_estop_active)
 
         messages = [entry.args[0] for entry in self.estop_publisher.publish.call_args_list]
         self.assertEqual([msg.data for msg in messages], [True, False])
         self.assertIsNot(messages[0], messages[1])
         self.velocity_publisher.publish.assert_not_called()
+
+    def test_unacknowledged_request_never_shows_a_stop(self):
+        """Verify a request the driver never confirms leaves the displayed state unchanged."""
+        for _ in range(3):
+            self.global_vm.toggle_estop()
+        self.assertFalse(self.global_vm.soft_estop_active)
+        self.assertEqual([m.args[0].data for m in self.estop_publisher.publish.call_args_list], [True] * 3)
 
     def test_failed_estop_publish_preserves_last_confirmed_ui_state(self):
         """Verify a publish exception leaves the displayed estop state unchanged."""
@@ -129,22 +154,116 @@ class TestDriveServices(unittest.TestCase):
         messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
         self.assertEqual([(m.linear.x, m.angular.z) for m in messages], [(0.5, -0.2), (0.0, 0.0)])
 
+    def test_repeat_resends_a_fresh_joystick_command_until_it_is_released(self):
+        """Verify a fresh held stick keeps publishing and a released one does not."""
+        self.run.repeat_joystick()
+        self.velocity_publisher.publish.assert_not_called()
+
+        self.run.move_joystick(0.5, 0.2)
+        self.run.repeat_joystick()
+        self.run.repeat_joystick()
+        self.run.stop_joystick()
+        self.run.repeat_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages],
+                         [(0.5, -0.2), (0.5, -0.2), (0.5, -0.2), (0.0, 0.0)])
+
+    def test_repeat_stops_when_input_expires_without_a_release_event(self):
+        """Verify repeats cannot renew the input lease and expiry stops only once."""
+        self.run.move_joystick(0.5, 0.2)
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S
+        self.run.repeat_joystick()
+        self.clock.return_value += 0.01
+        self.run.repeat_joystick()
+        self.run.repeat_joystick()
+        self.run.release_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages],
+                         [(0.5, -0.2), (0.5, -0.2), (0.0, 0.0)])
+
+    def test_held_position_stays_active_with_client_heartbeats_then_stops_when_they_cease(self):
+        """Verify a stationary hold outlasts the lease, but lost heartbeats still stop it."""
+        self.run.move_joystick(0.5, 0.2)
+        for _ in range(6):
+            self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S / 2
+            self.run.heartbeat_joystick()
+            self.run.repeat_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages], [(0.5, -0.2)] * 7)
+
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S + 0.01
+        self.run.repeat_joystick()
+        self.run.repeat_joystick()
+
+        self.assertEqual(self.velocity_publisher.publish.call_count, 8)
+        stopped = self.velocity_publisher.publish.call_args.args[0]
+        self.assertEqual((stopped.linear.x, stopped.angular.z), (0.0, 0.0))
+
+    def test_late_heartbeat_cannot_renew_an_expired_lease(self):
+        """Verify a delayed heartbeat cannot keep expired input moving before a repeat tick."""
+        self.run.move_joystick(0.5, 0.2)
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S + 0.01
+
+        self.run.heartbeat_joystick()
+        self.run.repeat_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages], [(0.5, -0.2), (0.0, 0.0)])
+
+    def test_heartbeats_without_a_held_gesture_do_not_start_motion(self):
+        """Verify idle and released gestures ignore heartbeats without publishing commands."""
+        self.run.heartbeat_joystick()
+        self.run.repeat_joystick()
+        self.velocity_publisher.publish.assert_not_called()
+        self.run.move_joystick(0.5, 0.2)
+        self.run.release_joystick()
+        self.velocity_publisher.reset_mock()
+
+        self.run.heartbeat_joystick()
+        self.run.repeat_joystick()
+
+        self.velocity_publisher.publish.assert_not_called()
+
+    def test_new_input_renews_the_lease_and_recovers_after_expiry(self):
+        """Verify new joystick movement extends or restarts motion."""
+        self.run.move_joystick(0.5, 0.2)
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S
+        self.run.move_joystick(0.3, -0.1)
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S
+        self.run.repeat_joystick()
+        self.clock.return_value += 0.01
+        self.run.repeat_joystick()
+        self.run.move_joystick(0.2, 0.1)
+        self.run.repeat_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual(
+            [(m.linear.x, m.angular.z) for m in messages],
+            [(0.5, -0.2), (0.3, 0.1), (0.3, 0.1), (0.0, 0.0), (0.2, -0.1), (0.2, -0.1)])
+
     def test_velocity_publish_failure_reaches_caller(self):
         """Verify velocity publishing errors propagate through the view model."""
         self.velocity_publisher.publish.side_effect = RuntimeError('publisher down')
         with self.assertRaisesRegex(RuntimeError, 'publisher down'):
             self.run.move_joystick(0.5, 0.1)
 
-    def test_global_view_model_uses_service_result(self):
-        """Verify the view model stores the returned estop state without assuming a toggle."""
+    def test_global_view_model_registers_for_confirmations(self):
+        """Verify the view model requests the opposite of its confirmed state and stores confirmations."""
         app = Mock(spec=DriveApplicationService)
-        app.toggle_estop.return_value = False
         vm = GlobalViewModel(app)
+        app.register_soft_estop_state_callback.assert_called_once()
 
         vm.toggle_estop()
-
         app.toggle_estop.assert_called_once_with(False)
         self.assertFalse(vm.soft_estop_active)
+
+        app.register_soft_estop_state_callback.call_args.args[0](True)
+        vm.toggle_estop()
+        app.toggle_estop.assert_called_with(True)
+        self.assertTrue(vm.soft_estop_active)
 
 
 class TestPoseLabel(unittest.TestCase):

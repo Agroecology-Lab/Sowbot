@@ -6,11 +6,10 @@ FROM ros:jazzy
 # ============================================================
 # Stage 1: Mirror + Locale + Timezone
 # ============================================================
-RUN sed -i \
-    -e 's|http://gb.archive.ubuntu.com/ubuntu/|g' \
-    -e 's|http://archive.ubuntu.com/ubuntu/|g' \
-    /etc/apt/sources.list.d/ubuntu.sources || true && \
-    sed -i 's/^Suites: noble$/Suites: noble noble-updates noble-security/' \
+# (An earlier mirror rewrite here had no replacement text, so sed rejected it and `|| true` hid the
+# error. It changed nothing and is removed. To use a mirror, add
+#   sed -i 's|http://archive.ubuntu.com/ubuntu/|<mirror URL>|' /etc/apt/sources.list.d/ubuntu.sources)
+RUN sed -i 's/^Suites: noble$/Suites: noble noble-updates noble-security/' \
     /etc/apt/sources.list.d/ubuntu.sources || true
 
 RUN apt-get update && apt-get install -y locales tzdata && \
@@ -219,7 +218,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --break-system-packages --no-deps yolox==0.3.0 && \
     pip install --break-system-packages \
       thop tqdm loguru ninja tabulate \
-      nicegui pyserial lizard pymongo networkx
+      nicegui pyserial pymongo networkx
 
 # 5.2b optical_flow_ros (PMW3901 / PAA5100) Python dependencies
 #      Not resolvable by rosdep (absent from its package.xml). numpy and
@@ -231,10 +230,17 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --break-system-packages \
       pmw3901==1.0.0 gpiod==2.5.0 gpiodevice==0.1.0
 
+# 5.2c pymavlink for devkit_mavlink_bridge (rosdep key python3-pymavlink-pip is skipped in Stage 9)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --break-system-packages pymavlink==2.4.50
+
 # 5.3 YOLOX-Nano pretrained weights
+# sha256 of the file the release served when this pin was added; the build fails if it changes.
+ARG YOLOX_NANO_SHA256=cd28f55fbbc1829f99d9ac9b38a16d259a22889739c8728ea877610201feff7b
 RUN mkdir -p /root/models && \
     wget -q -O /root/models/yolox_nano.pth \
-      https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth
+      https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth && \
+    echo "${YOLOX_NANO_SHA256}  /root/models/yolox_nano.pth" | sha256sum -c -
 
 # 5.4 Forest3D — realistic field generation
 # Pinned to an exact commit (was `-b feature/terrain-types-refactor`, a
@@ -348,6 +354,7 @@ COPY ./src/devkit_bringup    ./src/devkit_bringup
 COPY ./src/devkit_ui        ./src/devkit_ui
 COPY ./src/devkit_f2c_planner  ./src/devkit_f2c_planner
 COPY ./src/devkit_simulation   ./src/devkit_simulation
+COPY ./src/devkit_mavlink_bridge ./src/devkit_mavlink_bridge
 
 # devkit_simulation now lives in this repo (src/devkit_simulation, copied above).
 # Drop the copy that ships inside caatingarobotics so colcon doesn't see two.
@@ -392,6 +399,7 @@ RUN apt-get update && \
           mongodb_store \
           strands_navigation_msgs \
           nicegui \
+          python3-pymavlink-pip \
           septentrio_gnss_driver \
           ublox_dgnss \
           rtcm_msgs \

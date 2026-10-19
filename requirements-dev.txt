@@ -5,6 +5,8 @@
 scikit-image
 shapely
 deepdiff
+pymavlink==2.4.50
+numpy-stl  # tests/test_agri_field_to_terrain.py imports stl
 pytest
 pytest-asyncio
 mypy
