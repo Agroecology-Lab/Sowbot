@@ -3,7 +3,7 @@ name: Run Tests
 on: [push]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   code-checks:
@@ -15,6 +15,8 @@ jobs:
               pylint --disable=duplicate-code
               ./src/devkit_driver/devkit_driver
               ./src/devkit_ui/devkit_ui
+              ./src/devkit_mavlink_bridge/devkit_mavlink_bridge
+              ./src/devkit_f2c_planner/devkit_f2c_planner
               --fail-under=10.0
           - name: ruff
             command: make ruff
@@ -38,13 +40,5 @@ jobs:
             requirements-dev.txt
       - name: install dependencies
         run: pip install -r requirements-dev.txt
-      - name: auto-fix ruff errors
-        if: matrix.tools.name == 'ruff'
-        run: make ruff-fix
-      - name: commit ruff fixes
-        if: matrix.tools.name == 'ruff'
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "style: auto-fix ruff errors [skip ci]"
       - name: ${{ matrix.tools.name }}
         run: ${{ matrix.tools.command }}

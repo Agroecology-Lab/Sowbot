@@ -5,6 +5,7 @@
 scikit-image
 shapely
 deepdiff
+numpy-stl  # tests/test_agri_field_to_terrain.py imports stl
 pytest
 pytest-asyncio
 mypy

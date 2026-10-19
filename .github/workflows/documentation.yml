@@ -34,7 +34,8 @@ jobs:
           touch docs/_build/html/.nojekyll
 
       - name: Deploy Docs to Sowbot_Data Repo
-        uses: cpina/github-action-push-to-another-repository@main
+        # Pinned to the commit `main` pointed at on 2026-10-18 (tag v1.7.3). This step receives DOCS_DEPLOY_TOKEN.
+        uses: cpina/github-action-push-to-another-repository@55306faa4ed53b815ae49e564af8cfb359d32ae2
         env:
           API_TOKEN_GITHUB: ${{ secrets.DOCS_DEPLOY_TOKEN }}
         with:

@@ -1,7 +1,7 @@
 """Tests for the pure-shapely backend, plus an F2C parity check (skipped without fields2cover)."""
 # pylint: disable=invalid-name,protected-access
-import math
 import unittest
+from itertools import pairwise
 
 from devkit_f2c_planner.f2c_test_helpers import planner, silence_planner_log, to_ll, to_xy
 
@@ -10,8 +10,8 @@ RECT = [(0, 0), (100, 0), (100, 60), (0, 60)]
 
 def _run(backend, **kw):
     """Plan rows for the default rectangle with the chosen backend and option overrides."""
-    args = dict(corners_ll=to_ll(RECT), obstacle_rings=[], tool_width=5.0, angle_deg=0.0,
-                backend=backend)
+    args = {'corners_ll': to_ll(RECT), 'obstacle_rings': [], 'tool_width': 5.0, 'angle_deg': 0.0,
+            'backend': backend}
     args.update(kw)
     return planner.run_f2c(**args)
 
@@ -27,7 +27,7 @@ class ShapelyBackendTest(unittest.TestCase):
         self.assertEqual(len(rows), 12)
         ys = [to_xy(r)[0][1] for r in rows]
         self.assertAlmostEqual(ys[0], 2.5, places=2)
-        for a, b in zip(ys, ys[1:]):
+        for a, b in pairwise(ys):
             self.assertAlmostEqual(b - a, 5.0, places=2)
 
     def test_rows_span_field(self):
@@ -100,8 +100,8 @@ class ParityTest(unittest.TestCase):
             for angle in (0, 30, 90, 137):
                 for hl in (0.0, 8.0):
                     with self.subTest(shape=name, angle=angle, headland=hl):
-                        kw = dict(corners_ll=to_ll(shape), obstacle_rings=[], tool_width=5.0,
-                                  angle_deg=angle, headland_width_m=hl, snake_order=False)
+                        kw = {'corners_ll': to_ll(shape), 'obstacle_rings': [], 'tool_width': 5.0,
+                              'angle_deg': angle, 'headland_width_m': hl, 'snake_order': False}
                         self.assertEqual(self._norm(planner.run_f2c(backend='f2c', **kw)),
                                          self._norm(planner.run_f2c(backend='shapely', **kw)))
 

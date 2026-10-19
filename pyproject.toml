@@ -1,8 +1,11 @@
 [project]
-name = "feldfreund_devkit_ros"
+name = "sowbot"
 version = "0.1.0-dev"
-description = "ROS2 nodes for the Feldfreund DevKit"
-authors = [{ name="Zauberzeug GmbH", email="info@zauberzeug.com" }]
+description = "ROS 2 stack for the Sowbot open-hardware agricultural robot, built on the Zauberzeug Feldfreund DevKit"
+authors = [
+    { name="Agroecology Lab Ltd" },
+    { name="Zauberzeug GmbH", email="info@zauberzeug.com" },
+]
 readme = "README.md"
 requires-python = ">=3.11, <3.14"
 
@@ -47,6 +50,7 @@ module = [
     "topological_nav_simulator.*",
     "devkit_f2c_planner.*",
     "pyquaternion",
+    "pymavlink.*",
 ]
 ignore_missing_imports = true
 
