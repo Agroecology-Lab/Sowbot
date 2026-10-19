@@ -24,6 +24,7 @@ if command == 'git' and sys.argv[1] in ('rev-parse', 'ls-remote'):
 
 @pytest.fixture
 def shell_repo(tmp_path, monkeypatch):
+    """Create a temporary repo, isolated command doubles, and an external caller directory."""
     repo = tmp_path / 'repo with spaces'
     tools = repo / 'tools'
     tools.mkdir(parents=True)
@@ -149,6 +150,7 @@ def test_flasher_finds_optional_sibling_audit(shell_repo, audit_present):
 
 
 def run_script(repo, caller, name, *arguments):
+    """Run a tool with Bash from the caller directory and capture its output with a timeout."""
     return subprocess.run(
         ['/bin/bash', str(repo / 'tools' / name), *arguments],
         cwd=caller,
@@ -160,4 +162,5 @@ def run_script(repo, caller, name, *arguments):
 
 
 def read_calls(log):
+    """Return recorded command calls, or an empty list if no log was created."""
     return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
