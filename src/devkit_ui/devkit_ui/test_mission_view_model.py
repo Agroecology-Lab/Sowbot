@@ -26,7 +26,7 @@ class TestMissionViewModel(unittest.TestCase):
         self.executor = SimpleNamespace(running=False)
         self.doc = SimpleNamespace(nodes=[row_node('A_1', 1, 'entry'), row_node('A_2', 1, 'exit')])
         self.vm = MissionViewModel(MissionApplicationService(
-            self.store, self.executor, lambda: self.doc))
+            self.store, self.executor, SimpleNamespace(get_doc=lambda: self.doc)))
 
     def test_save_queue_stores_entry_node_names_and_shared_action(self) -> None:
         """Verify entry names, fallback names, duplicate rows and shared action settings."""

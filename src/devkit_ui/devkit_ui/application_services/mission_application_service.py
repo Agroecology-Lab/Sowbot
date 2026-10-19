@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from devkit_ui.application_services.topology_application_service import (
+        TopologyApplicationService,
+    )
     from devkit_ui.domain_services.mission_domain_service import MissionDomainService
     from devkit_ui.missions import MissionStore
-    from devkit_ui.models import TopoDoc
 
 
 class MissionApplicationService:
     """Use cases for saved missions: list, save a queue, toggle, delete, and report status."""
 
     def __init__(self, store: MissionStore, mission_service: MissionDomainService,
-                 get_doc: Callable[[], TopoDoc | None]) -> None:
-        """Store the mission store, the executor service and a getter for the live map."""
+                 topology: TopologyApplicationService) -> None:
+        """Store the mission store, the executor service and the topology service for the live map."""
         self._store = store
         self._mission_service = mission_service
-        self._get_doc = get_doc
+        self._topology = topology
 
     @property
     def missions(self) -> tuple[dict, ...]:
@@ -82,7 +83,7 @@ class MissionApplicationService:
             self._store.set_status(
                 'ERROR: all queued steps must have the same action and parameters')
             return None
-        doc = self._get_doc()
+        doc = self._topology.get_doc()
         nodes = doc.nodes if doc is not None else []
         rows = [
             next((nd.name for nd in nodes

@@ -70,6 +70,7 @@ from devkit_ui.pages.system.system_page import SystemPage
 from devkit_ui.process_registry import shutdown_tools
 from devkit_ui.qos import SENSOR_QOS
 from devkit_ui.ros_gateway import RosGateway
+from devkit_ui.sim_asset_store import SimAssetStore
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.map_authoring_view_model import MapAuthoringViewModel
 from devkit_ui.view_models.mission_view_model import MissionViewModel
@@ -160,7 +161,7 @@ class NiceGuiNode:
             self._telemetry_app_service, self._ros.create_timer, is_sim=self._is_sim)
         self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
         self._robot_brain_vm = RobotBrainViewModel(self._robot_brain_app_service)
-        sim_assets = SimAssetService()
+        sim_assets = SimAssetService(SimAssetStore())
         self._sim_vm = SimViewModel(sim_assets, SimWorldService(sim_assets))
 
         # Initialize with default demo document
@@ -186,7 +187,7 @@ class NiceGuiNode:
 
         self._mission_service = MissionDomainService(self._ros)
         self._mission_vm = MissionViewModel(MissionApplicationService(
-            self._mission_store, self._mission_service, self._topo_app_service.get_doc))
+            self._mission_store, self._mission_service, self._topo_app_service))
 
         @ui.page('/')
         def page():

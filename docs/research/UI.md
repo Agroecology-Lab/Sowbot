@@ -18,7 +18,7 @@ The mission executor moves into <code>MissionDomainService</code>, and <code>Obs
 Saved missions sit behind <code>MissionViewModel</code></td></tr>
 <tr><td>#162 Topology edits</td><td><code>TopologyEditService</code> holds the rules for dropping a node, saving F2C rows, repairing and deleting.
 The node methods become thin wrappers</td></tr>
-<tr><td>#163 Sim assets</td><td><code>SimAssetService</code> handles crop-model upload validation and writing, plus the soil zip import</td></tr>
+<tr><td>#163 Sim assets</td><td><code>SimAssetService</code> handles crop-model upload validation and the soil zip import; <code>SimAssetStore</code> writes the files</td></tr>
 <tr><td>Branch <code>ui-116-run-plan-sim-system</code> (PR number to add)</td><td>UI split into Run, Plan, Sim and System tabs.
 <code>SimPage</code> and <code>SystemPage</code> are classes with their cards under <code>pages/sim/</code> and <code>pages/system/</code>.
 <code>SimWorldService</code> rebuilds the Gazebo world.
@@ -48,7 +48,7 @@ The three items listed as outstanding in the 9 October comment are done: the sub
 
 Solid arrows follow the dependency rule.
 Dashed arrows and red dashed boxes are known deviations, each listed under "Still open" below.
-The dotted arrows labelled "callback" and "live doc getter" are runtime callbacks.
+The dotted arrows labelled "callback" are runtime callbacks.
 
 ```mermaid
 flowchart TB
@@ -117,6 +117,7 @@ flowchart TB
     subgraph INFRA["Infrastructure"]
       TopoMapStore["TopoMapStore<br/>(map file I/O)"]
       MissionStore["MissionStore<br/>(YAML or SQLite, scheduling, run recording)"]
+      SimAssetStore["SimAssetStore<br/>(crop model folders, soil texture folder)"]
       ObstacleManager["ObstacleManager<br/>(obstacles.yaml, /obstacles publisher)"]
       RosGateway["RosGateway<br/>(wraps the rclpy Node: publishers, subscriptions,<br/>clients, timers, clock, tf, parameters;<br/>turns QosSpec into QoSProfile)"]
     end
@@ -179,7 +180,8 @@ flowchart TB
   TopologyEdit --> TopologyApp
   TopologyEdit --> RowBuilder
   SimWorld --> SimAssets
-  MissionApp -.->|"live doc getter"| TopologyApp
+  SimAssets --> SimAssetStore
+  MissionApp --> TopologyApp
 
   DriveApp --> DriveDom
   NavApp --> NavDom
@@ -219,7 +221,7 @@ flowchart TB
   class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,SimAssets,SimWorld app
   class DriveDom,NavDom,RowDiscDom,RobotBrainDom,TelemetryDom,TopologyDom,MissionDom dom
   class RowBuilder,RowPlanning,F2CPkg pure
-  class TopoMapStore,MissionStore,ObstacleManager,RosGateway infra
+  class TopoMapStore,MissionStore,SimAssetStore,ObstacleManager,RosGateway infra
 
   style P1 fill:#ffffff,stroke:#6b7280,color:#111827
   style UI fill:#eff6ff,stroke:#1e40af,color:#111827
@@ -255,7 +257,7 @@ Use cases, plain dataclasses in and out, no UI or rclpy types.
 Phase 2 adapters call this layer</td></tr>
 <tr><td>Live state</td><td>Domain service</td><td>Holds live state (TopoDoc, mission state).
 Talks to ROS only through RosGateway</td></tr>
-<tr><td>Persistence</td><td>Store</td><td>TopoMapStore, MissionStore.
+<tr><td>Persistence</td><td>Store</td><td>TopoMapStore, MissionStore, SimAssetStore.
 Owned by application services.
 <code>TopoMapStore</code> sits in the <code>domain_services</code> package for now</td></tr>
 <tr><td>Algorithms</td><td>Pure module</td><td>row_planning, topo_row_builder, plan_import.
