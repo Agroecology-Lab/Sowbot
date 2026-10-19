@@ -1,35 +1,39 @@
-version: "4.0"
+# Same image and names as manage.py (sowbot:jazzy, sowbot_*). Build it with `python3 manage.py build`.
+# Source packages are mounted individually, as manage.py does: a blanket `../:/workspace` mount
+# would shadow the image's colcon install/ tree and the externals cloned at build time.
 
 services:
   devkit:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    image: devkit_ros:latest
-    container_name: feldfreund_runtime
+    image: sowbot:jazzy
+    container_name: sowbot_runtime
     network_mode: host
     privileged: true
     # This is the "Golden Link" - it reads the file on every 'up'
     env_file:
-      - ../.env 
+      - ../.env
     devices:
       - /dev:/dev
     volumes:
       - /dev:/dev
       - ~/.ros:/root/.ros
-      - ../:/workspace  # Mounts utilities AND code
+      - ../src/devkit_driver:/workspace/src/devkit_driver
+      - ../src/devkit_bringup:/workspace/src/devkit_bringup
+      - ../src/devkit_ui:/workspace/src/devkit_ui
+      - ../src/devkit_simulation:/workspace/src/devkit_simulation
+      - ../src/devkit_mavlink_bridge:/workspace/src/devkit_mavlink_bridge
+      - ../maps:/workspace/maps
+      - ../uploads:/workspace/uploads
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    # Foxglove binds to loopback and is view-only. Add foxglove_address:=<host IP> to reach it
+    # from another machine; the websocket has no authentication.
     command: bash -c "source /opt/ros/jazzy/setup.bash && [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash; ros2 launch devkit_bringup devkit_nocams.launch.py"
     restart: unless-stopped
 
   devkit-simulation:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    image: devkit_ros:latest
-    container_name: feldfreund_simulation
+    image: sowbot:jazzy
+    container_name: sowbot_simulation
     ports:
       - "80:80"
       - "127.0.0.1:8765:8765"
@@ -39,12 +43,20 @@ services:
       - "127.0.0.1:8888:8888"
     volumes:
       - ~/.ros:/root/.ros
-      - ../:/workspace
+      - ../src/devkit_driver:/workspace/src/devkit_driver
+      - ../src/devkit_bringup:/workspace/src/devkit_bringup
+      - ../src/devkit_ui:/workspace/src/devkit_ui
+      - ../src/devkit_simulation:/workspace/src/devkit_simulation
+      - ../src/devkit_mavlink_bridge:/workspace/src/devkit_mavlink_bridge
+      - ../maps:/workspace/maps
+      - ../uploads:/workspace/uploads
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - FELDFREUND_SIMULATION=true
       - MJPEG_CAMERA_PASSWORD=simulation
       - TELTONIKA_PASSWORD=simulation
-    command: bash -c "source /opt/ros/jazzy/setup.bash && [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash; ros2 launch devkit_bringup devkit_simulation.launch.py"
+    # Docker forwards the host's loopback port to the container's own address, so the bridge must
+    # listen on all container interfaces here. The host side of the mapping above is loopback only.
+    command: bash -c "source /opt/ros/jazzy/setup.bash && [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash; ros2 launch devkit_bringup devkit_simulation.launch.py foxglove_address:=0.0.0.0"
     restart: unless-stopped
