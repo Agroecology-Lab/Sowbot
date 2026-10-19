@@ -59,7 +59,7 @@ password).
 ### Notes
 
 - **Sudo prompt:** the `nav_stack` pane runs `./manage.py --sim`, which may run
-  `sudo python3 fixusb.py`. Attach and type the password in that pane (or set up
+  `sudo python3 tools/fixusb.py`. Attach and type the password in that pane (or set up
   passwordless sudo). Until the container is up, the `gazebo`/`crop_row` panes
   just wait.
 - **Timeouts:** the waits are generous (10 min) to cover the sudo prompt and

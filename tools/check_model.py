@@ -2,7 +2,7 @@
 """check_model.py — static mechanical sanity checks for a robot URDF/xacro.
 
 Usage:
-    python3 check_model.py [path/to/robot.xacro | path/to/robot.urdf]
+    python3 tools/check_model.py [path/to/robot.xacro | path/to/robot.urdf]
 
 Runs, in order:
     1. Parse + kinematic-tree validation (single root, joint axes).

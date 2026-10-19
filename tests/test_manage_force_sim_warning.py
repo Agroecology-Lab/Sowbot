@@ -27,6 +27,7 @@ def _run_output(env_text, extra_args=()):
         (manager.root_dir / '.env').write_text(env_text)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
+                patch.object(module.shutil, 'which', return_value=None), \
                 patch.object(module.subprocess, 'run', side_effect=_Stop), \
                 patch.object(module.os, 'system'):
             with contextlib.suppress(_Stop):

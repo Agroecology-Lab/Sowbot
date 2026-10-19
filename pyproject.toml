@@ -93,6 +93,7 @@ ignored-modules = [
 ]
 
 [tool.ruff]
+src = [".", "tools", "worldgen"]  # scripts in tools/ and worldgen/ are first-party for import sorting
 line-length = 120
 indent-width = 4
 target-version = "py311"
@@ -115,3 +116,4 @@ ignore = [
 asyncio_mode = "auto"
 cache_dir = "../.pytest_cache"
 testpaths = ["tests"]
+pythonpath = ["tools", "worldgen"]  # tests import the scripts in these directories as top-level modules

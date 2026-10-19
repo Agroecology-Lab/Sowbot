@@ -6,7 +6,7 @@
 > reference.
 > Several parts do not describe this stack: it names the Septentrio GNSS driver (Sowbot uses
 > dual u-blox F9P), Jetson settings (`/dev/ttyTHS0`, `-j orin`), a Zauberzeug clone URL and
-> `./docker.sh u`.
+> `./tools/docker.sh u`.
 > Its Lizard/ESP32 material is legacy here, the current controller path is ArduPilot on
 > LEVIA-H7.
 > For building and running Sowbot use the Quick Start in the main [README](../README.md).
@@ -225,7 +225,7 @@ Before building, check and adjust if needed:
 ### 3. Build with Docker
 
 ```bash
-./docker.sh u
+./tools/docker.sh u
 ```
 
 ### 4. Send Lizard Configuration

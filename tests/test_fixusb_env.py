@@ -22,7 +22,7 @@ def fixusb(monkeypatch):
                              ('serial.tools.list_ports', list_ports)):
             monkeypatch.setitem(sys.modules, name, module)
     spec = importlib.util.spec_from_file_location(
-        'fixusb', Path(__file__).parents[1] / 'fixusb.py')
+        'fixusb', Path(__file__).parents[1] / 'tools' / 'fixusb.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

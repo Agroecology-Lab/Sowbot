@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e  # Exit immediately if any command fails
 
+cd "$(dirname "${BASH_SOURCE[0]}")/.."  # repo root, so 'git add .' covers the whole repo
+
 REPO_URL="https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git"
 BRANCH="main"
 

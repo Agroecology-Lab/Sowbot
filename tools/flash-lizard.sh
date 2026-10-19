@@ -2,10 +2,12 @@
 # 🦎  Lizard Flasher (Agroecology Lab Version)
 
 # 1. Hardware Access & Environment Validation
-if [ -f "fixusb.py" ]; then
-    python3 fixusb.py
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$TOOLS_DIR/.." || exit 1
+if [ -f "$TOOLS_DIR/fixusb.py" ]; then
+    python3 "$TOOLS_DIR/fixusb.py"
 else
-    echo "⚠️ Warning: fixusb.py not found."
+    echo "⚠️ Warning: tools/fixusb.py not found."
 fi
 
 if [ -f ".env" ]; then
@@ -21,7 +23,7 @@ MCU_PORT=${MCU_PORT:-$(ls /dev/ttyACM* 2>/dev/null | head -n 1)}
 # 2. Binary Path Resolution
 # LIZARD_DIR points at a checkout of https://github.com/Agroecology-Lab/lizard
 # (a separate ESP-IDF project, not part of this repo). Override with:
-#   LIZARD_DIR=/path/to/lizard ./flash-lizard.sh
+#   LIZARD_DIR=/path/to/lizard ./tools/flash-lizard.sh
 LIZARD_DIR="${LIZARD_DIR:-../lizard}"
 BOOTLOADER="$LIZARD_DIR/build/bootloader/bootloader.bin"
 PARTITIONS="$LIZARD_DIR/build/partition_table/partition-table.bin"
@@ -59,7 +61,7 @@ sudo stty -F "$MCU_PORT" -hupcl raw 115200
 python3 -c "import serial, time; s=serial.Serial('$MCU_PORT'); s.dtr=0; s.rts=0; time.sleep(0.5); s.dtr=1; s.rts=1; s.close()"
 
 # 6. Final Verification Audit
-if [ -f "./espinfo.sh" ]; then
+if [ -f "$TOOLS_DIR/espinfo.sh" ]; then
     echo "🔍 Running espinfo.sh for final audit..."
-    ./espinfo.sh
+    "$TOOLS_DIR/espinfo.sh"
 fi
