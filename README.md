@@ -63,10 +63,13 @@ This repository provides the drivers and orchestration for the Sowbot platform, 
 | safety_roadmap.md (O7, O8, O14)                         |
 +---------------------------------------------------------+
 ```
+[Full architectural diagram](https://github.com/Agroecology-Lab/Sowbot/blob/dev/docs/research/UI.md#diagram-as-built)
 
-Controller status: ArduPilot on LEVIA-H7 is the current controller path and is in bring-up (the board is unvalidated).
-ESP32/Lizard is legacy.
-The 24V loop, not the controller, is the rated stop function.
+LLM Generated diagram:
+
+[![Alternate LLM generated architectural diagram](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros/diagram.png)](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros?utm_source=readme&utm_medium=picture)
+
+
 
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk/hardware) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
 
@@ -82,9 +85,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 [![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU)
 
 (click above image to play video)
-
-
-[![Architecture diagram of agroecology-lab/Sowbot](https://gitdiagram.com/agroecology-lab/Sowbot/diagram.png)](https://gitdiagram.com/agroecology-lab/Sowbot?utm_source=readme&utm_medium=picture)
 
 ## Sowbot Roadmap
 
