@@ -185,6 +185,8 @@ class MavlinkBridgeNode(Node):
             if (message.type == mavutil.mavlink.MAV_TYPE_GCS
                     or message.autopilot == mavutil.mavlink.MAV_AUTOPILOT_INVALID):
                 continue  # another ground station, or our own echo
+            if self._mav.target_system and message.get_srcSystem() != self._mav.target_system:
+                continue
             self._monitor.beat()
             self._note_flight_controller(message)
         self._log_link_change()

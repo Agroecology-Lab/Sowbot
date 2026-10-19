@@ -84,9 +84,10 @@ with patch.dict(sys.modules, {'rclpy': rclpy, 'rclpy.node': rclpy_node,
 
 
 def _heartbeat(autopilot=MAV.MAV_AUTOPILOT_ARDUPILOTMEGA, kind=MAV.MAV_TYPE_GROUND_ROVER,
-               base_mode=0, custom_mode=0):
+               base_mode=0, custom_mode=0, source_system=1):
     """Build a heartbeat double with configurable vehicle, autopilot, and mode fields."""
-    return SimpleNamespace(type=kind, autopilot=autopilot, base_mode=base_mode, custom_mode=custom_mode)
+    return SimpleNamespace(type=kind, autopilot=autopilot, base_mode=base_mode,
+                           custom_mode=custom_mode, get_srcSystem=lambda: source_system)
 
 
 class BridgeNodeTest(unittest.TestCase):
@@ -154,6 +155,48 @@ class BridgeNodeTest(unittest.TestCase):
         self.command(node, 0.5, 0.0)
         node._republish()
         self.assertEqual(self.sent(), [(0.0, 0.0)])
+
+    def test_other_systems_do_not_enable_commands(self):
+        """Verify another autopilot cannot satisfy the selected controller's heartbeat gate."""
+        self.connection.target_system = 7
+        node = self.make()
+        self.pending.append(_heartbeat(source_system=42))
+        self.command(node, 0.5, 0.2)
+        node._republish()
+        self.assertEqual(self.sent()[-1], (0.0, 0.0))
+
+        self.pending.append(_heartbeat(source_system=7))
+        node._republish()
+        self.assertEqual(self.sent()[-1], (0.5, 0.2))
+
+    def test_other_systems_do_not_keep_the_selected_controller_alive(self):
+        """Verify other heartbeats cannot extend or restore the selected controller's link."""
+        node = self.make()
+        self.pending.append(_heartbeat())
+        node._republish()
+        for elapsed in (2.0, 1.5, 1.0):
+            with self.subTest(elapsed=elapsed):
+                self.now += elapsed
+                self.pending.append(_heartbeat(source_system=42))
+                self.command(node, 0.5, 0.2)
+                node._republish()
+                expected = (0.5, 0.2) if elapsed == 2.0 else (0.0, 0.0)
+                self.assertEqual(self.sent()[-1], expected)
+
+    def test_unset_target_accepts_only_eligible_discovery_heartbeats(self):
+        """Verify discovery accepts an autopilot while retaining the GCS and echo filters."""
+        for target_system in (0, None):
+            with self.subTest(target_system=target_system):
+                self.connection.target_system = target_system
+                node = self.make()
+                self.pending += [_heartbeat(kind=MAV.MAV_TYPE_GCS),
+                                 _heartbeat(autopilot=MAV.MAV_AUTOPILOT_INVALID)]
+                self.command(node, 0.5, 0.2)
+                node._republish()
+                self.assertEqual(self.sent()[-1], (0.0, 0.0))
+                self.pending.append(_heartbeat(source_system=42))
+                node._republish()
+                self.assertEqual(self.sent()[-1], (0.5, 0.2))
 
     def test_velocity_is_clamped_to_the_limits(self):
         """Verify an excessive command is limited before it reaches the flight controller."""
