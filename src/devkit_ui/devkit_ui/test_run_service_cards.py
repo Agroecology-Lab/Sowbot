@@ -61,18 +61,22 @@ class TestJoystickControlCard(unittest.TestCase):
         self.assertEqual(self.app.move_joystick.call_count, 8)
         self.app.move_joystick.assert_called_with(0.0, 0.0)
 
-    def test_estop_click_updates_service_state_label_and_color(self):
-        """Verify estop clicks synchronize service state, button text, and button color."""
+    def test_estop_button_follows_the_drivers_confirmation_not_the_click(self):
+        """Verify a click only requests a stop; text and color change when the driver confirms."""
         self.assertEqual(self.card.estop_btn.text, 'E-Stop')
         self.assertEqual(self.card.estop_btn.properties, 'color=primary')
-        self.app.toggle_estop.side_effect = [True, False]
+        confirm = self.app.register_soft_estop_state_callback.call_args.args[0]
 
-        for expected, label, color in [(True, 'STOPPED', 'negative'), (False, 'E-Stop', 'primary')]:
-            with self.subTest(expected=expected):
-                current = self.global_vm.soft_estop_active
+        for confirmed, label, color in [(True, 'STOPPED', 'negative'), (False, 'E-Stop', 'primary')]:
+            with self.subTest(confirmed=confirmed):
+                before = self.global_vm.soft_estop_active
                 self.card.estop_btn.on_click(None)
-                self.app.toggle_estop.assert_called_with(current)
-                self.assertIs(self.global_vm.soft_estop_active, expected)
+                self.app.toggle_estop.assert_called_with(before)
+                self.assertEqual(self.card.estop_btn.refresh_binding(), 'STOPPED' if before else 'E-Stop')
+
+                confirm(confirmed)
+
+                self.assertIs(self.global_vm.soft_estop_active, confirmed)
                 self.assertEqual(self.card.estop_btn.refresh_binding(), label)
                 self.assertEqual(self.card.estop_btn.properties, f'color={color}')
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,5 +27,12 @@ class DriveApplicationService:
         self._drive.send_speed(x, y)
 
     def toggle_estop(self, current: bool) -> bool:
-        """Publish the inverse of current and return the new soft estop state."""
+        """Publish the request for the inverse of current and return the requested state.
+
+        The driver's acknowledgement, not this return value, confirms the stop.
+        """
         return self._drive.toggle_estop(current)
+
+    def register_soft_estop_state_callback(self, callback: Callable[[bool], None]) -> None:
+        """Call callback with the soft estop state each time the driver confirms it."""
+        self._drive.register_soft_estop_state_callback(callback)

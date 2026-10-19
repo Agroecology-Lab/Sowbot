@@ -101,10 +101,10 @@ class TestNavPage(unittest.TestCase):
         """Verify drive commands go to the drive service and leave measured velocity alone."""
         self.telemetry_vm.linear_velocity = 0.2
         self.telemetry_vm.angular_velocity = -0.3
-        self.drive.toggle_estop.return_value = True
 
         self.run_vm.move_joystick(0.8, 0.6)
         self.global_vm.toggle_estop()
+        self.drive.register_soft_estop_state_callback.call_args.args[0](True)
 
         self.drive.move_joystick.assert_called_once_with(0.8, 0.6)
         self.drive.toggle_estop.assert_called_once_with(False)

@@ -55,6 +55,8 @@ class TestDriveServices(unittest.TestCase):
         self.app = DriveApplicationService(self.domain)
         self.run = RunViewModel(self.app)
         self.global_vm = GlobalViewModel(self.app)
+        # The driver's acknowledgement reaches the view model through the callback the service registered.
+        self.ack = lambda active: self.ros.create_subscription.call_args.args[2](SimpleNamespace(data=active))
         self.clock = self.enterContext(patch(
             'devkit_ui.view_models.run_view_model.time.monotonic', return_value=1000.0))
 
@@ -63,6 +65,13 @@ class TestDriveServices(unittest.TestCase):
         self.assertEqual(self.ros.create_publisher.call_args_list, [
             call(FakeTwist, 'cmd_vel', 1), call(FakeBool, 'estop/soft', qos.SAFETY_QOS),
         ])
+
+    def test_driver_acknowledgement_is_subscribed_with_the_latched_profile(self):
+        """Verify the confirmed soft estop state arrives on estop/soft/state with the safety profile."""
+        self.ros.create_subscription.assert_called_once()
+        msg_type, topic, callback, profile = self.ros.create_subscription.call_args.args
+        self.assertEqual((msg_type, topic, profile), (FakeBool, 'estop/soft/state', qos.SAFETY_QOS))
+        self.assertTrue(callable(callback))
 
     def test_soft_estop_is_latched_reliable_and_matches_the_driver_profile(self):
         """Verify the soft estop keeps the latched safety profile the driver and bumper topics use."""
@@ -97,18 +106,31 @@ class TestDriveServices(unittest.TestCase):
         self.assertEqual((messages[0].linear.x, messages[0].angular.z), (0.8, -0.6))
         self.assertEqual((messages[1].linear.x, messages[1].angular.z), (0.0, 0.0))
 
-    def test_estop_toggles_both_directions_and_keeps_messages_independent(self):
-        """Verify successive estop toggles publish independent messages on the estop topic."""
+    def test_estop_requests_alternate_and_state_follows_only_the_acknowledgement(self):
+        """Verify toggles publish independent requests and the UI state changes only on confirmation."""
         self.assertFalse(self.global_vm.soft_estop_active)
         self.global_vm.toggle_estop()
+        self.assertFalse(self.global_vm.soft_estop_active)
+
+        self.ack(True)
         self.assertTrue(self.global_vm.soft_estop_active)
         self.global_vm.toggle_estop()
+        self.assertTrue(self.global_vm.soft_estop_active)
+
+        self.ack(False)
         self.assertFalse(self.global_vm.soft_estop_active)
 
         messages = [entry.args[0] for entry in self.estop_publisher.publish.call_args_list]
         self.assertEqual([msg.data for msg in messages], [True, False])
         self.assertIsNot(messages[0], messages[1])
         self.velocity_publisher.publish.assert_not_called()
+
+    def test_unacknowledged_request_never_shows_a_stop(self):
+        """Verify a request the driver never confirms leaves the displayed state unchanged."""
+        for _ in range(3):
+            self.global_vm.toggle_estop()
+        self.assertFalse(self.global_vm.soft_estop_active)
+        self.assertEqual([m.args[0].data for m in self.estop_publisher.publish.call_args_list], [True] * 3)
 
     def test_failed_estop_publish_preserves_last_confirmed_ui_state(self):
         """Verify a publish exception leaves the displayed estop state unchanged."""
@@ -228,16 +250,20 @@ class TestDriveServices(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'publisher down'):
             self.run.move_joystick(0.5, 0.1)
 
-    def test_global_view_model_uses_service_result(self):
-        """Verify the view model stores the returned estop state without assuming a toggle."""
+    def test_global_view_model_registers_for_confirmations(self):
+        """Verify the view model requests the opposite of its confirmed state and stores confirmations."""
         app = Mock(spec=DriveApplicationService)
-        app.toggle_estop.return_value = False
         vm = GlobalViewModel(app)
+        app.register_soft_estop_state_callback.assert_called_once()
 
         vm.toggle_estop()
-
         app.toggle_estop.assert_called_once_with(False)
         self.assertFalse(vm.soft_estop_active)
+
+        app.register_soft_estop_state_callback.call_args.args[0](True)
+        vm.toggle_estop()
+        app.toggle_estop.assert_called_with(True)
+        self.assertTrue(vm.soft_estop_active)
 
 
 class TestPoseLabel(unittest.TestCase):
