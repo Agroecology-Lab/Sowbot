@@ -16,21 +16,27 @@ class FakeLogger:
     """Records log calls by severity."""
 
     def __init__(self):
+        """Initialize an empty log record list."""
         self.records = []
 
     def _log(self, level, text, **_kwargs):
+        """Record a message and its severity, ignoring ROS logging options."""
         self.records.append((level, text))
 
     def info(self, text, **kwargs):
+        """Record an informational message."""
         self._log('info', text, **kwargs)
 
     def warn(self, text, **kwargs):
+        """Record a warning message."""
         self._log('warn', text, **kwargs)
 
     def error(self, text, **kwargs):
+        """Record an error message."""
         self._log('error', text, **kwargs)
 
     def levels(self):
+        """Return recorded severities in emission order."""
         return [level for level, _ in self.records]
 
 
@@ -40,23 +46,29 @@ class FakeNode:
     overrides: ClassVar[dict] = {}
 
     def __init__(self, _name):
+        """Initialize isolated parameter storage, a logger, and recorded timers."""
         self._parameters = {}
         self._logger = FakeLogger()
         self.timers = []
 
     def declare_parameter(self, name, default):
+        """Store a parameter's test override or its declared default."""
         self._parameters[name] = self.overrides.get(name, default)
 
     def get_parameter(self, name):
+        """Wrap a stored parameter value in the interface expected by the node."""
         return SimpleNamespace(value=self._parameters[name])
 
     def create_subscription(self, *_args):
+        """Return a passive subscription double without connecting to ROS."""
         return Mock()
 
     def create_timer(self, period, callback):
+        """Record a timer for inspection without scheduling its callback."""
         self.timers.append((period, callback))
 
     def get_logger(self):
+        """Return this node double's recording logger."""
         return self._logger
 
 
@@ -73,6 +85,7 @@ with patch.dict(sys.modules, {'rclpy': rclpy, 'rclpy.node': rclpy_node,
 
 def _heartbeat(autopilot=MAV.MAV_AUTOPILOT_ARDUPILOTMEGA, kind=MAV.MAV_TYPE_GROUND_ROVER,
                base_mode=0, custom_mode=0):
+    """Build a heartbeat double with configurable vehicle, autopilot, and mode fields."""
     return SimpleNamespace(type=kind, autopilot=autopilot, base_mode=base_mode, custom_mode=custom_mode)
 
 
@@ -93,6 +106,7 @@ class BridgeNodeTest(unittest.TestCase):
             mavlink_bridge_node.time, 'monotonic', side_effect=lambda: self.now))
 
     def make(self, **overrides):
+        """Create a bridge with parameter overrides and inject the controllable test clock."""
         FakeNode.overrides = overrides
         node = mavlink_bridge_node.MavlinkBridgeNode()
         # Both helpers bind time.monotonic as a default argument, so inject the test clock.
@@ -106,6 +120,7 @@ class BridgeNodeTest(unittest.TestCase):
         return [(c.kwargs['vx'], c.kwargs['yaw_rate']) for c in send.call_args_list]
 
     def command(self, node, linear_x, angular_z):
+        """Deliver linear velocity in m/s and yaw rate in rad/s to the bridge callback."""
         node._on_cmd_vel(SimpleNamespace(linear=SimpleNamespace(x=linear_x), angular=SimpleNamespace(z=angular_z)))
 
     def test_commands_are_forwarded_only_while_the_flight_controller_heartbeat_is_fresh(self):

@@ -21,6 +21,7 @@ class TwistHandler:
     """
 
     def __init__(self, node: Node, wheels: Wheels, clock: Callable[[], float] = time.monotonic):
+        """Validate the command timeout and register velocity input and watchdog callbacks."""
         self.log = node.get_logger()
         self._wheels = wheels
         self._clock = clock

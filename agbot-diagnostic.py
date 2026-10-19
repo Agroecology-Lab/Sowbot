@@ -74,6 +74,7 @@ def _sample_shim_stats(run_cmd_fn):
     return None
 
 def run_cmd(cmd):
+    """Run a shell command in the ROS workspace; return stripped output or an empty string on failure."""
     try:
         source_cmd = "source /opt/ros/jazzy/setup.bash && [ -f install/setup.bash ] && source install/setup.bash"
         full_cmd = f"{source_cmd}; {cmd}"
@@ -185,6 +186,7 @@ if __name__ == "__main__":
     print("═"*75)
 
     def run_cmd_plain(cmd):
+        """Run a ROS diagnostic command, returning empty output on failure and allowing interruption."""
         try:
             src = "source /opt/ros/jazzy/setup.bash && [ -f install/setup.bash ] && source install/setup.bash"
             return subprocess.check_output(["/bin/bash", "-c", f"{src}; {cmd}"],

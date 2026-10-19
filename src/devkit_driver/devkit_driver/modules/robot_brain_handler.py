@@ -20,16 +20,21 @@ class RobotBrainHandler:
             Empty, 'esp/configure', self._handle_configure, 10)
 
     def _handle_enable(self, _: Empty) -> None:
+        """Schedule ESP enablement on the RoSys event loop."""
         run_on_rosys_loop(self._robot_brain.enable_esp())
 
     def _handle_disable(self, _: Empty) -> None:
+        """Schedule ESP disablement on the RoSys event loop."""
         run_on_rosys_loop(self._robot_brain.disable_esp())
 
     def _handle_reset(self, _: Empty) -> None:
+        """Schedule an ESP reset on the RoSys event loop."""
         run_on_rosys_loop(self._robot_brain.reset_esp())
 
     def _handle_restart(self, _: Empty) -> None:
+        """Schedule a Robot Brain restart on the RoSys event loop."""
         run_on_rosys_loop(self._robot_brain.restart())
 
     def _handle_configure(self, _: Empty) -> None:
+        """Schedule Robot Brain configuration on the RoSys event loop."""
         run_on_rosys_loop(self._robot_brain.configure())

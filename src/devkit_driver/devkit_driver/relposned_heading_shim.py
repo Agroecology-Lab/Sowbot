@@ -30,6 +30,7 @@ _MIN_BASELINE_M = 0.3
 
 class RelPosnedHeadingShim(Node):
     def __init__(self):
+        """Connect dual-antenna GNSS input to heading and validity publishers."""
         super().__init__('relposned_heading_shim')
         self._pub = self.create_publisher(Imu, '/gnss/heading', 10)
         self._valid_pub = self.create_publisher(Bool, '/gnss/heading_valid', 10)
@@ -42,6 +43,7 @@ class RelPosnedHeadingShim(Node):
         self.get_logger().info('relposned_heading_shim ready')
 
     def _cb(self, msg: UBXNavRelPosNED) -> None:
+        """Publish ENU heading and validity after checking receiver flags and antenna separation."""
         # Both validity flags must be set before trusting the heading
         if not msg.rel_pos_valid or not msg.rel_pos_heading_valid:
             self._reject_count += 1

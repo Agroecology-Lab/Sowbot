@@ -19,10 +19,12 @@ def _heading_sources(monkeypatch):
     """Load both real nodes with passive ROS doubles and a controllable clock."""
     class Node:
         def __init__(self, _name):
+            """Initialize a controllable clock and storage for publisher doubles."""
             self.now_s = 0.0
             self.publishers = {}
 
         def create_publisher(self, _message_type, topic, _qos):
+            """Record a publisher double under its topic name for later assertions."""
             self.publishers[topic] = Mock()
             return self.publishers[topic]
 
@@ -33,10 +35,12 @@ def _heading_sources(monkeypatch):
         get_parameter = Mock(return_value=types.SimpleNamespace(value=False))
 
         def get_clock(self):
+            """Return the test time in the forms consumed by the heading nodes."""
             now = types.SimpleNamespace(nanoseconds=int(self.now_s * 1e9), to_msg=lambda: self.now_s)
             return types.SimpleNamespace(now=lambda: now)
 
     def imu():
+        """Create the writable IMU fields populated by the heading nodes."""
         return types.SimpleNamespace(
             header=types.SimpleNamespace(stamp=None, frame_id=''),
             orientation=types.SimpleNamespace(x=0.0, y=0.0, z=0.0, w=0.0),
@@ -58,6 +62,7 @@ def _heading_sources(monkeypatch):
         monkeypatch.setitem(sys.modules, name, module)
 
     def load(name, class_name):
+        """Load and instantiate a real heading node using the patched ROS modules."""
         path = ROOT / 'src/devkit_driver/devkit_driver' / f'{name}.py'
         spec = importlib.util.spec_from_file_location(name, path)
         module = importlib.util.module_from_spec(spec)
@@ -71,22 +76,26 @@ def _heading_sources(monkeypatch):
 
 
 def _pvt(**overrides):
+    """Build a valid moving GNSS fix, allowing individual acceptance gates to be overridden."""
     values = {'gnss_fix_ok': True, 'invalid_llh': False, 'g_speed': 1000,
               'head_acc': 1000, 'head_mot': 0}
     return types.SimpleNamespace(**(values | overrides))
 
 
 def _relposned(**overrides):
+    """Build valid dual-antenna heading input with optional field overrides."""
     values = {'rel_pos_valid': True, 'rel_pos_heading_valid': True,
               'rel_pos_length': 100, 'rel_pos_heading': 0, 'acc_heading': 1000}
     return types.SimpleNamespace(**(values | overrides))
 
 
 def _valid(node):
+    """Return the most recently published heading-validity flag."""
     return node.publishers['/gnss/heading_valid'].publish.call_args.args[0].data
 
 
 def _invalidity_signal(node):
+    """Check monitor configuration and evaluate its predicate against the last validity flag."""
     config = yaml.safe_load((ROOT / 'src/devkit_bringup/config/sowbot_monitor.yaml').read_text())
     monitor = next(item for item in config['monitors'] if item['name'] == '/gnss/heading_valid')
     assert monitor['message_type'] == 'std_msgs/msg/Bool'
@@ -99,6 +108,7 @@ def _invalidity_signal(node):
 
 
 def test_cached_heading_trips_monitor_even_with_low_variance(heading_sources):
+    """Verify cached headings trigger invalidity and a fresh accepted fix clears it."""
     node = heading_sources.cog
     node._cb(_pvt())
     assert _valid(node) is True
@@ -123,6 +133,7 @@ def test_cached_heading_trips_monitor_even_with_low_variance(heading_sources):
 
 @pytest.mark.parametrize('age, heading_count', [(10.0, 2), (10.001, 1)])
 def test_cache_timeout_keeps_reporting_invalid(heading_sources, age, heading_count):
+    """Verify invalidity persists at and beyond the cached-heading publication timeout."""
     node = heading_sources.cog
     node._cb(_pvt())
     node.now_s = age
@@ -132,6 +143,7 @@ def test_cache_timeout_keeps_reporting_invalid(heading_sources, age, heading_cou
 
 
 def test_no_accepted_heading_reports_invalid(heading_sources):
+    """Verify the stale timer reports invalidity without inventing an initial heading."""
     node = heading_sources.cog
     node._republish_stale()
     assert _valid(node) is False
@@ -142,6 +154,7 @@ def test_no_accepted_heading_reports_invalid(heading_sources):
     {'gnss_fix_ok': False}, {'invalid_llh': True}, {'g_speed': 499}, {'head_acc': 3000001},
 ])
 def test_rejected_cog_input_invalidates_heading(heading_sources, rejected):
+    """Verify a rejected fix invalidates the previous heading without publishing a new one."""
     node = heading_sources.cog
     node._cb(_pvt())
     node._cb(_pvt(**rejected))
@@ -153,6 +166,7 @@ def test_rejected_cog_input_invalidates_heading(heading_sources, rejected):
     {'rel_pos_valid': False}, {'rel_pos_heading_valid': False}, {'rel_pos_length': 29},
 ])
 def test_dual_antenna_gates_and_recovery(heading_sources, rejected):
+    """Verify rejected dual-antenna input reports invalidity until valid input recovers it."""
     node = heading_sources.dual
     node._cb(_relposned(**rejected))
     assert _valid(node) is False
@@ -163,6 +177,7 @@ def test_dual_antenna_gates_and_recovery(heading_sources, rejected):
 
 
 def test_disabled_cog_does_not_publish_heading_or_validity(heading_sources):
+    """Verify dual-antenna mode silences both course-over-ground output topics."""
     node = heading_sources.cog
     node._dual_antenna = True
     node._cb(_pvt())

@@ -22,6 +22,7 @@ def limit_velocity(linear_x: float, angular_z: float,
 
 
 def _clamp(value: float, limit: float) -> float:
+    """Clamp a finite value to symmetric bounds, replacing nonfinite values with zero."""
     if not math.isfinite(value):
         return 0.0
     return max(-limit, min(limit, value))

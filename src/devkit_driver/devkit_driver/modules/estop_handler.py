@@ -18,6 +18,7 @@ class EStopHandler:
     BACK_ID = 'back'
 
     def __init__(self, node: Node, estop: EStop):
+        """Connect soft-stop requests, state publishers, and RoSys emergency-stop events."""
         self.log = node.get_logger()
         self._estop = estop
 
@@ -33,6 +34,7 @@ class EStopHandler:
         rosys.on_startup(self._check_on_startup)
 
     def _check_on_startup(self) -> None:
+        """Publish the initial soft-stop state and each hardware emergency-stop input state."""
         self._publish_soft_state()
         if not isinstance(self._estop, EStopHardware):
             return
@@ -64,4 +66,5 @@ class EStopHandler:
         self._publish_soft_state()
 
     def _publish_soft_state(self) -> None:
+        """Publish the soft-stop state currently reported by the driver."""
         self.estop_soft_state_publisher.publish(Bool(data=self._estop.is_soft_estop_active))

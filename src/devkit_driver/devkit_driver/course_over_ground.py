@@ -56,6 +56,7 @@ _STALE_REPUB_HZ = 5.0
 
 class CourseOverGround(Node):
     def __init__(self):
+        """Set up GNSS input, heading and validity publishers, and cached-heading timers."""
         super().__init__('course_over_ground')
 
         # When True, a moving-baseline (dual-F9P) heading source is active and
@@ -82,6 +83,7 @@ class CourseOverGround(Node):
         self.get_logger().info('course_over_ground ready')
 
     def _cb(self, msg: UBXNavPVT) -> None:
+        """Publish gated course-over-ground heading and validity unless dual-antenna mode is active."""
         # Moving-baseline heading is authoritative when present — stay silent.
         if self._dual_antenna:
             return
