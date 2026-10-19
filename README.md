@@ -60,11 +60,11 @@ This repository provides the drivers and orchestration for the Sowbot platform, 
 | ArduPilot and the SBCs.                                 |
 +---------------------------------------------------------+
 ```
-[Full architectural diagram](https://github.com/Agroecology-Lab/Sowbot/blob/dev/docs/research/UI.md#diagram-as-built)
+[Full architectural diagram](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga-dev/docs/images/ui/architecture.md)
 
 LLM Generated diagram:
 
-[![Alternate LLM generated architectural diagram](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros/diagram.png)](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros?utm_source=readme&utm_medium=picture)
+[![Alternate LLM generated architectural diagram](https://gitdiagram.com/agroecology-lab/feldfreund_devkit_ros/diagram.png)](https://gitdiagram.com/agroecology-lab/sowbot?utm_source=readme&utm_medium=picture)
 
 
 
