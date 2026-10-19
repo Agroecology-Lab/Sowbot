@@ -91,10 +91,10 @@ Related [Safety Roadmap](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga
 |---|---------|-------------|--------|-----|-------|
 | **FOUNDATION** | | | | | **2025** |
 | F1 | Containerised deployment | Full ROS 2 Jazzy stack managed via Docker and `manage.py`. Live volume mapping to `/workspace`. Build, full-build, and `+sim` build modes. | Done | 6 | 2025 |
-| F2 | Stable device addressing | `fixusb.py` with Jetson/generic architecture detection, kernel `low_latency` mode, and udev symlink generation. Writes `.env` consumed by all launch files. Note: `run_neo()` never calls `fixusb.py` so `.env` is not written for neo-only runs. | Done | 6 | 2025 |
+| F2 | Stable device addressing | `tools/fixusb.py` with Jetson/generic architecture detection, kernel `low_latency` mode, and udev symlink generation. Writes `.env` consumed by all launch files. Note: `run_neo()` never calls `tools/fixusb.py` so `.env` is not written for neo-only runs. | Done | 6 | 2025 |
 | F3 | Teleop dashboard | NiceGUI web cockpit on `:80`. Three-tab interface: **Nav** (joystick, e-stop, topo map, node-drop, track mode), **Mission** (fields2cover corner entry, F2C row plan generator, reorderable mission queue), **System** (telemetry, safety indicators, GPS leaflet map). | Done | 6 | 2025 |
-| F4 | ublox DGNSS driver | Dual F9P moving-base configuration with dynamic port assignment via `fixusb.py`. | Done | 6 | 2026 |
-| F5 | Diagnostics TUI | `agbot-diagnostic.py` terminal status view of all hardware topics. Run inside container via `login.sh`. | Done | 6 | 2025 |
+| F4 | ublox DGNSS driver | Dual F9P moving-base configuration with dynamic port assignment via `tools/fixusb.py`. | Done | 6 | 2026 |
+| F5 | Diagnostics TUI | `tools/agbot-diagnostic.py` terminal status view of all hardware topics. Run inside container via `tools/login.sh`. | Done | 6 | 2025 |
 | **MVP FIELD** | | | | | **2026** |
 | M1 | Agri Open Core platform integration | Demonstrates AOC platform abstraction on affordable ARM hardware accessible to smallholders. | Done | 3 | 2026 |
 | M2 | Topological navigation + Nav2 | LCAS `topological_navigation` (`aoc_refactor` branch) building in Dockerfile. RViz visualisation confirmed working. Self-contained `navigation2.py` with A\* route planning, explicit state machine, and `row_traversal` / `NavigateToPose` / `goal_align` edge actions. `fake_nav2_server` with `/limbic_row_follow` stub enables full pipeline testing in sim. `sim_nav.launch.py` now routes through real Nav2. **Multi-row mission following (entry/exit node pairs across boustrophedon rows) validated end-to-end in Gazebo.** Pending: Jazzy field validation on hardware. | Sim only. Blocked: hardware field validation | 4 | 2026 |
@@ -352,22 +352,22 @@ Scenario configs live in [`tmule/`](tmule/) — see [`tmule/README.md`](tmule/RE
 ### Interactive Shell
 To enter the running container for debugging or manual ROS 2 commands:
 ```bash
-./login.sh
+./tools/login.sh
 ```
 
 ### Diagnostics
 If hardware is connected but topics are not flowing, run the diagnostic tool from inside the container:
 
-#### After running ./login.sh
+#### After running ./tools/login.sh
 ```bash
-python3 agbot-diagnostic.py
+python3 tools/agbot-diagnostic.py
 ```
 
 ![TUI Status.](https://raw.githubusercontent.com/Agroecology-Lab/Open_agbot_devkit_ros/refs/heads/main/assets/Screenshot%20From%202026-01-21%2018-07-45.png)
 
 You can also make it verbose with:
 ```bash
-python3 agbot-diagnostic.py full
+python3 tools/agbot-diagnostic.py full
 ```
 
 ## Sketch of MVP 2026 architecture

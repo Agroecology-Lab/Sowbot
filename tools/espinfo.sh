@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # 1. Hardware Access & Environment Setup
-if [ -f "fixusb.py" ]; then
-    python3 fixusb.py
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$TOOLS_DIR/fixusb.py" ]; then
+    python3 "$TOOLS_DIR/fixusb.py"
 fi
 
 # Determine Python path from .lizard_venv or default venv

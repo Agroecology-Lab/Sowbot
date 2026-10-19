@@ -94,7 +94,7 @@ class DevkitManager:
             build_cmd += ['--build-arg', 'INSTALL_SIM=true']
 
         env = {**os.environ, 'DOCKER_BUILDKIT': '1'}
-        if subprocess.run(build_cmd, env=env, check=False).returncode != 0:
+        if subprocess.run(build_cmd, env=env, cwd=self.root_dir, check=False).returncode != 0:
             self._log("Build failed.", "ERROR")
             sys.exit(1)
 
@@ -397,7 +397,7 @@ class DevkitManager:
         if not has_usb_hardware:
             self._log("No USB hardware detected. Skipping hardware detection.", "WARN")
 
-        if has_usb_hardware and (self.root_dir / 'fixusb.py').exists():
+        if has_usb_hardware and (self.root_dir / 'tools' / 'fixusb.py').exists():
             # Prep for fixusb.py: bind so it can detect serial ports
             bound_before = self._find_ublox_interfaces()
             if not bound_before:
@@ -413,7 +413,8 @@ class DevkitManager:
                     self._log("Binding cdc_acm for GPS detection...")
                     self._cdc_acm_bind(ublox_ifaces)
 
-            subprocess.run(['sudo', 'python3', 'fixusb.py'], check=True)
+            subprocess.run(['sudo', 'python3', str(self.root_dir / 'tools' / 'fixusb.py')],
+                           cwd=self.root_dir, check=True)
 
             # Restore ownership of .env to the actual user
             real_user = os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
@@ -572,11 +573,11 @@ class DevkitManager:
         # Limbic-only flags: topological map env + get_maize_topo.py mount.
         limbic_flags = [
             '--env', 'TMAP2_FILE=/workspace/maps/maize_map',
-            '-v', f'{self.root_dir}/get_maize_topo.py:/workspace/get_maize_topo.py:ro',
-            '-v', f'{self.root_dir}/topo_to_forest3d.py:/workspace/topo_to_forest3d.py:ro',
+            '-v', f'{self.root_dir}/worldgen/get_maize_topo.py:/workspace/get_maize_topo.py:ro',
+            '-v', f'{self.root_dir}/worldgen/topo_to_forest3d.py:/workspace/topo_to_forest3d.py:ro',
             # Shared world generator (cache + generation) used by both the
             # Launch Sim button and the UI Rebuild button.
-            '-v', f'{self.root_dir}/worldgen.sh:/workspace/worldgen.sh:ro',
+            '-v', f'{self.root_dir}/worldgen/worldgen.sh:/workspace/worldgen.sh:ro',
         ]
         cyclonedds_uri = self._cyclonedds_uri(cfg, is_sim == 'true')
         docker_cmd = [*self._base_docker_cmd(env_file, cyclonedds_uri, limbic_flags), ros_command]

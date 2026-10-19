@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1  # repo root; compose file path is relative to it
+
 compose_args="-f docker/docker-compose.yml"
 
 if [ $# -eq 0 ]

@@ -78,7 +78,11 @@ def analyse(crops, n_rows, headland):
 
 # ── YAML emission ─────────────────────────────────────────────────────────────
 
-sys.path.insert(0, str(Path(__file__).parent / 'src' / 'devkit_ui'))
+# In the container this file sits in /workspace (next to src/); in the repo it lives in worldgen/.
+_HERE = Path(__file__).resolve().parent
+_UI_SRC = next((d / 'src' / 'devkit_ui' for d in (_HERE, _HERE.parent) if (d / 'src' / 'devkit_ui').is_dir()),
+               _HERE / 'src' / 'devkit_ui')
+sys.path.insert(0, str(_UI_SRC))
 from devkit_ui.topo_defaults import ACTIONS, DEFINITIONS  # noqa: E402
 import yaml  # noqa: E402
 
