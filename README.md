@@ -17,38 +17,36 @@ This repository provides the drivers and orchestration for the Sowbot platform, 
 [Docs](https://agroecology-lab.github.io/Sowbot_Data/python_api.html)
 ```
 +---------------------------------------------------------+
-|               ROS 2 DUAL SBC Open Core                  |
+|                ROS 2 DUAL SBC Open Core                 |
 | +----------------------+     +----------------------+   |
 | |       NEO SBC        | Gig |      LIMBIC SBC      |   |
 | | - Camera Streams     | Eth | - NiceGUI Dashboard  |   |
 | |   (YOLO / ExG)       |<===>| - Nav2/LCAS TopoNav  |   |
 | | - Visual Servoing    |     | - FusionCore UKF     |   |
 | | - Crop Processing    |     | - devkit_mavlink     |   |
-| | - High-Throughput    |     |   (cmd_vel to MAVLink|   |
-| |   Perception         |     |   zero if stale)     |   |
-| +----------------------+     | - Dual F9P RTK (USB) |   |
-|                              +----------+-----------+   |
+| | - High-Throughput    |     |                      |   |
+| |   Perception         |     |                      |   |
+| +----------------------+     +----------------------+   |
 +---------------------------v-----------------------------+
                             |
                     Serial MAVLink (UART)
-        baud: MAVLINK_BAUD here, SERIALn_BAUD on the FC
                             |
 +---------------------------v-----------------------------+
-|              ARDUPILOT FLIGHT CONTROLLER                |
+|               ARDUPILOT FLIGHT CONTROLLER               |
 |    LEVIA-H7 running ArduRover, GUIDED mode (bring-up)   |
 |    SUPERVISORY: not the rated stop function             |
 |---------------------------------------------------------|
 | - Motion execution       - EKF3; planned GPS_INPUT     |
-| - Geofence (GUIDED)         from FusionCore            |
+| - Geofence (GUIDED)         from FusionCore             |
 | - Failsafes: GCS/GPS     - Arming state machine         |
 |   loss, EKF variance     - Pre-arm checks               |
+| - Dual F9P RTK (UART)                                   |
 +---------------------------+-----------------------------+
                             |
-                    DroneCAN / CAN bus
-              (motor driver choice open, O31)
+             DroneCAN & SimpleCan (Lua)/ CAN bus
                             |
 +---------------------------v-----------------------------+
-|            MOTOR CONTROLLERS (48V traction)             |
+|         MOTOR CONTROLLERS (48V traction)               |
 |---------------------------------------------------------|
 | Differential-drive tracked platform                     |
 | Traction power passes through the SW180 contactors      |
@@ -56,11 +54,10 @@ This repository provides the drivers and orchestration for the Sowbot platform, 
 +---------------------------------------------------------+
 
 +---------------------------------------------------------+
-|      HARDWIRED 24V SAFETY LOOP (rated stop function)    |
+|     HARDWIRED 24V SAFETY LOOP (rated stop function)     |
 | E-stops, bumpers, Inxpect radar + C203A -> 2x SW180     |
 | in series on the 48V bus. Independent of ROS,           |
-| ArduPilot and the SBCs. Not yet complete: see           |
-| safety_roadmap.md (O7, O8, O14)                         |
+| ArduPilot and the SBCs.                                 |
 +---------------------------------------------------------+
 ```
 [Full architectural diagram](https://github.com/Agroecology-Lab/Sowbot/blob/dev/docs/research/UI.md#diagram-as-built)
