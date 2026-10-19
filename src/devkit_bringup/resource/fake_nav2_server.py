@@ -20,6 +20,7 @@ Usage:
         -p initial_y:=0.0
 """
 
+import logging
 import math
 import threading
 import time
@@ -481,17 +482,17 @@ def main(args=None):
             if executor is not None and node is not None:
                 executor.remove_node(node)
         except Exception:
-            pass
+            logging.getLogger(__name__).debug('executor.remove_node failed during shutdown', exc_info=True)
         try:
             if node is not None:
                 node.destroy_node()
         except Exception:
-            pass
+            logging.getLogger(__name__).debug('node.destroy_node failed during shutdown', exc_info=True)
         try:
             if rclpy.ok():
                 rclpy.shutdown()
         except Exception:
-            pass
+            logging.getLogger(__name__).debug('rclpy.shutdown failed', exc_info=True)
 
 
 if __name__ == '__main__':

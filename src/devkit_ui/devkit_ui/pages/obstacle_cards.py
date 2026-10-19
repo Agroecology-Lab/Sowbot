@@ -1,6 +1,7 @@
 """NiceGUI cards for marking, drawing and listing obstacles on the Run and Plan tabs."""
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -8,6 +9,16 @@ from nicegui import ui
 
 if TYPE_CHECKING:
     from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
+
+_log = logging.getLogger(__name__)
+
+
+def _remove_layer(layer) -> None:
+    """Remove a leaflet layer from the map; a failure (for example a client that already left) is logged at debug."""
+    try:
+        layer.run_method('remove')
+    except Exception:
+        _log.debug('could not remove map layer', exc_info=True)
 
 
 # ── UI: Nav-tab attachment ────────────────────────────────────────────────────
@@ -120,16 +131,10 @@ class MissionDrawHandle:
         button so user intent ('clear everything') actually clears."""
         self.corners.clear()
         if self.layer[0] is not None:
-            try:
-                self.layer[0].run_method('remove')
-            except Exception:
-                pass
+            _remove_layer(self.layer[0])
             self.layer[0] = None
         for m in self.markers:
-            try:
-                m.run_method('remove')
-            except Exception:
-                pass
+            _remove_layer(m)
         self.markers.clear()
 
 
@@ -193,10 +198,7 @@ def attach_mission_sidebar_controls(
     def _redraw_in_progress() -> None:
         """Replace the polygon preview, drawing it when at least two corners exist."""
         if handle.layer[0] is not None:
-            try:
-                handle.layer[0].run_method('remove')
-            except Exception:
-                pass
+            _remove_layer(handle.layer[0])
             handle.layer[0] = None
         if len(handle.corners) >= 2:
             latlngs = [[la, lo] for la, lo in handle.corners]
@@ -300,10 +302,7 @@ def attach_mission_obstacle_panel(handle: MissionDrawHandle) -> None:
 
         # Map layers: clear-all then redraw-all. Cheap at obstacle counts < 1000.
         for lyr in handle.rendered.values():
-            try:
-                lyr.run_method('remove')
-            except Exception:
-                pass
+            _remove_layer(lyr)
         handle.rendered.clear()
         for o in obstacles:
             nm = o.get('name', '?')

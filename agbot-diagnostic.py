@@ -77,7 +77,7 @@ def run_cmd(cmd):
     try:
         source_cmd = "source /opt/ros/jazzy/setup.bash && [ -f install/setup.bash ] && source install/setup.bash"
         full_cmd = f"{source_cmd}; {cmd}"
-        return subprocess.check_output(full_cmd, shell=True, executable="/bin/bash", stderr=subprocess.DEVNULL).decode().strip()
+        return subprocess.check_output(["/bin/bash", "-c", full_cmd], stderr=subprocess.DEVNULL).decode().strip()
     except Exception:
         return ""
 
@@ -187,8 +187,8 @@ if __name__ == "__main__":
     def run_cmd_plain(cmd):
         try:
             src = "source /opt/ros/jazzy/setup.bash && [ -f install/setup.bash ] && source install/setup.bash"
-            return subprocess.check_output(f"{src}; {cmd}", shell=True,
-                                           executable="/bin/bash", stderr=subprocess.DEVNULL).decode().strip()
+            return subprocess.check_output(["/bin/bash", "-c", f"{src}; {cmd}"],
+                                           stderr=subprocess.DEVNULL).decode().strip()
         except KeyboardInterrupt:
             raise
         except Exception:

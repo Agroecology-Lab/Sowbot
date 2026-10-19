@@ -41,6 +41,7 @@ place obstacles thousands of kilometres from the origin.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -469,5 +470,5 @@ class ObstacleManager:
             try:
                 self._anchor_timer.cancel()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug('could not cancel anchor timer', exc_info=True)
             self._anchor_timer = None
