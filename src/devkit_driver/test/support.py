@@ -1,9 +1,12 @@
 """Load driver handler modules without a ROS installation.
 
 Registers stand-ins for rclpy and the message packages, and a bare devkit_driver package
-whose __init__ is not executed, so only the handler under test is imported.
+whose __init__ is not executed, so only the handler under test is imported. rosys and
+nicegui are stubbed only when they are not installed, so a full environment (make test)
+still runs against the real libraries and a bare colcon environment (industrial_ci) works.
 """
 import importlib
+import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -28,6 +31,25 @@ def _package(name: str, path: Path) -> ModuleType:
     module = ModuleType(name)
     module.__path__ = [str(path)]
     return module
+
+
+def _absent(name: str) -> bool:
+    """Return True if the top-level module cannot be imported."""
+    return name not in sys.modules and importlib.util.find_spec(name) is None
+
+
+def _optional_stubs() -> dict[str, ModuleType]:
+    """Build stand-ins for rosys and nicegui, for the ones that are not installed."""
+    stubs: dict[str, ModuleType] = {}
+    if _absent('rosys'):
+        hardware_names = ('EStop', 'EStopHardware', 'RobotBrain', 'Wheels')
+        stubs['rosys'] = _module('rosys', on_startup=lambda *_args, **_kwargs: None)
+        stubs['rosys.hardware'] = _module('rosys.hardware', **{name: type(name, (), {}) for name in hardware_names})
+    if _absent('nicegui'):
+        core = _module('nicegui.core', loop=None)
+        stubs['nicegui'] = _module('nicegui', core=core)
+        stubs['nicegui.core'] = core
+    return stubs
 
 
 def install_stubs() -> None:
@@ -59,6 +81,7 @@ def install_stubs() -> None:
         'std_msgs': _module('std_msgs'),
         'std_msgs.msg': _module('std_msgs.msg', Bool=Bool, Empty=Empty),
     }
+    stubs.update(_optional_stubs())
     for name, module in stubs.items():
         sys.modules.setdefault(name, module)
     package = _package('devkit_driver', _PACKAGE_DIR)
