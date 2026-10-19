@@ -4,7 +4,7 @@ CONTAINER_NAME=$(docker ps --format '{{.Names}}' | grep -E '^feldfreund_runtime$
 if [ -z "$CONTAINER_NAME" ]; then
     echo "------------------------------------------------------"
     echo "Error: No running Feldfreund container found."
-    echo "Ensure you have started the stack using ./tools/manage.py"
+    echo "Ensure you have started the stack using ./manage.py"
     echo "------------------------------------------------------"
     exit 1
 fi

@@ -3,6 +3,7 @@
 
 # 1. Hardware Access & Environment Validation
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$TOOLS_DIR/.." || exit 1
 if [ -f "$TOOLS_DIR/fixusb.py" ]; then
     python3 "$TOOLS_DIR/fixusb.py"
 else
