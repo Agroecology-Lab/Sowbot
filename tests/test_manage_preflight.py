@@ -32,6 +32,7 @@ def _run_output(env_text, files=None):
             path.write_text(text)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), \
+                patch.object(module.shutil, 'which', return_value=None), \
                 patch.object(module.subprocess, 'run', side_effect=_Stop), \
                 patch.object(module.os, 'system'):
             with contextlib.suppress(_Stop):
