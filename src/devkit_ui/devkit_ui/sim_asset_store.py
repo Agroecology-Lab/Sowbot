@@ -28,7 +28,7 @@ class SimAssetStore:
         if not self._crop_dir.exists():
             return []
         return [d.name for d in sorted(self._crop_dir.iterdir())
-                if d.is_dir() and (d / 'model.sdf').exists()]
+                if d.is_dir() and (d / 'model.sdf').is_file()]
 
     def has_crop_model(self, name: str) -> bool:
         """Return whether name is a crop model folder containing a model.sdf."""
