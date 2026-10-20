@@ -34,7 +34,8 @@ def load_mission_harness():
         'GlobalViewModel', 'RunViewModel', 'TopologyViewModel', 'TelemetryViewModel',
         'MapAuthoringViewModel',
         'RobotBrainViewModel', 'SimViewModel', 'PlanViewModel',
-        'ObstacleManager', 'ObstacleViewModel', 'MissionStore', 'MissionDomainService', 'MissionApplicationService',
+        'ObstacleApplicationService', 'ObstacleManager', 'ObstacleViewModel',
+        'MissionStore', 'MissionDomainService', 'MissionApplicationService',
         'MissionViewModel', 'ui', 'String',
     )}
     namespace.update({name: getattr(mds, name) for name in (

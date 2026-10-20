@@ -1,7 +1,7 @@
 
 ```mermaid
 flowchart TB
-  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 371 lines)"]
+  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 376 lines)"]
     subgraph UI["View (NiceGUI)"]
       Content["content(): four tabs"]
       NavPage["NavPage (class)"]
@@ -45,6 +45,7 @@ flowchart TB
       TopologyEdit["TopologyEditService<br/>(stage drop, F2C save, repair, delete)"]
       PlanApp["PlanApplicationService<br/>(plan rows, import plan, save rows; keeps no draft)"]
       MissionApp["MissionApplicationService"]
+      ObstacleApp["ObstacleApplicationService<br/>(mark here, add circle or polygon, delete)"]
       SimAssets["SimAssetService<br/>(crop models, soil textures; files only)"]
       SimWorld["SimWorldService<br/>(rebuild Gazebo world via worldgen.sh)"]
     end
@@ -69,6 +70,7 @@ flowchart TB
     subgraph INFRA["Infrastructure"]
       TopoMapStore["TopoMapStore<br/>(map file I/O; sits in the domain_services package)"]
       MissionStore["MissionStore<br/>(YAML or SQLite, scheduling, run recording)"]
+      SimAssetStore["SimAssetStore<br/>(crop model folders, soil texture folder)"]
       ObstacleManager["ObstacleManager<br/>(obstacles.yaml, /obstacles publisher)"]
       RosGateway["RosGateway<br/>(wraps the rclpy Node: publishers, subscriptions,<br/>clients, timers, clock, tf, parameters, logging;<br/>turns QosSpec into QoSProfile)"]
     end
@@ -123,13 +125,15 @@ flowchart TB
   MissionVM --> MissionApp
   SimVM --> SimAssets
   SimVM --> SimWorld
-  ObstacleVM -.-> ObstacleManager
+  ObstacleVM --> ObstacleApp
 
   PlanApp --> TopologyEdit
   PlanApp --> TopologyApp
   PlanApp --> TelemetryApp
   PlanApp --> RowPlanning
   PlanApp --> F2CPkg
+  ObstacleApp --> ObstacleManager
+  ObstacleApp --> TelemetryApp
   TopologyEdit --> TopologyApp
   TopologyEdit --> RowBuilder
   RowBuilder --> RowPlanning
@@ -138,8 +142,8 @@ flowchart TB
   RowPlanning --> F2CPkg
   DemMod --> F2CPkg
   SimWorld --> SimAssets
-  MissionApp -.->|"live doc getter"| TopologyApp
-  ObstacleVM -.->|"gps getter"| TelemetryApp
+  SimAssets --> SimAssetStore
+  MissionApp --> TopologyApp
   ObstacleManager -.->|"odom and gps getters"| TelemetryApp
   AuthoringVM -.->|"timer factory"| RosGateway
 
@@ -178,10 +182,10 @@ flowchart TB
   class Medkit todo
   class ProcReg proc
   class GlobalVM,RunVM,AuthoringVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM vm
-  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,SimAssets,SimWorld app
+  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,ObstacleApp,SimAssets,SimWorld app
   class DriveDom,NavDom,RowDiscDom,RobotBrainDom,TelemetryDom,TopologyDom,MissionDom dom
   class RowBuilder,RowPlanning,DemMod,F2CPkg pure
-  class TopoMapStore,MissionStore,ObstacleManager,RosGateway infra
+  class TopoMapStore,MissionStore,SimAssetStore,ObstacleManager,RosGateway infra
 
   style P1 fill:#ffffff,stroke:#6b7280,color:#111827
   style UI fill:#eff6ff,stroke:#1e40af,color:#111827

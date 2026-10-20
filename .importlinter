@@ -43,10 +43,6 @@ forbidden_modules =
     devkit_ui.qos
     rclpy
 allow_indirect_imports = True
-unmatched_ignore_imports_alerting = error
-ignore_imports =
-    # TODO(#116): ObstacleViewModel -> ObstacleApplicationService
-    devkit_ui.view_models.obstacle_view_model -> devkit_ui.obstacles
 
 [importlinter:contract:services-ui-neutral]
 name = Services are UI-neutral

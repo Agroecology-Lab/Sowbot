@@ -241,6 +241,9 @@ with patch.dict(sys.modules, {'nicegui': nicegui}):
 
 
 with patch.dict(sys.modules, {'nicegui': nicegui}):
+    from devkit_ui.application_services.obstacle_application_service import (
+        ObstacleApplicationService,
+    )
     from devkit_ui.pages.obstacle_cards import attach_nav_card
     from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
 
@@ -495,9 +498,10 @@ class TestRowDiscoveryCard(unittest.IsolatedAsyncioTestCase):
 class TestObstacleUndo(unittest.TestCase):
     def setUp(self) -> None:
         fake_ui.reset()
-        self.gps = SimpleNamespace(latitude=51.45, longitude=-2.58)
+        self.telemetry = SimpleNamespace(
+            latest_gps=SimpleNamespace(latitude=51.45, longitude=-2.58))
         self.manager = Mock()
-        self.vm = ObstacleViewModel(self.manager, lambda: self.gps)
+        self.vm = ObstacleViewModel(ObstacleApplicationService(self.manager, self.telemetry))
 
     def test_marked_obstacle_can_be_undone(self) -> None:
         self.manager.add.return_value = 'OBS_1'
@@ -540,7 +544,7 @@ class TestObstacleUndo(unittest.TestCase):
         self.assertTrue(dialog.is_open)
 
     def test_missing_gps_reports_error_without_creating_undo_prompt(self) -> None:
-        self.gps = None
+        self.telemetry.latest_gps = None
         attach_nav_card(self.vm)
 
         fake_ui.find('button', 'Mark here').on_click()

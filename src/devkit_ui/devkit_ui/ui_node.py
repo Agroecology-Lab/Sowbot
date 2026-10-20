@@ -24,6 +24,9 @@ from devkit_ui.application_services.mission_application_service import MissionAp
 from devkit_ui.application_services.navigation_application_service import (
     NavigationApplicationService,
 )
+from devkit_ui.application_services.obstacle_application_service import (
+    ObstacleApplicationService,
+)
 from devkit_ui.application_services.plan_application_service import PlanApplicationService
 from devkit_ui.application_services.robot_brain_application_service import RobotBrainApplicationService
 from devkit_ui.application_services.row_discovery_application_service import (
@@ -178,7 +181,8 @@ class NiceGuiNode:
         # the cards bind to. Start after the telemetry service exists so the getters resolve.
         self._obstacle_mgr = ObstacleManager(
             self._ros, lambda: self.latest_odom, lambda: self.latest_gps)
-        self._obstacle_vm = ObstacleViewModel(self._obstacle_mgr, lambda: self.latest_gps)
+        self._obstacle_vm = ObstacleViewModel(
+            ObstacleApplicationService(self._obstacle_mgr, self._telemetry_app_service))
         self._obstacle_mgr.start()
 
         # MISSION: store owns missions.yaml, scheduling, and run recording.
