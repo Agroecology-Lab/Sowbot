@@ -378,7 +378,8 @@ class TestDropNodeCard(unittest.TestCase):
 class TestNavigationSidebar(unittest.TestCase):
     def setUp(self) -> None:
         fake_ui.reset()
-        self.global_state = GlobalViewModel(Mock())
+        self.drive = Mock(soft_estop_active=False)
+        self.global_state = GlobalViewModel(self.drive)
         self.topo = TopologyViewModel(Mock())
         self.nav_state = RunViewModel.Topo()
         self.on_go = Mock()
@@ -413,7 +414,7 @@ class TestNavigationSidebar(unittest.TestCase):
         self.assertTrue(cancel.refresh_binding())
 
         self.nav_state.navigating = False
-        self.global_state.soft_estop_active = True
+        self.drive.soft_estop_active = True
         self.assertFalse(go.refresh_binding())
 
     def test_status_bindings_distinguish_success_failure_error_and_idle(self) -> None:

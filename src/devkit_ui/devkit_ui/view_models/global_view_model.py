@@ -10,10 +10,13 @@ if TYPE_CHECKING:
 
 class GlobalViewModel:
     def __init__(self, drive_app_service: DriveApplicationService) -> None:
-        """Initialize with the soft emergency stop inactive until the driver confirms a state."""
-        self.soft_estop_active: bool = False
+        """Bind to the drive service, which holds the soft emergency stop state."""
         self._drive_app_service = drive_app_service
-        drive_app_service.register_soft_estop_state_callback(self._on_soft_estop_state)
+
+    @property
+    def soft_estop_active(self) -> bool:
+        """Return the soft estop state the driver last confirmed, False before any confirmation."""
+        return self._drive_app_service.soft_estop_active
 
     def toggle_estop(self) -> None:
         """Request the opposite of the confirmed soft estop state.
@@ -22,7 +25,3 @@ class GlobalViewModel:
         never shows STOPPED for a request the driver did not apply. Publish errors propagate.
         """
         self._drive_app_service.toggle_estop(self.soft_estop_active)
-
-    def _on_soft_estop_state(self, active: bool) -> None:
-        """Store the soft estop state the driver confirmed."""
-        self.soft_estop_active = active

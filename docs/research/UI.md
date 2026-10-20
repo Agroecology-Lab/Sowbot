@@ -57,6 +57,8 @@ The node's <code>_topo_doc</code>, <code>latest_odom</code> and <code>latest_gps
 The import-linter ignore for <code>tools_card</code> importing <code>subprocess</code> is gone.
 Medkit's handle is now shared across browser sessions and stopped at app shutdown, every tool shows an interim <code>stopping</code> label, and a start or stop while another is in flight is ignored.
 The Sim cards still use <code>process_registry</code> directly</td></tr>
+<tr><td>Remaining #116 items (PR number to add)</td><td>The soft e-stop state is held once, in <code>DriveApplicationService</code>.
+<code>GlobalViewModel.soft_estop_active</code> is a read-only property that reads it, and no longer registers a callback</td></tr>
 </table>
 
 #155 (optical flow in Docker) and #157 (vendored skills) are unrelated to the refactor.
@@ -372,7 +374,5 @@ Tracked in #116 and `.importlinter`:
 - **Plan page state** is per browser session (`PlanPageState`, `MissionQueue`), but `PlanViewModel.save_status` is shared by every session.
 - **Plan page threading**: `PlanViewModel.plan` blocks, so the controls card calls it through `nicegui.run.io_bound`.
   Any other adapter has to run it on a worker thread too.
-- **Soft e-stop state** is held twice: `GlobalViewModel.soft_estop_active` and `DriveApplicationService.soft_estop_active` both follow the driver's confirmation.
-  The view model could read the service's value instead.
 - **Process control**: the Sim cards (Gazebo, row follow) start processes through `process_registry` from the page.
   A ViewModel and application service, as the System tools have, would complete the rule.
