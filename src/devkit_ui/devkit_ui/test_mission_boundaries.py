@@ -74,6 +74,7 @@ class TestExecutionBoundaries(unittest.TestCase):
 
     def test_cancel_before_first_goal_prevents_navigation_and_publishing(self):
         """Verify a pending cancellation stops execution before any navigation or tool command."""
+        self.service._running = True  # pylint: disable=protected-access  # cancel() ignores an idle service
         self.service.cancel()
         navigate = Mock(return_value=True)
         self.execute(navigate)

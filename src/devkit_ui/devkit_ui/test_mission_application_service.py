@@ -124,6 +124,14 @@ class TestMissionNavigation(unittest.TestCase):
 
         self.assertEqual(order.mock_calls, [call.worker_cancel(), call.navigation_cancel()])
 
+    def test_cancel_with_no_mission_running_leaves_a_manual_goal_alone(self) -> None:
+        """Verify an idle cancel does not reach navigation, which may be running a manual goal."""
+        self.executor.cancel.return_value = False
+
+        self.service.cancel()
+
+        self.navigation.cancel.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

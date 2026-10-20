@@ -152,9 +152,12 @@ class MissionApplicationService:
             on_status(ERROR, f'ERROR: {exc}')
 
     def cancel(self) -> None:
-        """Stop the mission before its next goal, then cancel the goal in flight."""
-        self._mission_service.cancel()
-        self._navigation.cancel()
+        """Stop the mission before its next goal, then cancel the goal in flight.
+
+        Do nothing when no mission is running, so a manual navigation goal is left alone.
+        """
+        if self._mission_service.cancel():
+            self._navigation.cancel()
 
     def _navigate(self, target: str, on_nav_update: Callable[[NavUpdate], None] | None) -> bool:
         """Navigate to a node and block until it ends; call from the mission worker thread.

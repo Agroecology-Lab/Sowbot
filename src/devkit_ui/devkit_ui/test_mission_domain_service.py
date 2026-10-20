@@ -135,6 +135,14 @@ class TestMissionExecution(unittest.TestCase):
         self.svc.publish_tool_msgs.assert_not_called()
         self.assertEqual(self.events[-1], (WARN, 'Cancelled'))
 
+    def test_cancel_reports_whether_a_mission_was_running(self) -> None:
+        """Verify an idle cancel returns False and leaves no stale cancel flag."""
+        self.assertFalse(self.svc.cancel())
+        self.assertFalse(self.svc.cancel_requested)
+        self.svc._running = True
+        self.assertTrue(self.svc.cancel())
+        self.assertTrue(self.svc.cancel_requested)
+
     def test_start_status_failure_releases_slot_and_preserves_exception(self) -> None:
         """Verify a failed initial status callback permits a later mission start."""
         failure = RuntimeError('status callback failed')
