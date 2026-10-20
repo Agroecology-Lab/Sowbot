@@ -182,7 +182,27 @@ class SystemApplicationService:
         if config is not None:
             args += ['-d', config]
         proc = spawn_logged(args, _LOGS[TOOL_RVIZ], env={**os.environ, 'DISPLAY': _RVIZ_DISPLAY})
+        threading.Thread(target=self._reap_rviz_display, args=(proc,), daemon=True).start()
         return proc, '' if config else _NO_TOPO_CONFIG
+
+    def _reap_rviz_display(self, proc: Any) -> None:
+        """Stop RViz's display daemons when proc exits on its own. Blocks until proc exits.
+
+        Do nothing if proc is no longer the registered RViz handle, because a stop or a restart
+        owns the daemons then. The daemons are detached under the tool lock and stopped outside it,
+        so a start or exit check is never held up. A daemon that cannot be signalled is dropped.
+        """
+        proc.wait()
+        with self._locks[TOOL_RVIZ]:
+            if shared(TOOL_RVIZ, lambda: [None])[0] is not proc:
+                return
+            registered = shared('rviz_daemons', list)
+            daemons = list(registered)
+            registered.clear()
+        try:
+            stop_all(daemons)
+        except OSError:
+            pass
 
     def _launch_medkit(self) -> tuple[Any, str]:
         """Start the Medkit gateway on loopback and return its process with no note.

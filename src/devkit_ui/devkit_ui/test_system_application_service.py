@@ -23,6 +23,9 @@ with patch.dict(sys.modules, {'ament_index_python.packages': packages}):
     )
 
 
+REAL_REAP = SystemApplicationService._reap_rviz_display
+
+
 def make_process(pid: int = 101):
     """Return a running process double."""
     return Mock(spec=['pid', 'poll', 'terminate', 'wait', 'kill', 'send_signal'],
@@ -48,6 +51,8 @@ class ServiceTestCase(unittest.TestCase):
         self.kill_group = self.enterContext(patch.object(sas, 'kill_group'))
         self.stop_all = self.enterContext(patch.object(sas, 'stop_all'))
         self.interrupt = self.enterContext(patch.object(sas, 'interrupt_stop'))
+        self.reaper = self.enterContext(
+            patch.object(SystemApplicationService, '_reap_rviz_display'))
         self.service = SystemApplicationService()
 
 
@@ -258,6 +263,52 @@ class TestStopOtherTools(ServiceTestCase):
         self.stop_all.side_effect = OSError('daemon stuck')
         self.assertEqual(self.service.stop(TOOL_RVIZ).kind, 'error')
         self.assertIs(handle(TOOL_RVIZ)[0], self.logged.return_value)
+
+
+class TestRvizDisplayReaper(ServiceTestCase):
+    def setUp(self):
+        super().setUp()
+        self.enterContext(patch.object(sas.threading, 'Thread'))  # keep the reaper off a real thread
+        self.service.start(TOOL_RVIZ)
+        self.rviz = self.logged.return_value
+        self.daemons = process_registry.shared('rviz_daemons', list)
+        self.daemons.extend([make_process(1), make_process(2)])
+        self.reap = lambda: REAL_REAP(self.service, self.rviz)
+
+    def test_starting_rviz_watches_the_process(self):
+        thread = sas.threading.Thread
+        thread.assert_called_once_with(
+            target=self.service._reap_rviz_display, args=(self.rviz,), daemon=True)
+        thread.return_value.start.assert_called_once_with()
+
+    def test_rviz_exiting_on_its_own_stops_the_display_daemons(self):
+        stopped = list(self.daemons)
+        self.reap()
+        self.rviz.wait.assert_called_once_with()
+        self.stop_all.assert_called_once_with(stopped)
+        self.assertEqual(self.daemons, [])
+
+    def test_a_stopped_rviz_leaves_its_daemons_to_the_stop(self):
+        handle(TOOL_RVIZ)[0] = None
+        self.reap()
+        self.stop_all.assert_not_called()
+        self.assertEqual(len(self.daemons), 2)
+
+    def test_a_restarted_rviz_keeps_the_new_daemons(self):
+        handle(TOOL_RVIZ)[0] = make_process(202)
+        self.reap()
+        self.stop_all.assert_not_called()
+        self.assertEqual(len(self.daemons), 2)
+
+    def test_an_unsignalable_daemon_does_not_raise(self):
+        self.stop_all.side_effect = PermissionError('cannot signal')
+        self.reap()
+
+    def test_the_exit_is_still_reported_after_the_display_is_reaped(self):
+        self.rviz.poll.return_value = 1
+        self.reap()
+        self.assertEqual(self.service.exited(TOOL_RVIZ),
+                         ToolState('exited', 101, '/tmp/rviz.log', '1'))
 
 
 class TestPolling(ServiceTestCase):
