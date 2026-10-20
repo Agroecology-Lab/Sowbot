@@ -7,10 +7,8 @@ from typing import TYPE_CHECKING, Literal
 from devkit_ui.constants import TOOL_GRAPHER, TOOL_RVIZ
 
 if TYPE_CHECKING:
-    from devkit_ui.application_services.system_application_service import (
-        SystemApplicationService,
-        ToolState,
-    )
+    from devkit_ui.application_services.system_application_service import SystemApplicationService
+    from devkit_ui.application_services.tool_state import ToolState
 
 Level = Literal['ok', 'error', 'muted']
 

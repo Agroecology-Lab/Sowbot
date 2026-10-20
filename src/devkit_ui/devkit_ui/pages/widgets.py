@@ -1,26 +1,24 @@
 """Small NiceGUI helpers shared by the System and Sim pages: status labels, request host and links."""
+from __future__ import annotations
+
 from html import escape
+from typing import TYPE_CHECKING
 
 from nicegui import ui
 
-from devkit_ui.process_registry import alive
+if TYPE_CHECKING:
+    from devkit_ui.view_models.system_view_model import ToolStatusView
+
+STATUS_COLOURS = {'ok': '#1a7f37', 'error': '#cf222e', 'muted': '#57606a'}
 
 
-def restore_label(lbl, proc) -> None:
-    """Show a running process in a status label after a page reload."""
-    if alive(proc):
-        lbl.set_text(f'running (pid {proc.pid})')
-        lbl.style('color:#1a7f37')
-
-
-def report_if_exited(proc, lbl, log: str) -> None:
-    """Two seconds after start, say so if the process already died."""
-    def check() -> None:
-        """Show the exit code and log path if the process has exited; otherwise keep the label."""
-        if proc.poll() is not None:
-            lbl.set_text(f'exited ({proc.returncode}) - see {log}')
-            lbl.style('color:#cf222e')
-    ui.timer(2.0, check, once=True)
+def show_status(lbl, view: ToolStatusView | None) -> None:
+    """Apply a status to lbl; do nothing for None, and keep the colour if the level is None."""
+    if view is None:
+        return
+    lbl.set_text(view.text)
+    if view.level is not None:
+        lbl.style(f'color:{STATUS_COLOURS[view.level]}')
 
 
 def request_host() -> str:

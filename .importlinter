@@ -18,12 +18,13 @@ forbidden_modules =
 allow_indirect_imports = True
 
 [importlinter:contract:pages-no-process-control]
-name = Pages do not spawn processes
+name = Pages do not spawn or track processes
 type = forbidden
 source_modules =
     devkit_ui.pages
 forbidden_modules =
     subprocess
+    devkit_ui.process_registry
 allow_indirect_imports = True
 unmatched_ignore_imports_alerting = error
 
@@ -34,6 +35,7 @@ source_modules =
     devkit_ui.view_models
 forbidden_modules =
     devkit_ui.domain_services
+    devkit_ui.process_registry
     devkit_ui.missions
     devkit_ui.obstacles
     devkit_ui.ros_gateway

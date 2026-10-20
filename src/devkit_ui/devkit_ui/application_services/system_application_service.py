@@ -10,12 +10,12 @@ import os
 import subprocess
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 # pylint: disable-next=import-error
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 
+from devkit_ui.application_services.tool_state import ToolState
 from devkit_ui.constants import TOOL_EXPLORER, TOOL_GRAPHER, TOOL_MEDKIT, TOOL_RVIZ
 from devkit_ui.process_registry import (
     alive,
@@ -42,22 +42,6 @@ _LOGS = {
     TOOL_RVIZ: '/tmp/rviz.log',
     TOOL_MEDKIT: '',  # Medkit's output is discarded
 }
-
-
-@dataclass(frozen=True)
-class ToolState:
-    """What a tool call did or found.
-
-    kind is one of 'started', 'already_running', 'running', 'stopped', 'exited', 'error', 'busy'
-    and 'idle'. pid is set for started, already_running, running and exited; log is the tool's log
-    path ('' if it has none); detail is the exception text for 'error', the return code for 'exited'
-    and the RViz note for 'started'.
-    """
-
-    kind: str
-    pid: int | None = None
-    log: str = ''
-    detail: str = ''
 
 
 class SystemApplicationService:

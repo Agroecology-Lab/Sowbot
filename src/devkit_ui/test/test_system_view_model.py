@@ -12,7 +12,7 @@ packages = ModuleType('ament_index_python.packages')
 packages.PackageNotFoundError = type('PackageNotFoundError', (LookupError,), {})
 packages.get_package_share_directory = Mock()
 with patch.dict(sys.modules, {'ament_index_python.packages': packages}):
-    from devkit_ui.application_services.system_application_service import ToolState
+    from devkit_ui.application_services.tool_state import ToolState
 
 
 class TestSystemViewModel(unittest.TestCase):
