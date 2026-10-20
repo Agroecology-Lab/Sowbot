@@ -1,7 +1,7 @@
 
 ```mermaid
 flowchart TB
-  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 260 lines)"]
+  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 264 lines)"]
     subgraph UI["View (NiceGUI)"]
       Content["content(): four tabs"]
       NavPage["NavPage (class)"]
@@ -18,8 +18,7 @@ flowchart TB
     end
 
     subgraph PROC["Process helper (UI-neutral, no ROS)"]
-      ProcReg["process_registry<br/>(RViz, Gazebo, explorer, grapher, neo;<br/>shared across browser sessions)"]
-      Medkit["Medkit launch<br/>(subprocess in tools_card)"]
+      ProcReg["process_registry<br/>(RViz, Gazebo, explorer, grapher, Medkit, neo;<br/>shared across browser sessions)"]
     end
 
     subgraph VM["ViewModel (UI state and user intent)"]
@@ -33,6 +32,7 @@ flowchart TB
       MissionVM["MissionViewModel<br/>(saved missions, run and cancel, MissionQueue per session)"]
       ObstacleVM["ObstacleViewModel"]
       SimVM["SimViewModel"]
+      SystemVM["SystemViewModel<br/>(tool status wording and levels)"]
     end
 
     subgraph APPSVC["ApplicationService (use-case logic)"]
@@ -48,6 +48,7 @@ flowchart TB
       ObstacleApp["ObstacleApplicationService<br/>(mark here, add circle or polygon, delete)"]
       SimAssets["SimAssetService<br/>(crop models, soil textures; files only)"]
       SimWorld["SimWorldService<br/>(rebuild Gazebo world via worldgen.sh)"]
+      SystemApp["SystemApplicationService<br/>(start, stop and poll the System page tools)"]
     end
 
     subgraph DOMSVC["DomainService (live state, ROS pub/sub)"]
@@ -105,12 +106,13 @@ flowchart TB
   SimCards --> TopoVM
   SysCards --> TelemetryVM
   SysCards --> RobotBrainVM
+  SysCards --> SystemVM
   ObsCards --> ObstacleVM
   DeleteDlg --> TopoVM
 
   SimCards -.-> ProcReg
-  SysCards -.-> ProcReg
-  SysCards -.-> Medkit
+  SystemVM --> SystemApp
+  SystemApp --> ProcReg
 
   AuthoringVM --> TopologyEdit
   AuthoringVM --> TopologyApp
@@ -187,10 +189,9 @@ flowchart TB
   classDef proc fill:#f3f4f6,stroke:#374151,color:#111827,stroke-width:1px
 
   class Content,NavPage,PlanPage,SimPage,SystemPage,RunCards,PlanCards,SimCards,SysCards,ObsCards,DeleteDlg,WebAuth view
-  class Medkit todo
   class ProcReg proc
-  class GlobalVM,RunVM,AuthoringVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM vm
-  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,ObstacleApp,SimAssets,SimWorld app
+  class GlobalVM,RunVM,AuthoringVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM,SystemVM vm
+  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,ObstacleApp,SimAssets,SimWorld,SystemApp app
   class DriveDom,NavDom,RowDiscDom,RobotBrainDom,TelemetryDom,TopologyDom,MissionDom dom
   class RowBuilder,RowPlanning,DemMod,F2CPkg pure
   class TopoMapStore,MissionStore,SimAssetStore,ObstacleManager,RosGateway infra

@@ -37,7 +37,8 @@ class TestUiTabs(unittest.TestCase):
         self.head = self.enterContext(patch.object(fake_ui, 'add_head_html', create=True))
         self.node, self.namespace = load_navigation_service_harness()
         for name in ('_plan_content', '_sim_vm', '_global_vm', '_run_vm', '_topo_vm',
-                     '_telemetry_vm', '_obstacle_vm', '_authoring_vm', '_robot_brain_vm'):
+                     '_telemetry_vm', '_obstacle_vm', '_authoring_vm', '_robot_brain_vm',
+                     '_system_vm'):
             setattr(self.node, name, Mock())
 
     def test_tabs_start_on_run_and_pass_correct_view_models_to_pages(self):
@@ -55,7 +56,8 @@ class TestUiTabs(unittest.TestCase):
         self.node._plan_content.assert_called_once_with()
         self.namespace['SimPage'].assert_called_once_with(self.node._sim_vm, self.node._topo_vm)
         self.namespace['SystemPage'].assert_called_once_with(
-            telemetry_vm=self.node._telemetry_vm, robot_brain_vm=self.node._robot_brain_vm)
+            telemetry_vm=self.node._telemetry_vm, robot_brain_vm=self.node._robot_brain_vm,
+            system_vm=self.node._system_vm)
         self.head.assert_not_called()
 
 

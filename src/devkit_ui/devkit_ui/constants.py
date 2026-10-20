@@ -26,3 +26,10 @@ FIELD27_BOUNDS = ((48.0031957, 3.6612233), (48.0060043, 3.6675767))
 # The saved topology map the simulated world is generated from (worldgen.sh reads it, and the
 # Gazebo launch passes it to the sim as TMAP2_FILE).
 SIM_MAP_FILE = '/workspace/maps/maize_map'
+
+# Keys of the System page tools. The page and SystemApplicationService both use them; pages cannot
+# import application services, so they live here. They are also the process_registry entry names.
+TOOL_EXPLORER = 'explorer'
+TOOL_GRAPHER = 'grapher'
+TOOL_RVIZ = 'rviz'
+TOOL_MEDKIT = 'medkit'

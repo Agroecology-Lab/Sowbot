@@ -1,158 +1,178 @@
-"""Diagnostic tool callbacks with process creation and package lookup isolated."""
+"""Tools card: labels and buttons over a view model double; no process control lives here."""
 
 # pylint: disable=protected-access
+import asyncio
 import sys
 import unittest
-from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, Mock, call, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
-from devkit_ui import process_registry
+from devkit_ui.constants import TOOL_EXPLORER, TOOL_GRAPHER, TOOL_MEDKIT, TOOL_RVIZ
 from devkit_ui.test_run_ui import fake_ui, nicegui
+from devkit_ui.view_models.system_view_model import ToolStatusView
 
-packages = ModuleType('ament_index_python.packages')
-packages.PackageNotFoundError = type('PackageNotFoundError', (LookupError,), {})
-packages.get_package_share_directory = Mock()
 with (
-    patch.dict(sys.modules, {'nicegui': nicegui, 'ament_index_python.packages': packages}),
+    patch.dict(sys.modules, {'nicegui': nicegui}),
     patch.object(nicegui, 'run', SimpleNamespace(), create=True),
 ):
     from devkit_ui.pages.system import tools_card
 
 
-class TestToolsCard(unittest.IsolatedAsyncioTestCase):
+async def run_inline(func, *args):
+    """Stand in for ng_run.io_bound: call func directly."""
+    return func(*args)
+
+
+class TestToolControls(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         fake_ui.reset()
         self.addCleanup(fake_ui.reset)
-        self.enterContext(patch.dict(process_registry._TOOLS, clear=True))
         self.enterContext(patch.object(tools_card, 'ui', fake_ui))
-        self.spawn = self.enterContext(patch.object(tools_card, 'spawn_logged'))
-        self.spawn.return_value = Mock(pid=101, poll=Mock(return_value=None))
-        self.report = self.enterContext(patch.object(tools_card, 'report_if_exited'))
-        self.mkdir = self.enterContext(patch.object(tools_card.os, 'makedirs'))
-        self.package = self.enterContext(
-            patch.object(tools_card, 'get_package_share_directory', return_value='/ros/topo')
-        )
-        self.io_bound = AsyncMock()
-        self.enterContext(
-            patch.object(tools_card, 'ng_run', SimpleNamespace(io_bound=self.io_bound))
-        )
+        self.io_bound = Mock(side_effect=run_inline)
+        self.enterContext(patch.object(tools_card, 'ng_run', SimpleNamespace(io_bound=self.io_bound)))
+        self.vm = Mock()
+        self.vm.status.return_value = None
+        self.vm.exited.return_value = None
+        self.vm.stopping.return_value = ToolStatusView('stopping')
 
-    async def test_graph_explorer_start_reuses_process_across_sessions_and_stop_releases_it(self):
-        tools_card._graph_explorer('robot.local')
-        fake_ui.find('button', 'Start Graph Explorer').on_click()
-        self.spawn.assert_called_once_with(
-            ['ros2', 'run', 'ros2graph_explorer', 'ros2graph_explorer'],
-            '/tmp/ros2graph_explorer.log',
-        )
-        handle = process_registry.shared('explorer', list)
+    def build(self, tool=TOOL_EXPLORER, start='Start', stop='Stop'):
+        tools_card._tool_controls(self.vm, tool, start, stop, 'robot.local')
+        return fake_ui.find('label'), fake_ui.find('button', start), fake_ui.find('button', stop)
+
+    def test_label_starts_muted_and_empty_for_a_tool_that_is_not_running(self):
+        label, _, _ = self.build()
+        self.assertEqual((label.text, label.styles), ('', ['color:#57606a']))
+        self.vm.status.assert_called_once_with(TOOL_EXPLORER)
+
+    def test_running_tool_is_shown_after_a_page_reload(self):
+        self.vm.status.return_value = ToolStatusView('running (pid 42)', 'ok')
+        label, _, _ = self.build()
+        self.assertEqual(label.text, 'running (pid 42)')
+        self.assertEqual(label.styles[-1], 'color:#1a7f37')
+
+    async def test_start_runs_off_the_loop_shows_the_result_and_schedules_an_exit_check(self):
+        self.vm.start.return_value = ToolStatusView('started (pid 7)', 'ok')
+        label, start, _ = self.build(TOOL_RVIZ)
+        await start.on_click()
+        self.io_bound.assert_called_once_with(self.vm.start, TOOL_RVIZ, 'robot.local')
+        self.assertEqual(label.text, 'started (pid 7)')
+        self.assertEqual(label.styles[-1], 'color:#1a7f37')
+        self.assertEqual(len(fake_ui.timers), 1)
+        timer = fake_ui.timers[0]
+        self.assertEqual((timer.interval, timer.once), (2.0, True))
+        self.vm.exited.return_value = ToolStatusView('exited (1) - see /tmp/rviz.log', 'error')
+        timer.callback()
+        self.vm.exited.assert_called_once_with(TOOL_RVIZ)
+        self.assertEqual(label.text, 'exited (1) - see /tmp/rviz.log')
+        self.assertEqual(label.styles[-1], 'color:#cf222e')
+
+    async def test_exit_check_leaves_the_label_alone_while_the_tool_lives(self):
+        self.vm.start.return_value = ToolStatusView('started (pid 7)', 'ok')
+        label, start, _ = self.build()
+        await start.on_click()
+        fake_ui.timers[0].callback()
+        self.assertEqual(label.text, 'started (pid 7)')
+
+    async def test_start_that_the_view_model_ignores_changes_nothing(self):
+        self.vm.start.return_value = None
+        label, start, _ = self.build()
+        await start.on_click()
+        self.assertEqual((label.text, label.styles, fake_ui.timers), ('', ['color:#57606a'], []))
+
+    async def test_a_level_of_none_keeps_the_current_colour(self):
+        self.vm.start.return_value = ToolStatusView('already running')
+        label, start, _ = self.build()
+        await start.on_click()
+        self.assertEqual((label.text, label.styles), ('already running', ['color:#57606a']))
+
+    async def test_stop_shows_the_interim_label_then_the_result(self):
+        seen = []
+
+        def stop(tool):
+            seen.append((tool, label.text))
+            return ToolStatusView('stopped', 'muted')
+
+        self.vm.stop.side_effect = stop
+        label, _, stop_button = self.build(TOOL_MEDKIT, 'Start Medkit Gateway', 'Stop Medkit Gateway')
+        await stop_button.on_click()
+        self.assertEqual(seen, [(TOOL_MEDKIT, 'stopping')])
+        self.io_bound.assert_called_once_with(self.vm.stop, TOOL_MEDKIT)
+        self.assertEqual(label.text, 'stopped')
+        self.assertEqual(label.styles[-1], 'color:#57606a')
+
+    async def test_ignored_stop_puts_the_previous_label_back(self):
+        self.vm.start.return_value = ToolStatusView('started (pid 7)', 'ok')
+        self.vm.stop.return_value = None
+        label, start, stop = self.build()
+        await start.on_click()
+        await stop.on_click()
+        self.assertEqual(label.text, 'started (pid 7)')
+
+    async def test_a_stop_overlapping_a_slow_stop_does_not_lose_the_interim_label(self):
+        release = asyncio.Event()
+
+        async def slow_stop(_func, _tool):
+            await release.wait()
+            return ToolStatusView('stopped', 'muted')
+
+        self.io_bound.side_effect = None
+        self.io_bound.side_effect = [slow_stop(None, None), run_inline(lambda: None)]
+        label, _, stop = self.build()
+        first = asyncio.ensure_future(stop.on_click())
+        await asyncio.sleep(0)
+        self.assertEqual(label.text, 'stopping')
+        await stop.on_click()  # ignored by the view model: busy
+        self.assertEqual(label.text, 'stopping')
+        release.set()
+        await first
+        self.assertEqual(label.text, 'stopped')
+
+    async def test_failed_stop_shows_the_error(self):
+        self.vm.stop.return_value = ToolStatusView('ERROR: cannot signal', 'error')
+        label, _, stop = self.build()
+        await stop.on_click()
+        self.assertEqual((label.text, label.styles[-1]), ('ERROR: cannot signal', 'color:#cf222e'))
+
+
+class TestToolsCardLinks(unittest.TestCase):
+    def setUp(self):
         fake_ui.reset()
-        tools_card._graph_explorer('robot.local')
-        self.assertEqual(fake_ui.find('label').text, 'running (pid 101)')
-        fake_ui.find('button', 'Start Graph Explorer').on_click()
-        self.spawn.assert_called_once()
-        await fake_ui.find('button', 'Stop').on_click()
-        self.io_bound.assert_awaited_once_with(tools_card.kill_group, self.spawn.return_value)
-        self.assertEqual(handle, [None])
-        self.assertEqual(fake_ui.find('label').text, 'stopped')
+        self.addCleanup(fake_ui.reset)
+        self.enterContext(patch.object(tools_card, 'ui', fake_ui))
+        self.enterContext(patch.object(tools_card, 'ng_run', SimpleNamespace(io_bound=AsyncMock())))
+        self.vm = Mock()
+        self.vm.status.return_value = None
 
-    def test_grapher_serves_only_private_output_directory(self):
-        tools_card._grapher('robot.local')
-        fake_ui.find('button', 'Start ros2grapher').on_click()
-        self.mkdir.assert_called_once_with('/tmp/ros2grapher', exist_ok=True)
-        self.spawn.assert_called_once_with(
-            ['ros2grapher', '/workspace', '-o', '/tmp/ros2grapher/index.html', '--port', '8888'],
-            '/tmp/ros2grapher.log',
-            cwd='/tmp/ros2grapher',
-        )
-        self.report.assert_called_once_with(
-            self.spawn.return_value, fake_ui.find('label'), '/tmp/ros2grapher.log'
-        )
-        fake_ui.find('button', 'Start ros2grapher').on_click()
-        self.spawn.assert_called_once()
+    def html(self, host):
+        fake_ui.reset()
+        with patch.object(tools_card, 'request_host', return_value=host):
+            tools_card.ToolsCard(self.vm)
+        return '\n'.join(e.text for e in fake_ui.elements if e.kind == 'html')
 
-    async def test_grapher_stop_offloads_cleanup_and_allows_restart(self):
-        tools_card._grapher('robot.local')
-        start = fake_ui.find('button', 'Start ros2grapher').on_click
-        start()
-        await fake_ui.find('button', 'Stop').on_click()
-        self.io_bound.assert_awaited_once_with(tools_card.kill_group, self.spawn.return_value)
-        self.assertEqual(process_registry.shared('grapher', list), [None])
-        start()
-        self.assertEqual(self.spawn.call_count, 2)
+    def test_every_tool_is_wired_to_its_own_key(self):
+        self.html('robot.local')
+        self.assertEqual([c.args[0] for c in self.vm.status.call_args_list],
+                         [TOOL_EXPLORER, TOOL_GRAPHER, TOOL_RVIZ, TOOL_MEDKIT])
 
-    def test_failed_directory_creation_never_starts_grapher(self):
-        self.mkdir.side_effect = PermissionError('private directory denied')
-        tools_card._grapher('robot.local')
-        fake_ui.find('button', 'Start ros2grapher').on_click()
-        self.spawn.assert_not_called()
-        self.report.assert_not_called()
-        self.assertEqual(fake_ui.find('label').text, 'ERROR: private directory denied')
+    def test_links_use_the_page_host(self):
+        html = self.html('robot.local')
+        for url in ('http://robot.local:8734/', 'http://robot.local:8888/',
+                    'http://robot.local:6081/vnc.html', 'http://robot.local:8080/'):
+            self.assertIn(f'href="{url}"', html)
 
-    async def test_rviz_uses_topology_configuration_virtual_display_and_cleanup(self):
-        tools_card._rviz('robot.local')
-        await fake_ui.find('button', 'Launch RViz').on_click()
-        daemons = process_registry.shared('rviz_daemons', list)
-        self.package.assert_called_once_with('topological_navigation')
-        self.io_bound.assert_awaited_once_with(
-            tools_card.start_vnc_stack, ':98', 5901, 6081, daemons
-        )
-        self.assertEqual(
-            self.spawn.call_args.args,
-            (
-                [
-                    'ros2',
-                    'run',
-                    'rviz2',
-                    'rviz2',
-                    '-d',
-                    '/ros/topo/rviz/topological_navigation.rviz',
-                ],
-                '/tmp/rviz.log',
-            ),
-        )
-        self.assertEqual(self.spawn.call_args.kwargs['env']['DISPLAY'], ':98')
-        await fake_ui.find('button', 'Launch RViz').on_click()
-        self.spawn.assert_called_once()
-        await fake_ui.find('button', 'Stop RViz').on_click()
-        self.assertEqual(
-            self.io_bound.await_args_list[-2:],
-            [
-                call(tools_card.kill_group, self.spawn.return_value),
-                call(tools_card.stop_all, daemons),
-            ],
-        )
-        self.assertEqual(process_registry.shared('rviz', list), [None])
+    def test_gateway_and_sovd_links_use_page_host(self):
+        for authority in ('robot.local', '192.0.2.10', 'localhost', '[2001:db8::1]'):
+            with self.subTest(authority=authority):
+                html = self.html(authority)
+                self.assertIn(f'href="http://{authority}:8080/"', html)
+                self.assertIn(f'href="http://{authority}:3000/"', html)
+                self.assertIn(f'<code>http://{authority}:8080</code>', html)
+                self.assertIn('docker run -p 3000:80 ghcr.io/selfpatch/sovd_web_ui:latest', html)
+                self.assertIn('authentication, TLS, and restricted network access', html)
 
-    async def test_rviz_without_topology_package_launches_without_configuration(self):
-        self.package.side_effect = tools_card.PackageNotFoundError('not installed')
-        tools_card._rviz('robot.local')
-        await fake_ui.find('button', 'Launch RViz').on_click()
-        self.assertEqual(self.spawn.call_args.args[0], ['ros2', 'run', 'rviz2', 'rviz2'])
-        self.assertIn('no topo config found', fake_ui.find('label').text)
-
-    async def test_rviz_display_failure_prevents_process_creation(self):
-        self.io_bound.side_effect = OSError('no display')
-        tools_card._rviz('robot.local')
-        await fake_ui.find('button', 'Launch RViz').on_click()
-        self.spawn.assert_not_called()
-        self.report.assert_not_called()
-        self.assertEqual(fake_ui.find('label').text, 'ERROR: no display')
-        self.assertEqual(process_registry.shared('rviz', list), [None])
-
-    def test_graph_tool_spawn_failures_report_error_without_registering_process(self):
-        for build, button, key in (
-            (tools_card._graph_explorer, 'Start Graph Explorer', 'explorer'),
-            (tools_card._grapher, 'Start ros2grapher', 'grapher'),
-        ):
-            with self.subTest(tool=key):
-                fake_ui.reset()
-                self.spawn.side_effect = OSError('missing executable')
-                build('robot.local')
-                fake_ui.find('button', button).on_click()
-                self.assertEqual(fake_ui.find('label').text, 'ERROR: missing executable')
-                self.assertEqual(fake_ui.find('label').styles[-1], 'color:#cf222e')
-                self.assertEqual(process_registry.shared(key, list), [None])
-                self.report.assert_not_called()
+    def test_page_does_not_import_process_control(self):
+        self.assertFalse(hasattr(tools_card, 'subprocess'))
+        self.assertFalse(hasattr(tools_card, 'spawn_logged'))
 
 
 if __name__ == '__main__':

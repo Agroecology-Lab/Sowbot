@@ -31,6 +31,7 @@ from devkit_ui.application_services.row_discovery_application_service import (
 )
 from devkit_ui.application_services.sim_asset_service import SimAssetService
 from devkit_ui.application_services.sim_world_service import SimWorldService
+from devkit_ui.application_services.system_application_service import SystemApplicationService
 from devkit_ui.application_services.telemetry_application_service import (
     TelemetryApplicationService,
 )
@@ -66,6 +67,7 @@ from devkit_ui.view_models.plan_view_model import PlanViewModel
 from devkit_ui.view_models.robot_brain_view_model import RobotBrainViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.sim_view_model import SimViewModel
+from devkit_ui.view_models.system_view_model import SystemViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
 from devkit_ui.web_auth import UI_PASSWORD_ENV, BasicAuthMiddleware
@@ -144,6 +146,7 @@ class NiceGuiNode:
             self._telemetry_app_service, self._ros.create_timer, is_sim=self._is_sim)
         self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
         self._robot_brain_vm = RobotBrainViewModel(self._robot_brain_app_service)
+        self._system_vm = SystemViewModel(SystemApplicationService())
         sim_assets = SimAssetService(SimAssetStore())
         self._sim_vm = SimViewModel(sim_assets, SimWorldService(sim_assets))
 
@@ -206,6 +209,7 @@ class NiceGuiNode:
                 SystemPage(
                     telemetry_vm=self._telemetry_vm,
                     robot_brain_vm=self._robot_brain_vm,
+                    system_vm=self._system_vm,
                 )
 
     # ── Plan tab ──────────────────────────────────────────────────────────────
