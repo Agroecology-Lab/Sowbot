@@ -12,6 +12,7 @@ with patch.dict(sys.modules, {'nicegui': nicegui}):
     from devkit_ui.pages import widgets
     from devkit_ui.pages.system.gps_card import GpsCard
     from devkit_ui.pages.system.odometry_card import OdometryCard
+    from devkit_ui.view_models.system_view_model import ToolStatusView
 
 
 class TestToolWidgets(unittest.TestCase):
@@ -32,35 +33,23 @@ class TestToolWidgets(unittest.TestCase):
                 with patch.object(fake_ui.context.client, 'request', request, create=True):
                     self.assertEqual(widgets.request_host(), expected)
 
-    def test_restore_changes_only_live_process_labels(self):
-        for code in (None, 0, -9):
-            with self.subTest(returncode=code):
+    def test_show_status_applies_text_and_level_colour(self):
+        for level, colour in (('ok', '#1a7f37'), ('error', '#cf222e'), ('muted', '#57606a')):
+            with self.subTest(level=level):
                 label = Mock()
-                widgets.restore_label(label, Mock(pid=42, poll=Mock(return_value=code)))
-                if code is None:
-                    label.set_text.assert_called_once_with('running (pid 42)')
-                    label.style.assert_called_once_with('color:#1a7f37')
-                else:
-                    label.set_text.assert_not_called()
-        label = Mock()
-        widgets.restore_label(label, None)
-        label.set_text.assert_not_called()
+                widgets.show_status(label, ToolStatusView(f'text {level}', level))
+                label.set_text.assert_called_once_with(f'text {level}')
+                label.style.assert_called_once_with(f'color:{colour}')
 
-    def test_exit_report_checks_later_once_and_includes_failure_log(self):
-        proc = Mock(poll=Mock(return_value=None), returncode=None)
+    def test_show_status_keeps_the_colour_without_a_level_and_ignores_none(self):
         label = Mock()
-        widgets.report_if_exited(proc, label, '/tmp/tool.log')
-        self.assertEqual(len(fake_ui.timers), 1)
-        timer = fake_ui.timers[0]
-        self.assertEqual((timer.interval, timer.once), (2.0, True))
-        proc.poll.assert_not_called()
-        timer.callback()
+        widgets.show_status(label, ToolStatusView('stopping'))
+        label.set_text.assert_called_once_with('stopping')
+        label.style.assert_not_called()
+        label = Mock()
+        widgets.show_status(label, None)
         label.set_text.assert_not_called()
-        proc.poll.return_value = 3
-        proc.returncode = 3
-        timer.callback()
-        label.set_text.assert_called_once_with('exited (3) - see /tmp/tool.log')
-        label.style.assert_called_once_with('color:#cf222e')
+        label.style.assert_not_called()
 
 
 class TestGpsCard(unittest.TestCase):

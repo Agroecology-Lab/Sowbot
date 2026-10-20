@@ -7,12 +7,11 @@ from nicegui import run as ng_run
 from nicegui import ui
 
 from devkit_ui.constants import TOOL_EXPLORER, TOOL_GRAPHER, TOOL_MEDKIT, TOOL_RVIZ
-from devkit_ui.pages.widgets import doc_link, link_button, request_host
+from devkit_ui.pages.widgets import STATUS_COLOURS, doc_link, link_button, request_host, show_status
 
 if TYPE_CHECKING:
-    from devkit_ui.view_models.system_view_model import SystemViewModel, ToolStatusView
+    from devkit_ui.view_models.system_view_model import SystemViewModel
 
-_COLOURS = {'ok': '#1a7f37', 'error': '#cf222e', 'muted': '#57606a'}
 _EXIT_CHECK_S = 2.0
 
 
@@ -51,17 +50,17 @@ def _tool_controls(vm: SystemViewModel, tool: str, start_text: str, stop_text: s
     The label shows a tool that is already running, e.g. after a page reload. Starting and stopping
     run off the UI loop; a request that the view model ignores leaves the label as it was.
     """
-    label = ui.label('').classes('text-xs font-mono').style(f'color:{_COLOURS["muted"]}')
-    _show(label, vm.status(tool))
+    label = ui.label('').classes('text-xs font-mono').style(f'color:{STATUS_COLOURS["muted"]}')
+    show_status(label, vm.status(tool))
 
     def report_if_exited() -> None:
         """Show the exit code and log path if the process has died since it started."""
-        _show(label, vm.exited(tool))
+        show_status(label, vm.exited(tool))
 
     async def start() -> None:
         """Start the tool, then check two seconds later that it is still alive."""
         view = await ng_run.io_bound(vm.start, tool, host)
-        _show(label, view)
+        show_status(label, view)
         if view is not None:
             ui.timer(_EXIT_CHECK_S, report_if_exited, once=True)
 
@@ -72,19 +71,10 @@ def _tool_controls(vm: SystemViewModel, tool: str, start_text: str, stop_text: s
         view = await ng_run.io_bound(vm.stop, tool)
         if view is None:
             label.set_text(previous)
-        _show(label, view)
+        show_status(label, view)
 
     ui.button(start_text, on_click=start).props('outline no-caps').classes('px-4')
     ui.button(stop_text, on_click=stop).props('outline no-caps').classes('px-4')
-
-
-def _show(label: ui.label, view: ToolStatusView | None) -> None:
-    """Apply a status to label; do nothing for None, and keep the colour if the level is None."""
-    if view is None:
-        return
-    label.set_text(view.text)
-    if view.level is not None:
-        label.style(f'color:{_COLOURS[view.level]}')
 
 
 def _medkit_links(host: str) -> None:

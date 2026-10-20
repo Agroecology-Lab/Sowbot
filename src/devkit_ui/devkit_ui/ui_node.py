@@ -30,6 +30,7 @@ from devkit_ui.application_services.row_discovery_application_service import (
     RowDiscoveryApplicationService,
 )
 from devkit_ui.application_services.sim_asset_service import SimAssetService
+from devkit_ui.application_services.sim_process_service import SimProcessApplicationService
 from devkit_ui.application_services.sim_world_service import SimWorldService
 from devkit_ui.application_services.system_application_service import SystemApplicationService
 from devkit_ui.application_services.telemetry_application_service import (
@@ -66,6 +67,7 @@ from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
 from devkit_ui.view_models.plan_view_model import PlanViewModel
 from devkit_ui.view_models.robot_brain_view_model import RobotBrainViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
+from devkit_ui.view_models.sim_process_view_model import SimProcessViewModel
 from devkit_ui.view_models.sim_view_model import SimViewModel
 from devkit_ui.view_models.system_view_model import SystemViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
@@ -149,15 +151,14 @@ class NiceGuiNode:
         self._system_vm = SystemViewModel(SystemApplicationService())
         sim_assets = SimAssetService(SimAssetStore())
         self._sim_vm = SimViewModel(sim_assets, SimWorldService(sim_assets))
+        self._sim_process_vm = SimProcessViewModel(SimProcessApplicationService())
 
         # Initialize with default demo document
         self._topo_app_service.initialize_with_default()
 
         # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher; the view model is what
-        # the cards bind to. Start after the telemetry service exists so the getters resolve.
-        self._obstacle_mgr = ObstacleManager(
-            self._ros, lambda: self._telemetry_app_service.latest_odom,
-            lambda: self._telemetry_app_service.latest_gps)
+        # the cards bind to. Start after the telemetry service exists, which supplies the anchor.
+        self._obstacle_mgr = ObstacleManager(self._ros, self._telemetry_app_service.map_anchor)
         self._obstacle_vm = ObstacleViewModel(
             ObstacleApplicationService(self._obstacle_mgr, self._telemetry_app_service))
         self._obstacle_mgr.start()
@@ -204,7 +205,7 @@ class NiceGuiNode:
             with ui.tab_panel(tab_plan):
                 self._plan_content()
             with ui.tab_panel(tab_sim):
-                SimPage(self._sim_vm, self._topo_vm)
+                SimPage(self._sim_vm, self._topo_vm, self._sim_process_vm)
             with ui.tab_panel(tab_system):
                 SystemPage(
                     telemetry_vm=self._telemetry_vm,

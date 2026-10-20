@@ -35,6 +35,7 @@ with patch.dict(
         'rclpy.qos': _qos,
     },
 ):
+    from devkit_ui.map_anchor import MapAnchor
     from devkit_ui.obstacles import ObstacleManager
 
 # Use the globals the class actually runs with: another test may have imported its own copy of
@@ -44,13 +45,12 @@ obstacles = SimpleNamespace(**ObstacleManager.start.__globals__)
 
 class TestObstacleManagerGateway(unittest.TestCase):
     def setUp(self) -> None:
-        """Create a manager on a mock gateway with settable odometry and GPS getters."""
+        """Create a manager on a mock gateway with a settable projection anchor."""
         self.ros = Mock()
-        self.odom = None
-        self.gps = None
+        self.anchor = None
         tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
         self.mgr = ObstacleManager(
-            self.ros, lambda: self.odom, lambda: self.gps, path=str(Path(tmp) / 'obstacles.yaml')
+            self.ros, lambda: self.anchor, path=str(Path(tmp) / 'obstacles.yaml')
         )
 
     def test_start_creates_publisher_and_timer_on_gateway(self) -> None:
@@ -81,10 +81,7 @@ class TestObstacleManagerGateway(unittest.TestCase):
         with patch.object(obstacles.threading, 'Thread'):
             self.mgr.start()
         self.mgr._publisher.publish.side_effect = RuntimeError('boom')
-        self.odom = SimpleNamespace(
-            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=0.0, y=0.0)))
-        )
-        self.gps = SimpleNamespace(latitude=51.0, longitude=-1.0)
+        self.anchor = MapAnchor(0.0, 0.0, 51.0, -1.0)
         self.mgr._obstacles = (
             {'name': 'A', 'type': 'circle', 'center': {'lat': 51.0, 'lon': -1.0}, 'radius_m': 0.5},
         )
@@ -97,7 +94,7 @@ class TestObstacleManagerGateway(unittest.TestCase):
     def test_construction_defers_loading_and_ros_resources(self) -> None:
         """Construction exposes empty state without starting threads or touching ROS."""
         with patch.object(obstacles.threading, 'Thread') as thread:
-            manager = ObstacleManager(self.ros, Mock(), Mock(), self.mgr._path)
+            manager = ObstacleManager(self.ros, Mock(), self.mgr._path)
         self.assertEqual((manager.obstacles, manager.version, manager.status), ((), 0, ''))
         thread.assert_not_called()
         self.assertEqual(self.ros.mock_calls, [])
@@ -213,26 +210,15 @@ class TestObstacleManagerGateway(unittest.TestCase):
         publish.assert_not_called()
         self.ros.get_logger.return_value.error.assert_called_once_with('persist failed: disk full')
 
-    def test_anchor_uses_latest_getter_values_and_rejects_invalid_fixes(self) -> None:
-        """Missing and nonfinite fixes cannot become metric projection anchors."""
+    def test_anchor_is_read_from_the_source_each_time(self) -> None:
+        """The manager asks the source on every use, so a late or changed anchor is picked up."""
         self.assertIsNone(self.mgr._current_anchor())
-        self.gps = SimpleNamespace(latitude=51.0, longitude=-1.0)
-        self.assertIsNone(self.mgr._current_anchor())
-        self.odom = SimpleNamespace(
-            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=12.0, y=-4.0)))
-        )
-        self.gps = None
-        self.assertIsNone(self.mgr._current_anchor())
-        for lat, lon in [(float('nan'), -1.0), (51.0, float('inf')), (0.0, 0.0), (1e-10, -1e-10)]:
-            with self.subTest(lat=lat, lon=lon):
-                self.gps = SimpleNamespace(latitude=lat, longitude=lon)
-                self.assertIsNone(self.mgr._current_anchor())
-        for lat, lon in [(51.0, -1.0), (0.0, -1.0), (51.0, 0.0), (1e-9, 0.0)]:
-            with self.subTest(lat=lat, lon=lon):
-                self.gps = SimpleNamespace(latitude=lat, longitude=lon)
-                self.assertEqual(self.mgr._current_anchor(), (12.0, -4.0, lat, lon))
+        self.anchor = MapAnchor(12.0, -4.0, 51.0, -1.0)
+        self.assertEqual(self.mgr._current_anchor(), (12.0, -4.0, 51.0, -1.0))
+        self.anchor = MapAnchor(13.0, -5.0, 51.5, -1.5)
+        self.assertEqual(self.mgr._current_anchor(), (13.0, -5.0, 51.5, -1.5))
 
-    def test_cold_start_waits_for_getters_then_publishes_in_map_frame(self) -> None:
+    def test_cold_start_waits_for_the_anchor_then_publishes_in_map_frame(self) -> None:
         """Late telemetry triggers publication once, using the current odometry offset."""
         with patch.object(obstacles.threading, 'Thread'):
             self.mgr.start()
@@ -243,10 +229,7 @@ class TestObstacleManagerGateway(unittest.TestCase):
         publisher.publish.assert_not_called()
         timer.cancel.assert_not_called()
 
-        self.odom = SimpleNamespace(
-            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=12.0, y=-4.0)))
-        )
-        self.gps = SimpleNamespace(latitude=51.0, longitude=-1.0)
+        self.anchor = MapAnchor(12.0, -4.0, 51.0, -1.0)
         self.mgr._cold_start_publish()
         publisher.publish.assert_called_once()
         message = publisher.publish.call_args.args[0]

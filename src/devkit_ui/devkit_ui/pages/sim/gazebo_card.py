@@ -1,26 +1,21 @@
-# pylint: disable=consider-using-with
-import os
+from __future__ import annotations
+
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from nicegui import run as ng_run
 from nicegui import ui
 
-from devkit_ui.constants import SIM_MAP_FILE
 from devkit_ui.pages.sim.plant_placement_card import PlantSettings
-from devkit_ui.pages.widgets import link_button, request_host, restore_label
-from devkit_ui.process_registry import (
-    alive,
-    kill_group,
-    shared,
-    spawn_logged,
-    start_vnc_stack,
-    stop_all,
-)
+from devkit_ui.pages.widgets import STATUS_COLOURS, link_button, request_host, show_status
 from devkit_ui.view_models.sim_view_model import SimViewModel, WorldRebuildError
 
-_MUTED = 'color:#57606a'
-_OK = 'color:#1a7f37'
-_ERROR = 'color:#cf222e'
+if TYPE_CHECKING:
+    from devkit_ui.view_models.sim_process_view_model import GazeboMode, SimProcessViewModel
+
+_MUTED = f'color:{STATUS_COLOURS["muted"]}'
+_OK = f'color:{STATUS_COLOURS["ok"]}'
+_ERROR = f'color:{STATUS_COLOURS["error"]}'
 
 # Robot model selector: controls which xacro is passed as the urdf arg to sowbot_sim.launch.py.
 # sowbot_01:     TrackedVehicle + TrackController (DART required)
@@ -36,37 +31,24 @@ _ROBOT_MODELS = {
 class GazeboCard(ui.card):
     """Launch, stop and rebuild the Gazebo simulation."""
 
-    def __init__(self, sim_vm: SimViewModel, plant_settings: Callable[[], PlantSettings]) -> None:
+    def __init__(self, sim_vm: SimViewModel, process_vm: SimProcessViewModel,
+                 plant_settings: Callable[[], PlantSettings]) -> None:
         """Build the robot model selector and the launch controls.
 
         Parameters:
             sim_vm (SimViewModel): Rebuilds the world from the saved map and plant placement.
+            process_vm (SimProcessViewModel): Launches, stops and reports on the sim process.
             plant_settings (Callable[[], PlantSettings]): Returns the plant placement to rebuild with.
         """
         super().__init__()
         self._sim_vm = sim_vm
+        self._vm = process_vm
         self._plant_settings = plant_settings
         self._xacro = 'sowbot_01.xacro'
-        # Handles are shared by every browser session, so a reload cannot orphan a running sim.
-        self._gazebo: list = shared('gazebo', lambda: [None])
-        self._spawn: list = shared('gazebo_spawn', lambda: [None])
-        self._daemons: list = shared('gazebo_daemons', list)  # Xvfb, x11vnc, websockify
-        self._env = {
-            **os.environ,
-            'TMAP2_FILE': SIM_MAP_FILE,
-            'GZ_SIM_RESOURCE_PATH': (
-                # Forest3D-generated models (model://ground, model://crop/plant) live here; it must
-                # come first or gz sim aborts world load with "Unable to find uri".
-                '/workspace/models'
-                ':/workspace/install/virtual_maize_field/share/virtual_maize_field/models'
-                + (':' + os.environ['GZ_SIM_RESOURCE_PATH']
-                   if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')
-            ),
-        }
         with self:
             ui.label('Gazebo Sim').classes('font-semibold mb-2')
             self._status = ui.label('').classes('text-xs font-mono').style(_MUTED)
-            restore_label(self._status, self._gazebo[0])
+            show_status(self._status, process_vm.gazebo_status())
             with ui.row().classes('items-center gap-3 mb-1'):
                 ui.html('<span style="font-size:12px;color:#57606a;font-family:monospace">Robot model</span>')
                 ui.toggle(
@@ -74,13 +56,13 @@ class GazeboCard(ui.card):
                     on_change=self._select_model,
                 ).props('dense')
             with ui.row().classes('items-center gap-2 flex-wrap'):
-                ui.button('Launch Sim', on_click=self._launch).props(
+                ui.button('Launch Sim', on_click=lambda: self._launch('normal')).props(
                     'color=positive no-caps').classes('px-4 font-bold')
                 ui.button('Rebuild World from Map', on_click=self._rebuild_world).props(
                     'outline no-caps').classes('px-4')
-                ui.button('Launch Sim (headless)', on_click=lambda: self._launch(headless=True)).props(
+                ui.button('Launch Sim (headless)', on_click=lambda: self._launch('headless')).props(
                     'outline no-caps').classes('px-4')
-                ui.button('Launch Sim (browser)', on_click=self._launch_in_browser).props(
+                ui.button('Launch Sim (browser)', on_click=lambda: self._launch('browser')).props(
                     'outline no-caps').classes('px-4')
                 ui.button('Stop Sim', on_click=self._stop).props('outline no-caps').classes('px-4')
                 link_button(f'http://{request_host()}:6080/vnc.html', '↗ Gazebo (noVNC)')
@@ -94,81 +76,16 @@ class GazeboCard(ui.card):
         self._status.set_text(text)
         self._status.style(style)
 
-    def _sim_cmd(self, headless: bool = False) -> list:
-        """Build the sowbot_sim launch command for the selected robot model."""
-        return [
-            'ros2', 'launch', 'devkit_bringup', 'sowbot_sim.launch.py',
-            'world:=maize.world',
-            f'urdf:={self._xacro}',
-            f'headless:={"true" if headless else "false"}',
-        ]
+    async def _launch(self, mode: GazeboMode = 'normal') -> None:
+        """Launch the selected simulation and show the result.
 
-    def _launch(self, headless: bool = False) -> None:
-        """Launch the selected simulation, optionally headless, and update its status.
-
-        Runs the same command as the CLI: `ros2 launch devkit_bringup sowbot_sim.launch.py
-        world:=maize.world urdf:=<selected xacro>`. This replaces the old Launch World / Spawn Robot
-        split, which ran sim.launch.py + nav2_only.launch.py instead. That path skipped
-        preflight_pkill, fusioncore and kill_bootstrap_tfs entirely (all of which only exist in
-        sowbot_sim.launch.py), causing stale wall-time bootstrap TFs to fight the real sim-time TF
-        forever and FusionCore to never run at all. Do not reintroduce that split.
+        The browser mode starts a virtual display first, so the launch runs off the UI loop.
         """
-        if alive(self._gazebo[0]):
-            self._show('already running')
-            return
-        try:
-            self._gazebo[0] = spawn_logged(
-                self._sim_cmd(headless), '/tmp/gazebo_sim.log', env=self._env)
-            self._show(f'sim launching{" (headless)" if headless else ""} — '
-                       f'{self._xacro} — pid {self._gazebo[0].pid}', _OK)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            self._show(f'ERROR: {exc}', _ERROR)
-
-    async def _launch_in_browser(self) -> None:
-        """Launch the sim on a virtual display that is viewable through noVNC."""
-        if alive(self._gazebo[0]):
-            self._show('already running')
-            return
-        try:
-            await ng_run.io_bound(start_vnc_stack, ':99', 5900, 6080, self._daemons)
-            # Xvfb has no DRI/GLX driver, so it can't honour whatever hardware-render env manage.py set
-            # for the container. Force llvmpipe software GL for this process only (docs/research/Sim.md).
-            #
-            # Env vars alone are not enough for gz-sim: RViz's Ogre1/GLX renderer honours
-            # LIBGL_ALWAYS_SOFTWARE directly, but gz-sim's Ogre2 initialises via EGL_EXT_platform_device,
-            # which enumerates /dev/dri and selects a real GPU node. Mesa's software-force guard then
-            # refuses to override an explicitly-selected hardware device (the "Not allowed to force
-            # software rendering..." warning right before the segfault in gazebo_sim.log). This
-            # container's /dev:/dev + privileged mode means a real render node is always visible.
-            #
-            # Fix: hide /dev/dri from just this subprocess with a private mount namespace, the same
-            # trick gz-sim's own CI uses on GPU-less runners.
-            env = {
-                **self._env,
-                'DISPLAY': ':99',
-                'LIBGL_ALWAYS_SOFTWARE': '1',
-                'GALLIUM_DRIVER': 'llvmpipe',
-                'MESA_LOADER_DRIVER_OVERRIDE': 'llvmpipe',
-            }
-            quoted = ' '.join("'" + a.replace("'", "'\\''") + "'" for a in self._sim_cmd())
-            wrapped = [
-                'unshare', '--mount', '--propagation', 'private',
-                '--', 'bash', '-c',
-                f'mount -t tmpfs tmpfs /dev/dri 2>/dev/null; exec {quoted}',
-            ]
-            # Log to a file so a crashed launch is diagnosable: tail /tmp/gazebo_sim.log.
-            self._gazebo[0] = spawn_logged(wrapped, '/tmp/gazebo_sim.log', env=env)
-            self._show(f'browser mode — {self._xacro} — pid {self._gazebo[0].pid}', _OK)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            self._show(f'ERROR: {exc}', _ERROR)
+        show_status(self._status, await ng_run.io_bound(self._vm.launch_gazebo, self._xacro, mode))
 
     async def _stop(self) -> None:
         """Stop the sim and the display daemons."""
-        for handle in (self._gazebo, self._spawn):
-            await ng_run.io_bound(kill_group, handle[0])
-            handle[0] = None
-        await ng_run.io_bound(stop_all, self._daemons)
-        self._show('stopped')
+        show_status(self._status, await ng_run.io_bound(self._vm.stop_gazebo))
 
     async def _rebuild_world(self) -> None:
         """Rebuild maize.world from the saved topology map and the plant placement.
@@ -177,7 +94,7 @@ class GazeboCard(ui.card):
         at launch, so a running sim must be stopped and relaunched to see a rebuild; this refuses
         mid-run rather than silently doing nothing.
         """
-        if alive(self._gazebo[0]):
+        if self._vm.gazebo_running():
             self._show('stop the sim before rebuilding — Gazebo reads the world only at launch', _ERROR)
             return
         try:

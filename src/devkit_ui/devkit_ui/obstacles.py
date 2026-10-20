@@ -52,7 +52,11 @@ from datetime import UTC, datetime
 import yaml
 from geometry_msgs.msg import Point32, PolygonStamped
 
+from devkit_ui.map_anchor import MapAnchor
 from devkit_ui.qos import LATCHED_QOS
+
+# Returns the current projection anchor, or None while it cannot be known.
+AnchorSource = Callable[[], MapAnchor | None]
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -172,16 +176,15 @@ class ObstacleManager:
         status    : str                last-action status (last writer wins)
     """
 
-    def __init__(self, ros, get_odom: Callable[[], object | None],
-                 get_gps: Callable[[], object | None],
-                 path: str = OBSTACLES_FILE) -> None:
-        """Store the RosGateway and the getters for the latest odometry and GPS fix.
+    def __init__(self, ros, get_anchor: AnchorSource, path: str = OBSTACLES_FILE) -> None:
+        """Store the RosGateway and the source of the map-to-GPS projection anchor.
 
-        Nothing is loaded or published until start() is called.
+        get_anchor returns None until odometry and a usable GPS fix have both arrived. The manager
+        knows nothing about the messages the anchor is made from. Nothing is loaded or published
+        until start() is called.
         """
         self._ros        = ros
-        self._get_odom   = get_odom
-        self._get_gps    = get_gps
+        self._get_anchor = get_anchor
         self._path       = path
         self._lock       = threading.Lock()
         self._obstacles: tuple[dict, ...] = ()
@@ -393,25 +396,12 @@ class ObstacleManager:
 
     # ── publishing ────────────────────────────────────────────────────────
 
-    def _current_anchor(self) -> tuple | None:
-        """Return (map_x, map_y, lat, lon), in meters and degrees, for projection.
+    def _current_anchor(self) -> MapAnchor | None:
+        """Return the projection anchor, or None while it is not yet known.
 
-        Return None if either message is missing, GPS coordinates are nonfinite,
-        or both GPS coordinates have magnitude below 1e-9 degrees.
-        Odometry coordinates are returned without validation.
-        Getter errors and errors accessing or checking message fields propagate.
+        Errors from the anchor source propagate.
         """
-        odom = self._get_odom()
-        gps  = self._get_gps()
-        if odom is None or gps is None:
-            return None
-        lat, lon = gps.latitude, gps.longitude
-        if not (math.isfinite(lat) and math.isfinite(lon)):
-            return None
-        if abs(lat) < 1e-9 and abs(lon) < 1e-9:
-            return None
-        return (odom.pose.pose.position.x, odom.pose.pose.position.y,
-                lat, lon)
+        return self._get_anchor()
 
     def _publish(self) -> None:
         """Publish each obstacle as a PolygonStamped in the map frame.

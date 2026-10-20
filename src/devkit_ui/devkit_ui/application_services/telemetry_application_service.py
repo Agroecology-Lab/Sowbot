@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
+
+from sensor_msgs.msg import NavSatStatus
+
+from devkit_ui.map_anchor import MapAnchor
 
 if TYPE_CHECKING:
     from nav_msgs.msg import Odometry
@@ -69,6 +74,27 @@ class TelemetryApplicationService:
         if odom is None:
             return None
         return odom.twist.twist.linear.x, odom.twist.twist.angular.z
+
+    def map_anchor(self) -> MapAnchor | None:
+        """Return the map position and GPS fix to project lat/lon through, or None if unusable.
+
+        Return None before odometry or a fix has arrived, for a status below STATUS_FIX,
+        for a nonfinite fix, and for coordinates both below 1e-9 degrees in magnitude.
+        Odometry coordinates are passed on as they are. Errors reading either message propagate.
+        """
+        odom = self._telemetry.latest_odom
+        gps = self._telemetry.latest_gps
+        if odom is None or gps is None:
+            return None
+        if gps.status.status < NavSatStatus.STATUS_FIX:
+            return None
+        lat, lon = gps.latitude, gps.longitude
+        if not (math.isfinite(lat) and math.isfinite(lon)):
+            return None
+        if abs(lat) < 1e-9 and abs(lon) < 1e-9:
+            return None
+        position = odom.pose.pose.position
+        return MapAnchor(position.x, position.y, lat, lon)
 
     def robot_pose(self) -> tuple[float, float, float] | None:
         """Return (x, y, yaw) in the map frame, in meters, meters, and radians.

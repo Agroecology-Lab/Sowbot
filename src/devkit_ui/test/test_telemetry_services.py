@@ -6,9 +6,6 @@ import unittest
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
-from devkit_ui.application_services.telemetry_application_service import (
-    TelemetryApplicationService,
-)
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 
 STATUS_NO_FIX = -1
@@ -57,6 +54,9 @@ with patch.dict(sys.modules, {
     'std_msgs': ModuleType('std_msgs'),
     'std_msgs.msg': _stub_module('std_msgs.msg', Bool=type('Bool', (), {})),
 }):
+    from devkit_ui.application_services.telemetry_application_service import (
+        TelemetryApplicationService,
+    )
     from devkit_ui.domain_services import telemetry_domain_service as telemetry_module
     from devkit_ui.domain_services.telemetry_domain_service import TelemetryDomainService
     from devkit_ui.ros_gateway import TransformUnavailable
@@ -447,6 +447,42 @@ class TestApplicationServiceAndViewModel(unittest.TestCase):
         self.assertEqual(self.vm.battery_text, '—')
         self.domain.latest_battery = SimpleNamespace(percentage=0.756, voltage=24.04)
         self.assertEqual(self.vm.battery_text, '75.6%  24.0 V')
+
+    def test_map_anchor_needs_odometry_and_a_usable_fix(self):
+        """Verify the projection anchor is None until both arrive, and rejects empty or nonfinite fixes."""
+        self.assertIsNone(self.app.map_anchor())
+        self.domain.latest_gps = fix(51.0, -1.0)
+        self.assertIsNone(self.app.map_anchor())
+        self.domain.latest_gps = None
+        self.domain.latest_odom = SimpleNamespace(
+            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=12.0, y=-4.0))))
+        self.assertIsNone(self.app.map_anchor())
+        for lat, lon in [(math.nan, -1.0), (51.0, math.inf), (0.0, 0.0), (1e-10, -1e-10)]:
+            with self.subTest(lat=lat, lon=lon):
+                self.domain.latest_gps = fix(lat, lon)
+                self.assertIsNone(self.app.map_anchor())
+        for lat, lon in [(51.0, -1.0), (0.0, -1.0), (51.0, 0.0), (1e-9, 0.0)]:
+            with self.subTest(lat=lat, lon=lon):
+                self.domain.latest_gps = fix(lat, lon)
+                self.assertEqual(self.app.map_anchor(), (12.0, -4.0, lat, lon))
+
+    def test_map_anchor_follows_the_latest_readings(self):
+        """Verify each call reads current state, so the manager never holds a stale anchor."""
+        self.domain.latest_gps = fix(51.0, -1.0)
+        self.domain.latest_odom = SimpleNamespace(
+            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=1.0, y=2.0))))
+        self.assertEqual(self.app.map_anchor(), (1.0, 2.0, 51.0, -1.0))
+        self.domain.latest_odom.pose.pose.position.x = 5.0
+        self.assertEqual(self.app.map_anchor(), (5.0, 2.0, 51.0, -1.0))
+
+    def test_map_anchor_rejects_no_fix_with_plausible_coordinates(self):
+        """A receiver's no-fix status prevents anchoring even with finite coordinates."""
+        self.domain.latest_odom = SimpleNamespace(
+            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=1.0, y=2.0))))
+        self.domain.latest_gps = fix(51.0, -1.0, status=STATUS_NO_FIX)
+        self.assertIsNone(self.app.map_anchor())
+        self.domain.latest_gps = fix(51.0, -1.0, status=STATUS_FIX)
+        self.assertEqual(self.app.map_anchor(), (1.0, 2.0, 51.0, -1.0))
 
     def test_view_model_passes_readings_through_live(self):
         """Verify the view model reflects service state at read time, not a stale copy."""

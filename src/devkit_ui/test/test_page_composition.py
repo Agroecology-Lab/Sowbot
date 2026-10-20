@@ -82,10 +82,13 @@ class TestSimPage(unittest.TestCase):
         self.sim_vm = Mock()
         self.sim_vm.list_crop_models.return_value = ['plant']
         self.topo_vm = Mock()
+        self.process_vm = Mock()
+        self.process_vm.gazebo_status.return_value = None
+        self.process_vm.row_follow_status.return_value = None
 
     def test_cards_render_in_workflow_order(self):
         """Verify assets, launch, row follow, soil texture and archive appear in that order."""
-        SimPage(self.sim_vm, self.topo_vm)
+        SimPage(self.sim_vm, self.topo_vm, self.process_vm)
         self.assertEqual(
             card_titles(),
             ['Plant Placement', 'Gazebo Sim', 'Sowbot Row Follow', 'Soil Texture', 'Map Archive'])
@@ -94,7 +97,7 @@ class TestSimPage(unittest.TestCase):
         """Verify the page itself is styled as a full-width column."""
         # NOTE: The patched ui.column supplies FakeElement.class_names at runtime.
         self.assertEqual(
-            SimPage(self.sim_vm, self.topo_vm).class_names,  # pylint: disable=no-member
+            SimPage(self.sim_vm, self.topo_vm, self.process_vm).class_names,  # pylint: disable=no-member
             'w-full gap-3')
 
     def test_cards_get_the_view_models_and_live_plant_settings_they_need(self):
@@ -104,11 +107,12 @@ class TestSimPage(unittest.TestCase):
         manager = Mock()
         for name in names:
             self.enterContext(patch.object(sim_page, name, getattr(manager, name)))
-        SimPage(self.sim_vm, self.topo_vm)
+        SimPage(self.sim_vm, self.topo_vm, self.process_vm)
         placement = manager.PlantPlacementCard.return_value.classes.return_value
         manager.PlantPlacementCard.assert_called_once_with(self.sim_vm)
-        manager.GazeboCard.assert_called_once_with(self.sim_vm, placement.settings)
-        manager.RowFollowCard.assert_called_once_with()
+        manager.GazeboCard.assert_called_once_with(
+            self.sim_vm, self.process_vm, placement.settings)
+        manager.RowFollowCard.assert_called_once_with(self.process_vm)
         manager.SoilTextureCard.assert_called_once_with(self.sim_vm)
         manager.MapArchiveCard.assert_called_once_with(self.topo_vm)
         for name in names:
