@@ -77,6 +77,10 @@ disable = [
 [tool.pylint.format]
 max-line-length = 120  # same as ruff's line-length
 
+[tool.pylint.imports]
+# Match Ruff's first-party classification for the relocated UI test helpers.
+known-first-party = ["plan_fake_ui", "test_*", "topo_test_fakes"]
+
 [tool.pylint.'TYPECHECK']
 ignored-modules = [
     "rclpy",
@@ -93,7 +97,7 @@ ignored-modules = [
 ]
 
 [tool.ruff]
-src = [".", "tools", "worldgen"]  # scripts in tools/ and worldgen/ are first-party for import sorting
+src = [".", "tools", "worldgen", "src/devkit_ui/test"]  # scripts in tools/ and worldgen/, and the UI test modules, are first-party for import sorting
 line-length = 120
 indent-width = 4
 target-version = "py311"

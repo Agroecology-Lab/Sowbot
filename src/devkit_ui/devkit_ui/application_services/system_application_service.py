@@ -171,6 +171,8 @@ class SystemApplicationService:
         Use the topology RViz configuration when its ROS package is available, which has
         MarkerArray displays pre-wired to /topological_map_visualisation et al. Otherwise launch
         without -d. If the display stack fails to start, the error propagates and RViz is not spawned.
+        Start a background worker to clean up the display daemons after RViz exits.
+        RViz launch and worker startup errors also propagate.
         """
         try:
             config = os.path.join(get_package_share_directory('topological_navigation'),
@@ -182,7 +184,30 @@ class SystemApplicationService:
         if config is not None:
             args += ['-d', config]
         proc = spawn_logged(args, _LOGS[TOOL_RVIZ], env={**os.environ, 'DISPLAY': _RVIZ_DISPLAY})
+        threading.Thread(target=self._reap_rviz_display, args=(proc,), daemon=True).start()
         return proc, '' if config else _NO_TOPO_CONFIG
+
+    def _reap_rviz_display(self, proc: Any) -> None:
+        """Stop RViz's display daemons when proc exits on its own. Blocks until proc exits.
+
+        Do nothing if proc is no longer the registered RViz handle, because a stop or a restart
+        owns the daemons then. Detach the daemons under the tool lock, then stop them outside it;
+        keep the RViz handle so exited() can still report its return code.
+        Ignore cleanup OSError exceptions without retrying failed or remaining daemons;
+        their handles have already been removed from the registry.
+        Errors from proc.wait() propagate.
+        """
+        proc.wait()
+        with self._locks[TOOL_RVIZ]:
+            if shared(TOOL_RVIZ, lambda: [None])[0] is not proc:
+                return
+            registered = shared('rviz_daemons', list)
+            daemons = list(registered)
+            registered.clear()
+        try:
+            stop_all(daemons)
+        except OSError:
+            pass
 
     def _launch_medkit(self) -> tuple[Any, str]:
         """Start the Medkit gateway on loopback and return its process with no note.

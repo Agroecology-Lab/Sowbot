@@ -85,9 +85,16 @@ class MissionDomainService:
         """Whether cancel() was called since the last mission start or worker cleanup."""
         return self._cancel
 
-    def cancel(self) -> None:
-        """Ask the executor to stop before its next goal. Cancelling the active goal is the caller's job."""
-        self._cancel = True
+    def cancel(self) -> bool:
+        """Ask a running mission to stop before its next goal; return False if none is running.
+
+        Cancelling the active goal is the caller's job, and only when this returns True.
+        """
+        with self._lock:
+            if not self._running:
+                return False
+            self._cancel = True
+            return True
 
     def start(self, steps: list[MissionStep], navigate: Callable[[str], bool],
               on_status: StatusCallback, estop_active: Callable[[], bool]) -> None:

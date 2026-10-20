@@ -17,6 +17,9 @@ setup(
         (os.path.join('share', package_name, 'config'), glob(os.path.join('config', '*'))),
     ],
     install_requires=['setuptools'],
+    # Declares pytest so colcon uses it: its unittest fallback only finds tests in a package
+    # (unittest exits 5 when it finds none), and the tests live in test/, which is not one.
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='sam',
     description='Sowbot Devkit Package',

@@ -34,6 +34,7 @@ pylint:
 		--disable=import-error \
 		./src/devkit_driver/devkit_driver \
 		./src/devkit_ui/devkit_ui \
+		./src/devkit_ui/test/*.py \
 		./src/devkit_mavlink_bridge/devkit_mavlink_bridge \
 		./src/devkit_f2c_planner/devkit_f2c_planner
 
@@ -42,13 +43,13 @@ ruff:
 	find ./src/devkit_driver/devkit_driver -name '*.py' | xargs ruff check
 	find ./src/devkit_bringup/launch -name '*.py' | xargs ruff check
 	find ./src/devkit_ui/devkit_ui -name '*.py' | xargs ruff check
-	ruff check ./src/devkit_mavlink_bridge ./src/devkit_f2c_planner ./src/devkit_simulation ./src/devkit_driver/test manage.py tests
+	ruff check ./src/devkit_mavlink_bridge ./src/devkit_f2c_planner ./src/devkit_simulation ./src/devkit_driver/test ./src/devkit_ui/test manage.py tests
 
 ruff-fix:
 	find ./src/devkit_driver/devkit_driver -name '*.py' | xargs ruff check --fix
 	find ./src/devkit_bringup/launch -name '*.py' | xargs ruff check --fix
 	find ./src/devkit_ui/devkit_ui -name '*.py' | xargs ruff check --fix
-	ruff check --fix ./src/devkit_mavlink_bridge ./src/devkit_f2c_planner ./src/devkit_simulation ./src/devkit_driver/test manage.py tests
+	ruff check --fix ./src/devkit_mavlink_bridge ./src/devkit_f2c_planner ./src/devkit_simulation ./src/devkit_driver/test ./src/devkit_ui/test manage.py tests
 
 ## pre-commit	Run pre-commit hooks on all files.
 pre-commit:
@@ -56,7 +57,7 @@ pre-commit:
 
 ## test		Run unit tests.
 test:
-	cd src/devkit_ui && python -m unittest discover
+	cd src/devkit_ui && python -m unittest discover -s test
 	cd src/devkit_f2c_planner && python -m unittest discover
 	cd src/devkit_mavlink_bridge && python -m unittest discover -s test
 	cd src/devkit_driver && python -m unittest discover -s test

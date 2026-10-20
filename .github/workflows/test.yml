@@ -15,6 +15,7 @@ jobs:
               pylint --disable=duplicate-code
               ./src/devkit_driver/devkit_driver
               ./src/devkit_ui/devkit_ui
+              ./src/devkit_ui/test/*.py
               ./src/devkit_mavlink_bridge/devkit_mavlink_bridge
               ./src/devkit_f2c_planner/devkit_f2c_planner
               --fail-under=10.0
