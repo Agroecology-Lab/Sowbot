@@ -45,7 +45,7 @@ class TestNavPage(unittest.TestCase):
         self.ui_on = self.enterContext(patch.object(fake_ui, 'on', create=True))
         self.mocks = {name: self.enterContext(patch.object(nav_page, name, new=Mock()))
                       for name in _COLLABORATORS}
-        self.drive = Mock()
+        self.drive = Mock(soft_estop_active=False)
         self.global_vm = GlobalViewModel(self.drive)
         self.run_vm = RunViewModel(self.drive)
         self.run_vm.go_to = Mock()
@@ -104,7 +104,7 @@ class TestNavPage(unittest.TestCase):
 
         self.run_vm.move_joystick(0.8, 0.6)
         self.global_vm.toggle_estop()
-        self.drive.register_soft_estop_state_callback.call_args.args[0](True)
+        self.drive.soft_estop_active = True
 
         self.drive.move_joystick.assert_called_once_with(0.8, 0.6)
         self.drive.toggle_estop.assert_called_once_with(False)
@@ -200,7 +200,7 @@ class TestNavPage(unittest.TestCase):
         """Verify Go reads the soft e-stop when pressed, not when the page was built."""
         go = self.mocks['NavigationSidebar'].call_args.kwargs['on_go']
         self.topo_vm.set_selected_node('A')
-        self.global_vm.soft_estop_active = True
+        self.drive.soft_estop_active = True
 
         go()
 

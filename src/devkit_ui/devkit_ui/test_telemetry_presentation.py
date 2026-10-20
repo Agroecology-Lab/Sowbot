@@ -1,8 +1,6 @@
-"""Telemetry state remains live through the application, view model and node bridges."""
-# pylint: disable=exec-used,protected-access
-import ast
+"""Telemetry state remains live through the application and view model."""
+# pylint: disable=protected-access
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -94,22 +92,6 @@ class TestTelemetryPresentation(unittest.TestCase):
         self.assertEqual(self.vm.robot_pose(), (-2.0, 3.0, -0.5))
         self.assertEqual(self.domain.robot_pose.call_count, 3)
 
-    def test_node_compatibility_properties_are_live_and_read_only(self):
-        """Legacy odometry/GPS readers retain access without becoming extra state owners."""
-        node = load_node_telemetry_bridge()
-        node._telemetry_app_service = self.app
-        self.assertIsNone(node.latest_gps)
-        self.assertIsNone(node.latest_odom)
-        for _ in range(2):
-            gps, reading = fixtures.fix(), fixtures.odom()
-            self.sub['/gnss/fix'](gps)
-            self.sub['/odom'](reading)
-            self.assertIs(node.latest_gps, gps)
-            self.assertIs(node.latest_odom, reading)
-        for name in ('latest_gps', 'latest_odom'):
-            with self.subTest(property=name), self.assertRaises(AttributeError):
-                setattr(node, name, None)
-
     def test_displayed_velocity_tracks_only_accepted_odometry(self):
         """Rejected fusion and fallback messages cannot replace trusted displayed velocity."""
         self.sub['/gnss/fix'](fixtures.fix())
@@ -164,8 +146,6 @@ class TestTelemetryPresentation(unittest.TestCase):
 
     def test_cached_gps_remains_visible_after_freshness_windows_expire(self):
         """GPS readers expose the cached message even after it cannot authorize fusion."""
-        node = load_node_telemetry_bridge()
-        node._telemetry_app_service = self.app
         for status in (fixtures.STATUS_FIX, fixtures.STATUS_NO_FIX):
             with self.subTest(status=status):
                 reading = fixtures.fix(status=status)
@@ -175,7 +155,6 @@ class TestTelemetryPresentation(unittest.TestCase):
                 self.vm.refresh()
                 self.assertIs(self.app.latest_gps, reading)
                 self.assertIs(self.vm.gps, reading)
-                self.assertIs(node.latest_gps, reading)
                 self.sub['/fusion/odom'](fixtures.odom())
                 self.assertIsNone(self.app.latest_odom)
 
@@ -212,21 +191,6 @@ class TestTelemetryPresentation(unittest.TestCase):
             with self.subTest(layer=type(layer).__name__), self.assertRaises(ValueError) as raised:
                 layer.robot_pose()
             self.assertIs(raised.exception, failure)
-
-
-def load_node_telemetry_bridge():
-    """Load the actual bridge properties using the repository's isolated AST harness pattern."""
-    source = Path(__file__).with_name('ui_node.py')
-    tree = ast.parse(source.read_text(encoding='utf-8'))
-    node_class = next(node for node in tree.body
-                      if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode')
-    members = [node for node in node_class.body
-               if isinstance(node, ast.FunctionDef) and node.name in ('latest_odom', 'latest_gps')]
-    harness = ast.ClassDef(name='Harness', bases=[], keywords=[], body=members, decorator_list=[])
-    module = ast.fix_missing_locations(ast.Module(body=[harness], type_ignores=[]))
-    namespace = {'Odometry': object, 'NavSatFix': object}
-    exec(compile(module, source, 'exec'), namespace)
-    return namespace['Harness']()
 
 
 if __name__ == '__main__':

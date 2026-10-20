@@ -180,7 +180,7 @@ class RunViewModel:
             return
         self.topo.nav_status = f'connecting → {target}…'
         self.topo.navigating = True
-        self._navigation_app_service.navigate(target, self._on_nav_update)
+        self._navigation_app_service.navigate(target, self.on_nav_update)
 
     def go_to(self, target: str, soft_estop_active: bool) -> None:
         """Start navigating to a node unless a goal is running or the soft e-stop is active.
@@ -208,14 +208,14 @@ class RunViewModel:
         if self._navigation_app_service is None:
             return False
         return self._navigation_app_service.navigate_and_wait(
-            target, timeout_sec, should_abort, self._on_nav_update)
+            target, timeout_sec, should_abort, self.on_nav_update)
 
     @property
     def navigation_available(self) -> bool:
         """Whether the navigation action interface is available."""
         return self._navigation_app_service is not None and self._navigation_app_service.available
 
-    def _on_nav_update(self, update: NavUpdate) -> None:
+    def on_nav_update(self, update: NavUpdate) -> None:
         """Apply navigation progress to the displayed status and running flag."""
         self.topo.nav_status = update.status
         self.topo.navigating = update.navigating

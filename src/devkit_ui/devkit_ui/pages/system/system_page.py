@@ -7,6 +7,7 @@ from devkit_ui.pages.system.odometry_card import OdometryCard
 from devkit_ui.pages.system.safety_card import SafetyCard
 from devkit_ui.pages.system.tools_card import ToolsCard
 from devkit_ui.view_models.robot_brain_view_model import RobotBrainViewModel
+from devkit_ui.view_models.system_view_model import SystemViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 
 
@@ -15,12 +16,14 @@ class SystemPage(ui.column):
 
     def __init__(self,
                  telemetry_vm: TelemetryViewModel,
-                 robot_brain_vm: RobotBrainViewModel) -> None:
+                 robot_brain_vm: RobotBrainViewModel,
+                 system_vm: SystemViewModel) -> None:
         """Compose the System page from its cards.
 
         Parameters:
             telemetry_vm (TelemetryViewModel): Source for the odometry, battery, safety and GPS cards.
             robot_brain_vm (RobotBrainViewModel): Receives the ESP commands.
+            system_vm (SystemViewModel): Starts and stops the tools in the Tools card.
         """
         super().__init__()
         self.classes('w-full gap-3')
@@ -31,4 +34,4 @@ class SystemPage(ui.column):
                 SafetyCard(telemetry_vm).classes('flex-1')
             EspCard(robot_brain_vm).classes('w-full')
             GpsCard(telemetry_vm).classes('w-full')
-            ToolsCard().classes('w-full')
+            ToolsCard(system_vm).classes('w-full')

@@ -72,7 +72,7 @@ Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sow
 
 Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
 
-We have a [Online version of swath planner](https://agroecology-lab.github.io/feldfreund_devkit_ros/)
+We have a [Online version of swath planner](https://agroecology-lab.github.io/Sowbot/)
 
 **Collaborators welcome.**
 See [CONTRIBUTING.md](CONTRIBUTING.md).

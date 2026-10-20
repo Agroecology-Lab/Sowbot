@@ -125,15 +125,17 @@ class TestSystemPage(unittest.TestCase):
             bumper_front_top_active=False, bumper_front_bottom_active=False,
             bumper_back_active=False, estop_front_active=False, estop_back_active=False)
         self.brain = Mock()
+        self.system = Mock()
+        self.system.status.return_value = None
 
     def test_cards_render_health_first_then_maintenance(self):
         """Verify odometry, battery and safety come before ESP, GPS and tools."""
-        SystemPage(self.telemetry, self.brain)
+        SystemPage(self.telemetry, self.brain, self.system)
         self.assertEqual(card_titles(), ['Odometry', 'Battery', 'Safety', 'ESP', 'GPS', 'Tools'])
 
     def test_health_cards_share_one_stretched_row(self):
         """Verify odometry, battery and safety are built inside the same full-width row."""
-        page = SystemPage(self.telemetry, self.brain)
+        page = SystemPage(self.telemetry, self.brain, self.system)
         # NOTE: The patched ui.column supplies FakeElement.children at runtime.
         rows = [child for child in page.children if child.kind == 'row']  # pylint: disable=no-member
         self.assertEqual(len(rows), 1)
@@ -142,17 +144,17 @@ class TestSystemPage(unittest.TestCase):
         self.assertEqual(page.class_names, 'w-full gap-3')  # pylint: disable=no-member
 
     def test_cards_get_the_view_models_they_need_and_the_right_widths(self):
-        """Verify telemetry and brain view models reach their cards and widths are set."""
+        """Verify telemetry, brain and system view models reach their cards and widths are set."""
         flex = ('OdometryCard', 'BatteryCard', 'SafetyCard')
         full = ('EspCard', 'GpsCard', 'ToolsCard')
         manager = Mock()
         for name in flex + full:
             self.enterContext(patch.object(system_page, name, getattr(manager, name)))
-        SystemPage(self.telemetry, self.brain)
+        SystemPage(self.telemetry, self.brain, self.system)
         for name in ('OdometryCard', 'BatteryCard', 'SafetyCard', 'GpsCard'):
             getattr(manager, name).assert_called_once_with(self.telemetry)
         manager.EspCard.assert_called_once_with(self.brain)
-        manager.ToolsCard.assert_called_once_with()
+        manager.ToolsCard.assert_called_once_with(self.system)
         for name in flex:
             getattr(manager, name).return_value.classes.assert_called_once_with('flex-1')
         for name in full:
@@ -165,7 +167,9 @@ class TestToolsCardLayout(unittest.TestCase):
         self.addCleanup(fake_ui.reset)
         self.enterContext(patch.object(tools_card, 'request_host', return_value='robot.local'))
         self.enterContext(patch.object(fake_ui.context.client, 'request', REQUEST, create=True))
-        self.card = ToolsCard()
+        system = Mock()
+        system.status.return_value = None
+        self.card = ToolsCard(system)
 
     def test_each_tool_has_start_and_stop_controls_separated_by_rules(self):
         """Verify the four tool groups are separated by three rules and each has a stop control."""

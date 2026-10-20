@@ -345,7 +345,7 @@ class TestMissionQueue(unittest.TestCase):
 
     def test_the_view_model_hands_out_separate_queues(self) -> None:
         """Verify each session gets its own queue."""
-        vm = MissionViewModel(Mock())
+        vm = MissionViewModel(Mock(), Mock())
 
         first, second = vm.new_queue(), vm.new_queue()
         first.add(1, 'drive', {})

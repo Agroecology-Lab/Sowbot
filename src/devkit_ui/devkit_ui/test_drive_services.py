@@ -125,6 +125,16 @@ class TestDriveServices(unittest.TestCase):
         self.assertIsNot(messages[0], messages[1])
         self.velocity_publisher.publish.assert_not_called()
 
+    def test_application_service_exposes_the_confirmed_estop_to_other_use_cases(self):
+        """Verify a mission can read the confirmed state without going through a view model."""
+        self.assertFalse(self.app.soft_estop_active)
+        self.ack(True)
+        self.assertTrue(self.app.soft_estop_active)
+        self.app.toggle_estop(True)
+        self.assertTrue(self.app.soft_estop_active)
+        self.ack(False)
+        self.assertFalse(self.app.soft_estop_active)
+
     def test_unacknowledged_request_never_shows_a_stop(self):
         """Verify a request the driver never confirms leaves the displayed state unchanged."""
         for _ in range(3):
@@ -137,7 +147,7 @@ class TestDriveServices(unittest.TestCase):
         self.estop_publisher.publish.side_effect = RuntimeError('publisher down')
         for current in (False, True):
             with self.subTest(current=current):
-                self.global_vm.soft_estop_active = current
+                self.ack(current)
                 with self.assertRaisesRegex(RuntimeError, 'publisher down'):
                     self.global_vm.toggle_estop()
                 self.assertIs(self.global_vm.soft_estop_active, current)
@@ -250,17 +260,17 @@ class TestDriveServices(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'publisher down'):
             self.run.move_joystick(0.5, 0.1)
 
-    def test_global_view_model_registers_for_confirmations(self):
-        """Verify the view model requests the opposite of its confirmed state and stores confirmations."""
-        app = Mock(spec=DriveApplicationService)
+    def test_global_view_model_reads_the_confirmed_state_from_the_service(self):
+        """Verify the view model keeps no copy: it requests the opposite of the service's state."""
+        app = Mock(spec=DriveApplicationService, soft_estop_active=False)
         vm = GlobalViewModel(app)
-        app.register_soft_estop_state_callback.assert_called_once()
+        app.register_soft_estop_state_callback.assert_not_called()
 
         vm.toggle_estop()
         app.toggle_estop.assert_called_once_with(False)
         self.assertFalse(vm.soft_estop_active)
 
-        app.register_soft_estop_state_callback.call_args.args[0](True)
+        app.soft_estop_active = True
         vm.toggle_estop()
         app.toggle_estop.assert_called_with(True)
         self.assertTrue(vm.soft_estop_active)

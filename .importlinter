@@ -26,9 +26,6 @@ forbidden_modules =
     subprocess
 allow_indirect_imports = True
 unmatched_ignore_imports_alerting = error
-ignore_imports =
-    # TODO(#116): move the Medkit process behind an application service
-    devkit_ui.pages.system.tools_card -> subprocess
 
 [importlinter:contract:view-models-no-backend]
 name = ViewModels do not reach domain services, stores or ROS
@@ -43,10 +40,6 @@ forbidden_modules =
     devkit_ui.qos
     rclpy
 allow_indirect_imports = True
-unmatched_ignore_imports_alerting = error
-ignore_imports =
-    # TODO(#116): ObstacleViewModel -> ObstacleApplicationService
-    devkit_ui.view_models.obstacle_view_model -> devkit_ui.obstacles
 
 [importlinter:contract:services-ui-neutral]
 name = Services are UI-neutral

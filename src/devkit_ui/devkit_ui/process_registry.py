@@ -37,6 +37,16 @@ def spawn_logged(cmd: list, log: str, **kwargs):
                                 start_new_session=True, **kwargs)
 
 
+def spawn_quiet(cmd: list, **kwargs):
+    """Start cmd in its own session with both output streams discarded.
+
+    Forward kwargs to Popen; process-creation errors propagate.
+    The new session keeps shutdown_tools' kill_group from signalling the UI's own process group.
+    """
+    return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,  # pylint: disable=consider-using-with
+                            start_new_session=True, **kwargs)
+
+
 def kill_group(proc, grace: float = 5.0) -> None:
     """Request process-group termination, escalating if the leader outlives grace seconds.
 
@@ -62,6 +72,25 @@ def kill_group(proc, grace: float = 5.0) -> None:
         proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
         pass
+
+
+def interrupt_stop(proc, interrupt_wait: float, terminate_wait: float, kill_wait: float) -> None:
+    """Stop a launch leader gently, escalating only after each wait times out.
+
+    Send SIGINT to the leader only, so ROS launch can stop its children, and wait interrupt_wait
+    seconds. Then terminate and wait terminate_wait, then kill and wait kill_wait.
+    OS errors and a timeout after kill propagate. Blocking: call off the UI loop.
+    """
+    proc.send_signal(signal.SIGINT)
+    try:
+        proc.wait(timeout=interrupt_wait)
+    except subprocess.TimeoutExpired:
+        proc.terminate()
+        try:
+            proc.wait(timeout=terminate_wait)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=kill_wait)
 
 
 def stop_all(procs: list) -> None:

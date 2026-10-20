@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from devkit_ui.application_services.mission_application_service import (
         MissionApplicationService,
+        StatusCallback,
     )
+    from devkit_ui.view_models.run_view_model import RunViewModel
 
 
 class MissionQueue:
@@ -50,11 +52,15 @@ class MissionQueue:
 
 
 class MissionViewModel:
-    """UI-facing state and user intents for the saved-missions list."""
+    """UI-facing state and user intents for saved missions and for running a queue."""
 
-    def __init__(self, app_service: MissionApplicationService) -> None:
-        """Bind to the mission application service."""
+    def __init__(self, app_service: MissionApplicationService, run_vm: RunViewModel) -> None:
+        """Bind to the mission application service.
+
+        run_vm shows navigation progress on the Run tab while a mission drives the robot.
+        """
         self._app_service = app_service
+        self._run_vm = run_vm
 
     @staticmethod
     def new_queue() -> MissionQueue:
@@ -106,3 +112,14 @@ class MissionViewModel:
         SQLite database and JSON serialization errors propagate.
         """
         return self._app_service.save_queue(queue, name, repeat_every_hours)
+
+    def run(self, queue: list, on_status: StatusCallback) -> None:
+        """Run (row_id, action_key, action_params) steps; progress arrives as (level, text).
+
+        See MissionApplicationService.start for the error and threading behaviour.
+        """
+        self._app_service.start(queue, on_status, self._run_vm.on_nav_update)
+
+    def cancel(self) -> None:
+        """Cancel the running mission and its active navigation goal."""
+        self._app_service.cancel()

@@ -21,7 +21,7 @@ class TestJoystickControlCard(unittest.TestCase):
         """Build the joystick card with fake UI elements and a mock drive service."""
         fake_ui.reset()
         self.enterContext(patch.object(joystick_control_card, 'ui', fake_ui))
-        self.app = Mock()
+        self.app = Mock(soft_estop_active=False)
         self.global_vm = GlobalViewModel(self.app)
         self.run_vm = RunViewModel(self.app)
         self.card = joystick_control_card.JoystickControlCard(self.global_vm, self.run_vm)
@@ -65,7 +65,6 @@ class TestJoystickControlCard(unittest.TestCase):
         """Verify a click only requests a stop; text and color change when the driver confirms."""
         self.assertEqual(self.card.estop_btn.text, 'E-Stop')
         self.assertEqual(self.card.estop_btn.properties, 'color=primary')
-        confirm = self.app.register_soft_estop_state_callback.call_args.args[0]
 
         for confirmed, label, color in [(True, 'STOPPED', 'negative'), (False, 'E-Stop', 'primary')]:
             with self.subTest(confirmed=confirmed):
@@ -74,7 +73,7 @@ class TestJoystickControlCard(unittest.TestCase):
                 self.app.toggle_estop.assert_called_with(before)
                 self.assertEqual(self.card.estop_btn.refresh_binding(), 'STOPPED' if before else 'E-Stop')
 
-                confirm(confirmed)
+                self.app.soft_estop_active = confirmed
 
                 self.assertIs(self.global_vm.soft_estop_active, confirmed)
                 self.assertEqual(self.card.estop_btn.refresh_binding(), label)

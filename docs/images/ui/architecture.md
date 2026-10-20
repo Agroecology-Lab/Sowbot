@@ -1,7 +1,7 @@
 
 ```mermaid
 flowchart TB
-  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 371 lines)"]
+  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 264 lines)"]
     subgraph UI["View (NiceGUI)"]
       Content["content(): four tabs"]
       NavPage["NavPage (class)"]
@@ -18,8 +18,7 @@ flowchart TB
     end
 
     subgraph PROC["Process helper (UI-neutral, no ROS)"]
-      ProcReg["process_registry<br/>(RViz, Gazebo, explorer, grapher, neo;<br/>shared across browser sessions)"]
-      Medkit["Medkit launch<br/>(subprocess in tools_card)"]
+      ProcReg["process_registry<br/>(RViz, Gazebo, explorer, grapher, Medkit, neo;<br/>shared across browser sessions)"]
     end
 
     subgraph VM["ViewModel (UI state and user intent)"]
@@ -30,9 +29,10 @@ flowchart TB
       TelemetryVM["TelemetryViewModel"]
       RobotBrainVM["RobotBrainViewModel"]
       PlanVM["PlanViewModel<br/>(plan status wording, PlanPageState per session)"]
-      MissionVM["MissionViewModel<br/>(saved missions, MissionQueue per session)"]
+      MissionVM["MissionViewModel<br/>(saved missions, run and cancel, MissionQueue per session)"]
       ObstacleVM["ObstacleViewModel"]
       SimVM["SimViewModel"]
+      SystemVM["SystemViewModel<br/>(tool status wording and levels)"]
     end
 
     subgraph APPSVC["ApplicationService (use-case logic)"]
@@ -44,9 +44,11 @@ flowchart TB
       TopologyApp["TopologyApplicationService<br/>(save, save-as, archive, go-live, role patch)"]
       TopologyEdit["TopologyEditService<br/>(stage drop, F2C save, repair, delete)"]
       PlanApp["PlanApplicationService<br/>(plan rows, import plan, save rows; keeps no draft)"]
-      MissionApp["MissionApplicationService"]
+      MissionApp["MissionApplicationService<br/>(saved missions, start and cancel a run)"]
+      ObstacleApp["ObstacleApplicationService<br/>(mark here, add circle or polygon, delete)"]
       SimAssets["SimAssetService<br/>(crop models, soil textures; files only)"]
       SimWorld["SimWorldService<br/>(rebuild Gazebo world via worldgen.sh)"]
+      SystemApp["SystemApplicationService<br/>(start, stop and poll the System page tools)"]
     end
 
     subgraph DOMSVC["DomainService (live state, ROS pub/sub)"]
@@ -55,7 +57,7 @@ flowchart TB
       RowDiscDom["RowDiscoveryDomainService"]
       RobotBrainDom["RobotBrainDomainService"]
       TelemetryDom["TelemetryDomainService"]
-      TopologyDom["TopologyDomainService<br/>(live TopoDoc, /topological_map_2,<br/>switch_topological_map client)"]
+      TopologyDom["TopologyDomainService<br/>(live TopoDoc, /topological_map_2, /current_node,<br/>switch_topological_map client)"]
       MissionDom["MissionDomainService<br/>(mission executor, tool publishers)"]
     end
 
@@ -69,6 +71,7 @@ flowchart TB
     subgraph INFRA["Infrastructure"]
       TopoMapStore["TopoMapStore<br/>(map file I/O; sits in the domain_services package)"]
       MissionStore["MissionStore<br/>(YAML or SQLite, scheduling, run recording)"]
+      SimAssetStore["SimAssetStore<br/>(crop model folders, soil texture folder)"]
       ObstacleManager["ObstacleManager<br/>(obstacles.yaml, /obstacles publisher)"]
       RosGateway["RosGateway<br/>(wraps the rclpy Node: publishers, subscriptions,<br/>clients, timers, clock, tf, parameters, logging;<br/>turns QosSpec into QoSProfile)"]
     end
@@ -93,18 +96,23 @@ flowchart TB
   NavPage --> AuthoringVM
   PlanCards --> PlanVM
   PlanCards --> MissionVM
+  PlanCards --> TopoVM
+  PlanCards --> AuthoringVM
+  PlanCards --> DeleteDlg
   PlanVM -.->|"reads map"| TopoVM
   PlanVM -.->|"reads row action"| RunVM
+  MissionVM -.->|"navigation updates for the Run tab"| RunVM
   SimCards --> SimVM
   SimCards --> TopoVM
   SysCards --> TelemetryVM
   SysCards --> RobotBrainVM
+  SysCards --> SystemVM
   ObsCards --> ObstacleVM
   DeleteDlg --> TopoVM
 
   SimCards -.-> ProcReg
-  SysCards -.-> ProcReg
-  SysCards -.-> Medkit
+  SystemVM --> SystemApp
+  SystemApp --> ProcReg
 
   AuthoringVM --> TopologyEdit
   AuthoringVM --> TopologyApp
@@ -123,13 +131,15 @@ flowchart TB
   MissionVM --> MissionApp
   SimVM --> SimAssets
   SimVM --> SimWorld
-  ObstacleVM -.-> ObstacleManager
+  ObstacleVM --> ObstacleApp
 
   PlanApp --> TopologyEdit
   PlanApp --> TopologyApp
   PlanApp --> TelemetryApp
   PlanApp --> RowPlanning
   PlanApp --> F2CPkg
+  ObstacleApp --> ObstacleManager
+  ObstacleApp --> TelemetryApp
   TopologyEdit --> TopologyApp
   TopologyEdit --> RowBuilder
   RowBuilder --> RowPlanning
@@ -138,8 +148,10 @@ flowchart TB
   RowPlanning --> F2CPkg
   DemMod --> F2CPkg
   SimWorld --> SimAssets
-  MissionApp -.->|"live doc getter"| TopologyApp
-  ObstacleVM -.->|"gps getter"| TelemetryApp
+  SimAssets --> SimAssetStore
+  MissionApp --> TopologyApp
+  MissionApp --> NavApp
+  MissionApp --> DriveApp
   ObstacleManager -.->|"odom and gps getters"| TelemetryApp
   AuthoringVM -.->|"timer factory"| RosGateway
 
@@ -154,6 +166,8 @@ flowchart TB
   MissionApp --> MissionStore
   TopologyDom -.->|"doc changed callback"| TopologyApp
   TopologyApp -.->|"doc changed callback"| TopoVM
+  TopologyDom -.->|"current node callback"| TopologyApp
+  TopologyApp -.->|"current node callback"| TopoVM
 
   DriveDom --> RosGateway
   NavDom --> RosGateway
@@ -175,13 +189,12 @@ flowchart TB
   classDef proc fill:#f3f4f6,stroke:#374151,color:#111827,stroke-width:1px
 
   class Content,NavPage,PlanPage,SimPage,SystemPage,RunCards,PlanCards,SimCards,SysCards,ObsCards,DeleteDlg,WebAuth view
-  class Medkit todo
   class ProcReg proc
-  class GlobalVM,RunVM,AuthoringVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM vm
-  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,SimAssets,SimWorld app
+  class GlobalVM,RunVM,AuthoringVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM,SystemVM vm
+  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,ObstacleApp,SimAssets,SimWorld,SystemApp app
   class DriveDom,NavDom,RowDiscDom,RobotBrainDom,TelemetryDom,TopologyDom,MissionDom dom
   class RowBuilder,RowPlanning,DemMod,F2CPkg pure
-  class TopoMapStore,MissionStore,ObstacleManager,RosGateway infra
+  class TopoMapStore,MissionStore,SimAssetStore,ObstacleManager,RosGateway infra
 
   style P1 fill:#ffffff,stroke:#6b7280,color:#111827
   style UI fill:#eff6ff,stroke:#1e40af,color:#111827

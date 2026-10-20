@@ -7,7 +7,7 @@ from std_msgs.msg import String
 
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.parse import parse_topo_json
-from devkit_ui.qos import LATCHED_QOS
+from devkit_ui.qos import LATCHED_QOS, SENSOR_QOS
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.topo_results import SwitchResult
 
@@ -26,6 +26,7 @@ class TopologyDomainService:
     Responsibilities:
     - Store and mutate the TopoDoc
     - Subscribe to /topological_map_2 (incoming map updates)
+    - Subscribe to /current_node (the node the robot is localised on)
     - Publish to /topological_map_2 (outgoing updates)
     - Provide query and mutation interfaces
     """
@@ -39,11 +40,13 @@ class TopologyDomainService:
         self._doc: TopoDoc | None = None
         self._ros = ros_gateway
         self._on_doc_changed = None  # Set via set_doc_changed_callback()
+        self._current_node_callbacks: list = []
         self._topo_map_pub = None
 
         # Subscribe to map updates and create publisher
         self._ros.create_subscription(String, '/topological_map_2', self._on_topo_map, TMAP_QOS)
         self._topo_map_pub = self._ros.create_publisher(String, '/topological_map_2', TMAP_QOS)
+        self._ros.create_subscription(String, '/current_node', self._on_current_node, SENSOR_QOS)
         self._switch_cli = (
             self._ros.create_client(
                 WriteTopologicalMap, '/topological_map_manager2/switch_topological_map')
@@ -58,6 +61,18 @@ class TopologyDomainService:
             callback: Callable(doc: TopoDoc | None) invoked on doc changes.
         """
         self._on_doc_changed = callback
+
+    def register_current_node_callback(self, callback) -> None:
+        """Call callback(name: str) each time /current_node reports the robot's node.
+
+        Callbacks run on the ROS executor thread.
+        """
+        self._current_node_callbacks.append(callback)
+
+    def _on_current_node(self, msg: String) -> None:
+        """Forward the reported node name to every registered callback."""
+        for callback in self._current_node_callbacks:
+            callback(msg.data)
 
     def _on_topo_map(self, msg: String) -> None:
         """Handle incoming topology map from ROS."""

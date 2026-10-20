@@ -10,6 +10,7 @@ from devkit_ui.application_services.sim_asset_service import (
     SimAssetError,
     SimAssetService,
 )
+from devkit_ui.sim_asset_store import SimAssetStore
 
 GLB = b'glTF' + b'\x00' * 12
 
@@ -33,7 +34,7 @@ class SimAssetTestCase(unittest.TestCase):
         self.root = Path(self.enterContext(TemporaryDirectory()))
         self.crop_dir = self.root / 'models' / 'crop'
         self.soil_dir = self.root / 'soil' / 'textures'
-        self.service = SimAssetService(self.crop_dir, self.soil_dir)
+        self.service = SimAssetService(SimAssetStore(self.crop_dir, self.soil_dir))
 
 
 class TestValidateMesh(SimAssetTestCase):

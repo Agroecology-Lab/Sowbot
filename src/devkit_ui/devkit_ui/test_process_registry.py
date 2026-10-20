@@ -1,7 +1,10 @@
 """Process ownership and display setup without starting external programs."""
 
 # pylint: disable=protected-access
+import os
+import signal
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -93,6 +96,64 @@ class TestProcessRegistry(unittest.TestCase):
         with patch.object(registry, 'kill_group') as kill:
             registry.shutdown_tools()
         self.assertEqual(kill.call_args_list, [call(first, grace=3.0), call(second, grace=3.0)])
+
+    def test_spawn_quiet_discards_output_and_starts_a_new_session(self):
+        """Verify output goes to DEVNULL and the child leads its own session, away from the UI's group."""
+        with patch.object(registry.subprocess, 'Popen') as popen:
+            result = registry.spawn_quiet(['tool', 'argument'], cwd='/work')
+        self.assertIs(result, popen.return_value)
+        popen.assert_called_once_with(
+            ['tool', 'argument'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, cwd='/work')
+
+    def test_spawn_quiet_failure_propagates(self):
+        """Verify a process-creation error reaches the caller."""
+        with patch.object(registry.subprocess, 'Popen', side_effect=OSError('cannot start')):
+            with self.assertRaisesRegex(OSError, 'cannot start'):
+                registry.spawn_quiet(['missing'])
+
+    def test_interrupt_stop_escalates_only_after_each_timeout(self):
+        """Verify SIGINT goes to the leader alone and terminate and kill follow only on timeouts."""
+        timeout = subprocess.TimeoutExpired('ros2', 15)
+        sigint = call.send_signal(signal.SIGINT)
+        for waits, expected in (
+            ([0], [sigint, call.wait(timeout=15)]),
+            ([timeout, 0], [sigint, call.wait(timeout=15), call.terminate(), call.wait(timeout=5)]),
+            ([timeout, timeout, 0], [sigint, call.wait(timeout=15), call.terminate(),
+                                     call.wait(timeout=5), call.kill(), call.wait(timeout=5)]),
+        ):
+            with self.subTest(waits=waits):
+                proc = Mock(spec=['send_signal', 'wait', 'terminate', 'kill'])
+                proc.wait.side_effect = waits
+                registry.interrupt_stop(proc, 15, 5, 5)
+                self.assertEqual(proc.mock_calls, expected)
+
+    def test_interrupt_stop_propagates_signal_errors_and_a_timeout_after_kill(self):
+        """Verify the caller sees an OS error before any wait, and a final timeout."""
+        proc = Mock()
+        proc.send_signal.side_effect = PermissionError('cannot signal')
+        with self.assertRaisesRegex(PermissionError, 'cannot signal'):
+            registry.interrupt_stop(proc, 15, 5, 5)
+        proc.wait.assert_not_called()
+        proc = Mock()
+        proc.wait.side_effect = subprocess.TimeoutExpired('ros2', 5)
+        with self.assertRaises(subprocess.TimeoutExpired):
+            registry.interrupt_stop(proc, 15, 5, 5)
+        proc.kill.assert_called_once_with()
+        self.assertEqual(proc.wait.call_count, 3)
+
+    def test_shutdown_stops_a_quietly_spawned_process_without_touching_the_callers_group(self):
+        """Verify a spawn_quiet child registered for shutdown is killed alone, not with this process."""
+        proc = registry.spawn_quiet([sys.executable, '-c', 'import time; time.sleep(60)'])
+        try:
+            registry._TOOLS['quiet'] = [proc]
+            self.assertNotEqual(os.getpgid(proc.pid), os.getpgrp())
+            registry.shutdown_tools()
+            self.assertIsNotNone(proc.poll())
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
 
     def test_permission_error_terminating_group_is_not_hidden(self):
         """Verify denied process-group access propagates before waiting for exit."""

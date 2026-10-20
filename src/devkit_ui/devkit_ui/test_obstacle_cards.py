@@ -6,6 +6,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
+from devkit_ui.application_services.obstacle_application_service import (
+    ObstacleApplicationService,
+)
 from devkit_ui.test_run_ui import FakeElement, FakeUi, nicegui
 from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
 
@@ -35,9 +38,8 @@ class TestObstacleCards(unittest.TestCase):
         self.ui.card = FakeElement
         self.enterContext(patch.object(obstacle_cards, 'ui', self.ui))
         self.manager = Mock(obstacles=(), version=0, status='')
-        self.vm = ObstacleViewModel(
-            self.manager, lambda: SimpleNamespace(latitude=51.0, longitude=-1.0)
-        )
+        telemetry = SimpleNamespace(latest_gps=SimpleNamespace(latitude=51.0, longitude=-1.0))
+        self.vm = ObstacleViewModel(ObstacleApplicationService(self.manager, telemetry))
         self.mission_map = Mock()
         self.mission_map.generic_layer.side_effect = lambda **_kwargs: Mock()
         self.mission_map.marker.side_effect = lambda **_kwargs: Mock()
