@@ -448,6 +448,33 @@ class TestApplicationServiceAndViewModel(unittest.TestCase):
         self.domain.latest_battery = SimpleNamespace(percentage=0.756, voltage=24.04)
         self.assertEqual(self.vm.battery_text, '75.6%  24.0 V')
 
+    def test_map_anchor_needs_odometry_and_a_usable_fix(self):
+        """Verify the projection anchor is None until both arrive, and rejects empty or nonfinite fixes."""
+        self.assertIsNone(self.app.map_anchor())
+        self.domain.latest_gps = fix(51.0, -1.0)
+        self.assertIsNone(self.app.map_anchor())
+        self.domain.latest_gps = None
+        self.domain.latest_odom = SimpleNamespace(
+            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=12.0, y=-4.0))))
+        self.assertIsNone(self.app.map_anchor())
+        for lat, lon in [(math.nan, -1.0), (51.0, math.inf), (0.0, 0.0), (1e-10, -1e-10)]:
+            with self.subTest(lat=lat, lon=lon):
+                self.domain.latest_gps = fix(lat, lon)
+                self.assertIsNone(self.app.map_anchor())
+        for lat, lon in [(51.0, -1.0), (0.0, -1.0), (51.0, 0.0), (1e-9, 0.0)]:
+            with self.subTest(lat=lat, lon=lon):
+                self.domain.latest_gps = fix(lat, lon)
+                self.assertEqual(self.app.map_anchor(), (12.0, -4.0, lat, lon))
+
+    def test_map_anchor_follows_the_latest_readings(self):
+        """Verify each call reads current state, so the manager never holds a stale anchor."""
+        self.domain.latest_gps = fix(51.0, -1.0)
+        self.domain.latest_odom = SimpleNamespace(
+            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=1.0, y=2.0))))
+        self.assertEqual(self.app.map_anchor(), (1.0, 2.0, 51.0, -1.0))
+        self.domain.latest_odom.pose.pose.position.x = 5.0
+        self.assertEqual(self.app.map_anchor(), (5.0, 2.0, 51.0, -1.0))
+
     def test_view_model_passes_readings_through_live(self):
         """Verify the view model reflects service state at read time, not a stale copy."""
         gps, reading = fix(), odom()

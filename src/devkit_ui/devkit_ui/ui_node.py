@@ -157,10 +157,8 @@ class NiceGuiNode:
         self._topo_app_service.initialize_with_default()
 
         # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher; the view model is what
-        # the cards bind to. Start after the telemetry service exists so the getters resolve.
-        self._obstacle_mgr = ObstacleManager(
-            self._ros, lambda: self._telemetry_app_service.latest_odom,
-            lambda: self._telemetry_app_service.latest_gps)
+        # the cards bind to. Start after the telemetry service exists, which supplies the anchor.
+        self._obstacle_mgr = ObstacleManager(self._ros, self._telemetry_app_service.map_anchor)
         self._obstacle_vm = ObstacleViewModel(
             ObstacleApplicationService(self._obstacle_mgr, self._telemetry_app_service))
         self._obstacle_mgr.start()
