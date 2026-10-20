@@ -138,11 +138,14 @@ pts.filter((_,k)=>k%st==0).forEach(p=>L.circleMarker([p[0],p[1]],{radius:2,color
 map.fitBounds(L.latLngBounds(pts.map(p=>[p[0],p[1]])));
 const z=pts.map(p=>p[2]);msg(`Survey: ${pts.length} points, ${Math.min(...z).toFixed(1)} to ${Math.max(...z).toFixed(1)} m. Draw the field inside it, tick Contour rows, then Plan.`);
 }catch(e){recon=null;msg('Survey error: '+e.message)}};
-$('rc').onchange=async ev=>{const f=ev.target.files[0];if(f)loadSurvey(await f.text())};
+let surveySelection=0;
+$('rc').onchange=async ev=>{const selection=++surveySelection,f=ev.target.files[0];
+if(f){const t=await f.text();if(selection===surveySelection)loadSurvey(t)}};
 // recon.csv is copied next to index.html by the Pages workflow, so this is a same-origin fetch.
-$('rcx').onclick=async()=>{msg('Loading example survey…');
-try{const r=await fetch('recon.csv');if(!r.ok)throw Error('HTTP '+r.status);loadSurvey(await r.text())}
-catch(e){msg('Could not load the example survey: '+e.message)}};
+$('rcx').onclick=async()=>{const selection=++surveySelection;$('rc').value='';msg('Loading example survey…');
+try{const r=await fetch('recon.csv');if(!r.ok)throw Error('HTTP '+r.status);
+const t=await r.text();if(selection===surveySelection)loadSurvey(t)}
+catch(e){if(selection===surveySelection)msg('Could not load the example survey: '+e.message)}};
 $('do').oninput=()=>demLayer&&demLayer.setOpacity(+$('do').value);
 
 const dist=(p,q)=>map.distance(p,q);
