@@ -43,8 +43,8 @@ class SimAssetStore:
                          config: str, sdf: str) -> None:
         """Write a crop model folder: meshes under mesh/, then model.config and model.sdf.
 
-        A model that fails part way through is removed, so the name can be used again.
-        OSError propagates from writing.
+        On failure, attempt to remove the entire model folder; cleanup errors are ignored
+        and the original exception propagates, including OSError from writing.
         """
         model_dir = self._crop_dir / name
         try:
@@ -65,5 +65,8 @@ class SimAssetStore:
         self._soil_dir.mkdir(parents=True, exist_ok=True)
 
     def open_soil_texture(self, name: str) -> BinaryIO:
-        """Open a file called name in the texture folder for writing; the caller closes it."""
+        """Open name for binary writing, truncating any existing file; the caller closes it.
+
+        The texture folder must already exist. File-opening errors propagate as OSError.
+        """
         return open(self._soil_dir / name, 'wb')  # pylint: disable=consider-using-with

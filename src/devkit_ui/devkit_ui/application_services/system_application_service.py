@@ -97,11 +97,16 @@ class SystemApplicationService:
             lock.release()
 
     def stop(self, tool: str) -> ToolState:
-        """Stop tool's process group, and for RViz its display daemons, then release the handle.
+        """Stop tool and release its handle; also stop RViz's display daemons.
+
+        Medkit receives SIGINT at its launch leader, escalating to terminate and kill on
+        timeouts. Other tools receive process-group termination via kill_group.
 
         Return 'busy' while another start or stop is in flight, 'stopped' on success (also when
         nothing was running), or 'error' with the text of an OS error or timeout, in which case the
         handle is kept so the stop can be retried. Blocking: call off the UI loop.
+
+        Raises KeyError for an unknown tool key.
         """
         lock = self._locks[tool]
         if not lock.acquire(blocking=False):

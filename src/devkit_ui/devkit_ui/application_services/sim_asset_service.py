@@ -93,10 +93,11 @@ class SimAssetService:
 
     def create_crop_model(self, name: str, visual: bytes | None,
                           collision: bytes | None = None) -> str:
-        """Write a new crop model folder (meshes, model.config, model.sdf) and return its name.
+        """Write a new crop model folder (meshes, model.config, model.sdf) and return its stripped name.
 
-        The collision mesh falls back to the visual one. A model that fails part way
-        through is removed, so it does not block creating it again.
+        The collision mesh falls back to the visual one. Mesh contents are not validated
+        here; call validate_mesh separately. On write failure, the store attempts to remove
+        the model folder, then propagates the original exception.
 
         Raises:
             SimAssetError: The name is empty, not alphanumeric plus underscore, or already
@@ -137,7 +138,10 @@ class SimAssetService:
     def import_soil_zip(self, data: bytes) -> list[str]:
         """Replace the imported soil set with the image maps in a zip and return their names.
 
-        Folder structure is flattened to base names. Blocking; call from a worker thread.
+        Folder structure is flattened to base names; later entries overwrite earlier files
+        with the same base name. Returned names follow archive order and may include duplicates.
+        Extraction and filesystem errors propagate and may leave a partial replacement
+        after the old textures have been removed. Blocking; call from a worker thread.
 
         Raises:
             SimAssetError: The data is not a zip or holds no .jpg/.jpeg/.png maps. The

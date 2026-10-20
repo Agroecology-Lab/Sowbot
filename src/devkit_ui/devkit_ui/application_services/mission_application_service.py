@@ -159,8 +159,11 @@ class MissionApplicationService:
     def _navigate(self, target: str, on_nav_update: Callable[[NavUpdate], None] | None) -> bool:
         """Navigate to a node and block until it ends; call from the mission worker thread.
 
-        Wait up to NAV_TIMEOUT_SEC after sending the goal. A mission cancel or a soft estop
-        requests cancellation while waiting. Return True only if the robot arrived.
+        Use a 300-second wait budget after sending the goal, excluding the server wait.
+        A mission cancel or a confirmed soft estop requests cancellation while waiting.
+        Return True only on arrival; failure, rejection, cancellation, timeout or unavailable
+        navigation returns False. Synchronous navigation errors propagate to the mission worker.
+        See NavigationApplicationService.navigate_and_wait for polling and cancellation timing.
         """
         return self._navigation.navigate_and_wait(
             target, NAV_TIMEOUT_SEC,
