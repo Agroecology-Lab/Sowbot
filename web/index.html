@@ -19,6 +19,7 @@ button{margin:8px 4px 0 0;padding:6px 10px}#msg{margin-top:10px;white-space:pre-
 <label>Obstacle padding (m)<input id="p" type="number" value="0" min="0" step="0.5"></label>
 <label><input id="s" type="checkbox" checked> Snake order (connected path)</label>
 <label>Survey (recon.csv from the robot)<input id="rc" type="file" accept=".csv"></label>
+<button id="rcx" type="button">Load example survey</button>
 <label><input id="ct" type="checkbox"> Contour rows (needs survey; angle ignored)</label>
 <label>Survey grid resolution (m)<input id="dr" type="number" value="1" min="0.25" step="0.25"></label>
 <label>DEM (GeoTIFF, read locally)<input id="dem" type="file" accept=".tif,.tiff"></label>
@@ -127,8 +128,8 @@ const b=[[lat0,lon0],[lat1,lon1]];
 demLayer=L.imageOverlay(cv.toDataURL(),b,{pane:'dem',opacity:+$('do').value}).addTo(map);map.fitBounds(b);
 dem={at};msg(`DEM loaded: ${mn.toFixed(0)} to ${mxz.toFixed(0)} m. Draw a field inside it.`);
 }catch(e){dem=null;msg('DEM error: '+e.message);console.error(e)}};
-$('rc').onchange=async ev=>{const f=ev.target.files[0];if(!f)return;
-try{const t=await f.text(),r=t.trim().split(/\r?\n/),h=r[0].split(',').map(x=>x.trim()),i=['lat','lon','alt'].map(c=>h.indexOf(c));
+const loadSurvey=t=>{
+try{const r=t.trim().split(/\r?\n/),h=r[0].split(',').map(x=>x.trim()),i=['lat','lon','alt'].map(c=>h.indexOf(c));
 if(i.includes(-1))throw Error('expected columns stamp,lat,lon,alt,x,y');
 const pts=r.slice(1).map(l=>l.split(',')).map(c=>[+c[i[0]],+c[i[1]],+c[i[2]]]).filter(p=>p.every(isFinite));
 if(pts.length<3)throw Error('need at least 3 valid points');
@@ -137,6 +138,11 @@ pts.filter((_,k)=>k%st==0).forEach(p=>L.circleMarker([p[0],p[1]],{radius:2,color
 map.fitBounds(L.latLngBounds(pts.map(p=>[p[0],p[1]])));
 const z=pts.map(p=>p[2]);msg(`Survey: ${pts.length} points, ${Math.min(...z).toFixed(1)} to ${Math.max(...z).toFixed(1)} m. Draw the field inside it, tick Contour rows, then Plan.`);
 }catch(e){recon=null;msg('Survey error: '+e.message)}};
+$('rc').onchange=async ev=>{const f=ev.target.files[0];if(f)loadSurvey(await f.text())};
+// recon.csv is copied next to index.html by the Pages workflow, so this is a same-origin fetch.
+$('rcx').onclick=async()=>{msg('Loading example survey…');
+try{const r=await fetch('recon.csv');if(!r.ok)throw Error('HTTP '+r.status);loadSurvey(await r.text())}
+catch(e){msg('Could not load the example survey: '+e.message)}};
 $('do').oninput=()=>demLayer&&demLayer.setOpacity(+$('do').value);
 
 const dist=(p,q)=>map.distance(p,q);
