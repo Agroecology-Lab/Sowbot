@@ -125,6 +125,16 @@ class TestDriveServices(unittest.TestCase):
         self.assertIsNot(messages[0], messages[1])
         self.velocity_publisher.publish.assert_not_called()
 
+    def test_application_service_exposes_the_confirmed_estop_to_other_use_cases(self):
+        """Verify a mission can read the confirmed state without going through a view model."""
+        self.assertFalse(self.app.soft_estop_active)
+        self.ack(True)
+        self.assertTrue(self.app.soft_estop_active)
+        self.app.toggle_estop(True)
+        self.assertTrue(self.app.soft_estop_active)
+        self.ack(False)
+        self.assertFalse(self.app.soft_estop_active)
+
     def test_unacknowledged_request_never_shows_a_stop(self):
         """Verify a request the driver never confirms leaves the displayed state unchanged."""
         for _ in range(3):

@@ -1,7 +1,7 @@
 
 ```mermaid
 flowchart TB
-  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 376 lines)"]
+  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 260 lines)"]
     subgraph UI["View (NiceGUI)"]
       Content["content(): four tabs"]
       NavPage["NavPage (class)"]
@@ -30,7 +30,7 @@ flowchart TB
       TelemetryVM["TelemetryViewModel"]
       RobotBrainVM["RobotBrainViewModel"]
       PlanVM["PlanViewModel<br/>(plan status wording, PlanPageState per session)"]
-      MissionVM["MissionViewModel<br/>(saved missions, MissionQueue per session)"]
+      MissionVM["MissionViewModel<br/>(saved missions, run and cancel, MissionQueue per session)"]
       ObstacleVM["ObstacleViewModel"]
       SimVM["SimViewModel"]
     end
@@ -44,7 +44,7 @@ flowchart TB
       TopologyApp["TopologyApplicationService<br/>(save, save-as, archive, go-live, role patch)"]
       TopologyEdit["TopologyEditService<br/>(stage drop, F2C save, repair, delete)"]
       PlanApp["PlanApplicationService<br/>(plan rows, import plan, save rows; keeps no draft)"]
-      MissionApp["MissionApplicationService"]
+      MissionApp["MissionApplicationService<br/>(saved missions, start and cancel a run)"]
       ObstacleApp["ObstacleApplicationService<br/>(mark here, add circle or polygon, delete)"]
       SimAssets["SimAssetService<br/>(crop models, soil textures; files only)"]
       SimWorld["SimWorldService<br/>(rebuild Gazebo world via worldgen.sh)"]
@@ -56,7 +56,7 @@ flowchart TB
       RowDiscDom["RowDiscoveryDomainService"]
       RobotBrainDom["RobotBrainDomainService"]
       TelemetryDom["TelemetryDomainService"]
-      TopologyDom["TopologyDomainService<br/>(live TopoDoc, /topological_map_2,<br/>switch_topological_map client)"]
+      TopologyDom["TopologyDomainService<br/>(live TopoDoc, /topological_map_2, /current_node,<br/>switch_topological_map client)"]
       MissionDom["MissionDomainService<br/>(mission executor, tool publishers)"]
     end
 
@@ -95,8 +95,12 @@ flowchart TB
   NavPage --> AuthoringVM
   PlanCards --> PlanVM
   PlanCards --> MissionVM
+  PlanCards --> TopoVM
+  PlanCards --> AuthoringVM
+  PlanCards --> DeleteDlg
   PlanVM -.->|"reads map"| TopoVM
   PlanVM -.->|"reads row action"| RunVM
+  MissionVM -.->|"navigation updates for the Run tab"| RunVM
   SimCards --> SimVM
   SimCards --> TopoVM
   SysCards --> TelemetryVM
@@ -144,6 +148,8 @@ flowchart TB
   SimWorld --> SimAssets
   SimAssets --> SimAssetStore
   MissionApp --> TopologyApp
+  MissionApp --> NavApp
+  MissionApp --> DriveApp
   ObstacleManager -.->|"odom and gps getters"| TelemetryApp
   AuthoringVM -.->|"timer factory"| RosGateway
 
@@ -158,6 +164,8 @@ flowchart TB
   MissionApp --> MissionStore
   TopologyDom -.->|"doc changed callback"| TopologyApp
   TopologyApp -.->|"doc changed callback"| TopoVM
+  TopologyDom -.->|"current node callback"| TopologyApp
+  TopologyApp -.->|"current node callback"| TopoVM
 
   DriveDom --> RosGateway
   NavDom --> RosGateway

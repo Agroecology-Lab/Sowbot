@@ -3,7 +3,7 @@ import json
 import sys
 import unittest
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
@@ -41,22 +41,53 @@ def make_stack():
     return ros, domain, app, vm
 
 
+def subscription(ros, topic):
+    """Return the (message type, topic, callback, qos) the service subscribed with for topic."""
+    calls = [c.args for c in ros.create_subscription.call_args_list if c.args[1] == topic]
+    assert len(calls) == 1, f'expected one subscription to {topic}, found {len(calls)}'
+    return calls[0]
+
+
 class TestTopologyStack(unittest.TestCase):
     def test_map_publisher_and_subscription_share_the_latched_spec(self):
         """Late map subscribers must retain reliable, transient-local, depth-one delivery."""
         ros, domain, _, _ = make_stack()
         ros.create_publisher.assert_called_once()
-        ros.create_subscription.assert_called_once()
         msg_type, topic, spec = ros.create_publisher.call_args.args
-        ros.create_subscription.assert_called_once_with(
-            msg_type, '/topological_map_2',
-            domain._on_topo_map, spec)  # pylint: disable=protected-access
+        self.assertEqual(
+            subscription(ros, '/topological_map_2'),
+            (msg_type, '/topological_map_2',
+             domain._on_topo_map, spec))  # pylint: disable=protected-access
         self.assertEqual(topic, '/topological_map_2')
         self.assertIs(spec, TopologyDomainService.__init__.__globals__['LATCHED_QOS'])
-        self.assertIs(ros.create_subscription.call_args.args[-1], spec)
         self.assertEqual(
             (spec.depth, spec.reliability, spec.durability, spec.history),
             (1, 'reliable', 'transient_local', 'keep_last'))
+
+    def test_current_node_is_a_sensor_stream_forwarded_to_every_callback(self) -> None:
+        """Verify /current_node uses the depth-one best-effort profile and fans out each name."""
+        ros, domain, _, _ = make_stack()
+        first, second = Mock(), Mock()
+        domain.register_current_node_callback(first)
+        domain.register_current_node_callback(second)
+
+        msg_type, _, callback, spec = subscription(ros, '/current_node')
+        callback(SimpleNamespace(data='E'))
+        callback(SimpleNamespace(data='X'))
+
+        self.assertIs(msg_type, subscription(ros, '/topological_map_2')[0])
+        self.assertIs(spec, TopologyDomainService.__init__.__globals__['SENSOR_QOS'])
+        self.assertEqual((spec.depth, spec.reliability), (1, 'best_effort'))
+        for registered in (first, second):
+            self.assertEqual(registered.call_args_list, [call('E'), call('X')])
+
+    def test_current_node_reaches_the_view_model_through_the_application_service(self) -> None:
+        """Verify the localised node shown in the UI follows /current_node messages."""
+        ros, _, _, vm = make_stack()
+
+        subscription(ros, '/current_node')[2](SimpleNamespace(data='E'))
+
+        self.assertEqual(vm.current_node, 'E')
 
     def test_default_doc_has_linear_chain(self) -> None:
         """Verify the demo map is a six-node chain."""
@@ -123,7 +154,7 @@ class TestTopologyStack(unittest.TestCase):
     def test_incoming_map_replaces_doc(self) -> None:
         """Verify a message on the map topic updates the view model."""
         ros, _, _, vm = make_stack()
-        callback = ros.create_subscription.call_args.args[2]
+        callback = subscription(ros, '/topological_map_2')[2]
         payload = TopoDoc(name='remote', nodes=[TopoNode(name='R', x=1.0, y=2.0)]).to_dict()
 
         callback(SimpleNamespace(data=json.dumps(payload)))
@@ -233,7 +264,7 @@ class TestTopologyStack(unittest.TestCase):
         original = TopoDoc(name='field', nodes=[TopoNode(name='A')])
         app.set_doc(original)
         vm.set_selected_node('A')
-        callback = ros.create_subscription.call_args.args[2]
+        callback = subscription(ros, '/topological_map_2')[2]
 
         for payload in ('{', 'null', '[]', '{"nodes": [{"node": {}}]}'):
             with self.subTest(payload=payload):
@@ -258,7 +289,7 @@ class TestTopologyStack(unittest.TestCase):
         vm.remove_node('A')
         message = ros.create_publisher.return_value.publish.call_args.args[0]
 
-        ros.create_subscription.call_args.args[2](message)
+        subscription(ros, '/topological_map_2')[2](message)
 
         self.assertIsNone(vm.selected_node)
         self.assertEqual(list(vm.topo_doc.nodes), [])

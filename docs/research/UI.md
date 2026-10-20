@@ -7,6 +7,7 @@ On `ui-116-Plan-service-fixes` it was 838.
 On `caatinga-dev` at `c69b649` (after #174 and #175) it is 360.
 With the #168 and #169 change it is 354, and `NiceGuiNode` no longer subclasses `rclpy.node.Node`.
 With #170, #171 and #166 it is 376.
+With the mission start glue and the `/current_node` subscription moved out it is 260, and the node only builds and wires the layers.
 
 <table>
 <tr><th>PR</th><th>Change</th></tr>
@@ -43,6 +44,12 @@ The <code>sim</code> parameter is read through <code>RosGateway.get_bool_paramet
 It reads the latest GPS fix from <code>TelemetryApplicationService</code>, so the node no longer gives the view model a GPS getter.
 The default radius and its conversion stay in the view model.
 The import-linter ignore for <code>obstacle_view_model</code> importing <code>obstacles</code> is gone</td></tr>
+<tr><td>Mission start glue (PR number to add)</td><td><code>MissionApplicationService</code> starts and cancels a mission: it checks the queue, the running state and navigation, resolves the rows against the live map, and waits on navigation with the confirmed soft e-stop.
+<code>MissionViewModel.run</code> and <code>cancel</code> replace <code>_run_mission</code>, <code>_send_goal_sync</code> and <code>cancel_mission</code> on the node, and <code>MissionQueueCard</code> maps status levels to colours.
+<code>PlanPage</code> confirms row deletion itself.
+<code>DriveApplicationService</code> exposes the confirmed soft e-stop state.
+<code>TopologyDomainService</code> owns the <code>/current_node</code> subscription, passed to <code>TopologyViewModel</code> through <code>TopologyApplicationService</code>.
+The node's <code>_topo_doc</code>, <code>latest_odom</code> and <code>latest_gps</code> bridges are gone</td></tr>
 </table>
 
 #155 (optical flow in Docker) and #157 (vendored skills) are unrelated to the refactor.
@@ -57,7 +64,7 @@ The dotted arrows labelled "callback" are runtime callbacks.
 
 ```mermaid
 flowchart TB
-  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 376 lines)"]
+  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 260 lines)"]
     subgraph UI["View (NiceGUI)"]
       Content["content(): four tabs"]
       NavPage["NavPage (class)"]
@@ -84,7 +91,7 @@ flowchart TB
       TelemetryVM["TelemetryViewModel"]
       RobotBrainVM["RobotBrainViewModel"]
       PlanVM["PlanViewModel<br/>(plan status wording, PlanPageState per session)"]
-      MissionVM["MissionViewModel<br/>(saved missions, MissionQueue per session)"]
+      MissionVM["MissionViewModel<br/>(saved missions, run and cancel, MissionQueue per session)"]
       ObstacleVM["ObstacleViewModel"]
       SimVM["SimViewModel"]
     end
@@ -98,7 +105,7 @@ flowchart TB
       TopologyApp["TopologyApplicationService<br/>(save, save-as, archive, go-live, role patch)"]
       TopologyEdit["TopologyEditService<br/>(stage drop, F2C save, repair, delete)"]
       PlanApp["PlanApplicationService<br/>(plan rows, import plan, save rows; keeps no draft)"]
-      MissionApp["MissionApplicationService"]
+      MissionApp["MissionApplicationService<br/>(saved missions, start and cancel a run)"]
       ObstacleApp["ObstacleApplicationService<br/>(mark here, add circle or polygon, delete)"]
       SimAssets["SimAssetService<br/>(crop models, soil textures; files only)"]
       SimWorld["SimWorldService<br/>(rebuild Gazebo world via worldgen.sh)"]
@@ -110,7 +117,7 @@ flowchart TB
       RowDiscDom["RowDiscoveryDomainService"]
       RobotBrainDom["RobotBrainDomainService"]
       TelemetryDom["TelemetryDomainService"]
-      TopologyDom["TopologyDomainService<br/>(live TopoDoc, /topological_map_2,<br/>switch_topological_map client)"]
+      TopologyDom["TopologyDomainService<br/>(live TopoDoc, /topological_map_2, /current_node,<br/>switch_topological_map client)"]
       MissionDom["MissionDomainService<br/>(mission executor, tool publishers)"]
     end
 
@@ -147,8 +154,12 @@ flowchart TB
   NavPage --> AuthoringVM
   PlanCards --> PlanVM
   PlanCards --> MissionVM
+  PlanCards --> TopoVM
+  PlanCards --> AuthoringVM
+  PlanCards --> DeleteDlg
   PlanVM -.->|"reads map"| TopoVM
   PlanVM -.->|"reads row action"| RunVM
+  MissionVM -.->|"navigation updates for the Run tab"| RunVM
   SimCards --> SimVM
   SimCards --> TopoVM
   SysCards --> TelemetryVM
@@ -190,6 +201,8 @@ flowchart TB
   SimWorld --> SimAssets
   SimAssets --> SimAssetStore
   MissionApp --> TopologyApp
+  MissionApp --> NavApp
+  MissionApp --> DriveApp
 
   DriveApp --> DriveDom
   NavApp --> NavDom
@@ -202,6 +215,8 @@ flowchart TB
   MissionApp --> MissionStore
   TopologyDom -.->|"doc changed callback"| TopologyApp
   TopologyApp -.->|"doc changed callback"| TopoVM
+  TopologyDom -.->|"current node callback"| TopologyApp
+  TopologyApp -.->|"current node callback"| TopoVM
 
   DriveDom --> RosGateway
   NavDom --> RosGateway
@@ -346,11 +361,10 @@ No adapters in the code</td></tr>
 Tracked in #116 and `.importlinter`:
 
 - **Plan page state** is per browser session (`PlanPageState`, `MissionQueue`), but `PlanViewModel.save_status` is shared by every session.
-  `PlanPage` takes `_run_mission`, `cancel_mission` and `confirm_delete_row` as callbacks from the node.
 - **Plan page threading**: `PlanViewModel.plan` blocks, so the controls card calls it through `nicegui.run.io_bound`.
   Any other adapter has to run it on a worker thread too.
-- **Mission start glue**: `_run_mission` and `_send_goal_sync` are still on the node, around `MissionDomainService.start`.
-- **Node leftovers**: the `/current_node` subscription is still created in `NiceGuiNode`, through the gateway.
 - **Medkit**: still started with `subprocess` in `pages/system/tools_card.py`.
+- **Soft e-stop state** is held twice: `GlobalViewModel.soft_estop_active` and `DriveApplicationService.soft_estop_active` both follow the driver's confirmation.
+  The view model could read the service's value instead.
 - **Process control**: the other tool cards (Gazebo, row follow, RViz, explorer, grapher) start processes through `process_registry` from the page.
   A ViewModel and application service would complete the rule.

@@ -66,6 +66,14 @@ class TopologyApplicationService:
         """
         self._domain.set_doc_changed_callback(callback)
 
+    def register_current_node_callback(self, callback) -> None:
+        """Register a callback with the domain service for localisation updates.
+
+        Parameters:
+            callback: Callable(name: str) to invoke with the node the robot is on.
+        """
+        self._domain.register_current_node_callback(callback)
+
     def initialize_with_default(self) -> None:
         """Initialize the topology with a default demo document.
 

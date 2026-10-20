@@ -20,6 +20,7 @@ from devkit_ui.plan_fake_ui import (
     texts,
     walk,
 )
+from devkit_ui.test_mission_domain_service import mds  # installs ROS message stand-ins
 from devkit_ui.view_models.mission_view_model import MissionQueue
 from devkit_ui.view_models.plan_view_model import PlanPageState
 
@@ -39,9 +40,8 @@ class TestMissionQueueCard(unittest.TestCase):
         self.vm = Mock()
         self.vm.topo_snapshot.return_value = frozenset({('A_IN', 1, 'entry')})
         self.vm.available_rows.return_value = {2: 'B_IN', 1: 'A_IN'}
-        self.on_run, self.on_cancel, self.on_delete = Mock(), Mock(), Mock()
-        self.card = MissionQueueCard(
-            self.queue, self.vm, self.on_run, self.on_cancel, self.on_delete)
+        self.mission_vm, self.on_delete = Mock(), Mock()
+        self.card = MissionQueueCard(self.queue, self.vm, self.mission_vm, self.on_delete)
         self.tick = fake_ui.timers[-1][1]
 
     def buttons(self, container, text):
@@ -148,19 +148,35 @@ class TestMissionQueueCard(unittest.TestCase):
 
         self.assertTrue(self.card._queue_lbl.visible)
 
-    def test_run_passes_the_queue_and_the_status_label(self) -> None:
-        """Verify Run Mission hands over the live steps and the label it reports in."""
+    def test_run_passes_the_queue_and_the_status_reporter(self) -> None:
+        """Verify Run Mission hands the live steps and the card's status reporter to the view model."""
         self.queue.add(1, 'drive', {})
 
         self.card.run_btn.click()
 
-        self.on_run.assert_called_once_with(self.queue.items, self.card._status_lbl)
+        self.mission_vm.run.assert_called_once_with(self.queue.items, self.card._show_status)
 
-    def test_cancel_calls_the_cancel_callback(self) -> None:
-        """Verify Cancel is wired straight to the callback."""
+    def test_cancel_cancels_the_mission_in_the_view_model(self) -> None:
+        """Verify Cancel is wired straight to the view model."""
         fake_ui.find('button', 'Cancel')[0].click()
 
-        self.on_cancel.assert_called_once_with()
+        self.mission_vm.cancel.assert_called_once_with()
+
+    def test_each_status_level_sets_the_label_text_and_colour(self) -> None:
+        """Verify every level the executor reports is shown in its own colour."""
+        for level, colour in [('info', '#57606a'), ('progress', '#0969da'),
+                              ('warn', '#9a6700'), ('error', '#cf222e'), ('ok', '#1a7f37')]:
+            with self.subTest(level=level):
+                self.card._show_status(level, f'mission {level}')
+
+                self.assertEqual(self.card._status_lbl.text, f'mission {level}')
+                self.assertEqual(self.card._status_lbl.styles[-1], f'color:{colour}')
+
+    def test_colours_cover_exactly_the_levels_the_executor_reports(self) -> None:
+        """Verify a new executor level cannot reach the card without a colour."""
+        levels = {mds.INFO, mds.PROGRESS, mds.WARN, mds.ERROR, mds.OK}
+
+        self.assertEqual(set(mission_queue_card.STATUS_COLOURS), levels)
 
     def test_run_can_be_disabled_while_a_mission_runs(self) -> None:
         """Verify the store card's switch reaches the button."""
@@ -364,12 +380,12 @@ class TestPlanPage(unittest.TestCase):
         self.mission_vm.running = False
         self.mission_vm.missions = ()
         self.obstacle_vm = Mock()
-        self.on_run, self.on_cancel, self.on_delete = Mock(), Mock(), Mock()
+        self.topo_vm, self.authoring = Mock(), Mock()
 
     def build(self):
         """Build a page, as one browser session opening the tab would."""
-        return PlanPage(self.plan_vm, self.mission_vm, self.obstacle_vm, (51.0, -2.0),
-                        self.on_run, self.on_cancel, self.on_delete)
+        return PlanPage(self.plan_vm, self.mission_vm, self.obstacle_vm, self.topo_vm,
+                        self.authoring, (51.0, -2.0))
 
     def test_the_page_is_a_full_width_column_without_extra_gaps(self) -> None:
         """Verify the cards carry their own spacing."""
@@ -430,3 +446,36 @@ class TestPlanPage(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class TestPlanPageDeleteRow(unittest.IsolatedAsyncioTestCase):
+    async def test_deleting_a_row_asks_for_confirmation_then_deletes_it_through_authoring(self):
+        """Verify the page confirms against the live map and hands the delete to authoring."""
+        fake_ui.reset()
+        self.addCleanup(fake_ui.reset)
+        enter = patch.object
+        self.enterContext(enter(mission_queue_card, 'ACTIONS', {'drive': ActionDef('Drive', 'D')}))
+        self.enterContext(enter(mission_store_card, 'ACTIONS', {'drive': ActionDef('Drive', 'D')}))
+        self.enterContext(enter(plan_controls_card, 'attach_mission_sidebar_controls',
+                                Mock(return_value=Mock(obstacle_pad=SimpleNamespace(value=0.5)))))
+        self.enterContext(enter(plan_page, 'attach_mission_obstacle_panel', Mock()))
+        confirm = self.enterContext(enter(plan_page, 'confirm_delete_row', Mock()))
+        confirm.side_effect = _completed
+        plan_vm, mission_vm = Mock(), Mock()
+        plan_vm.open_page.side_effect = PlanPageState
+        plan_vm.save_status = ''
+        plan_vm.topo_snapshot.return_value = frozenset({('A_IN', 1, 'entry')})
+        plan_vm.available_rows.return_value = {1: 'A_IN'}
+        mission_vm.new_queue.side_effect = MissionQueue
+        mission_vm.status, mission_vm.version, mission_vm.running = '', 1, False
+        mission_vm.missions = ()
+        topo_vm, authoring = Mock(), Mock()
+        page = PlanPage(plan_vm, mission_vm, Mock(), topo_vm, authoring, None)
+
+        delete = next(b for b in walk(page) if b.kind == 'button' and b.text == '✕')
+        await delete.click(None)
+
+        confirm.assert_called_once_with(topo_vm, 1, authoring.delete_row)
+
+
+async def _completed(*_args) -> None:
+    """Stand in for a confirmation dialog the user accepted."""

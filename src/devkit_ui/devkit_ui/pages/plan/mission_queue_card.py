@@ -3,12 +3,17 @@ from collections.abc import Callable
 from nicegui import ui
 
 from devkit_ui.actions import ACTIONS
-from devkit_ui.view_models.mission_view_model import MissionQueue
+from devkit_ui.view_models.mission_view_model import MissionQueue, MissionViewModel
 from devkit_ui.view_models.plan_view_model import PlanViewModel
 
 MUTED = 'color:#8c959f'
 GREY = 'color:#57606a'
 RED = 'color:#cf222e'
+# Mission status level -> label colour. The keys are the levels the mission executor reports
+# (INFO, PROGRESS, WARN, ERROR and OK in mission_domain_service); a test keeps them in step.
+STATUS_COLOURS = {
+    'info': '#57606a', 'progress': '#0969da', 'warn': '#9a6700', 'error': '#cf222e',
+    'ok': '#1a7f37'}
 PANEL = 'background:#f6f8fa;padding:10px'
 _UNSET = object()
 
@@ -16,17 +21,15 @@ _UNSET = object()
 class MissionQueueCard(ui.card):
     """Pick an implement, queue rows from the map, and run or cancel the queued mission."""
 
-    def __init__(self, queue: MissionQueue, plan_vm: PlanViewModel,
-                 on_run: Callable[[list, object], object], on_cancel: Callable[[], object],
+    def __init__(self, queue: MissionQueue, plan_vm: PlanViewModel, mission_vm: MissionViewModel,
                  on_delete_row: Callable[[int], object]) -> None:
         """Build the action picker, the available rows, the queue and the Run and Cancel buttons.
 
         Parameters:
             queue (MissionQueue): This session's steps. The queue list redraws when it changes.
             plan_vm (PlanViewModel): Says which rows the loaded map has.
-            on_run (Callable): Called with the queue's steps and the status label when Run
-                Mission is pressed; it reports progress and errors in that label.
-            on_cancel (Callable): Called when Cancel is pressed.
+            mission_vm (MissionViewModel): Runs the queue when Run Mission is pressed, reporting
+                progress and errors in the status label, and cancels when Cancel is pressed.
             on_delete_row (Callable): Called with a row id when its delete button is pressed;
                 it may be a coroutine function that asks for confirmation.
         """
@@ -69,14 +72,19 @@ class MissionQueueCard(ui.card):
             self._status_lbl = ui.label('').classes('text-xs font-mono mt-3').style(GREY)
             with ui.row().classes('gap-2 mt-3'):
                 self.run_btn = ui.button(
-                    'Run Mission', on_click=lambda: on_run(queue.items, self._status_lbl),
+                    'Run Mission', on_click=lambda: mission_vm.run(queue.items, self._show_status),
                 ).props('color=positive no-caps')
-                ui.button('Cancel', on_click=on_cancel).props('color=negative no-caps flat')
+                ui.button('Cancel', on_click=mission_vm.cancel).props('color=negative no-caps flat')
 
         queue.subscribe(self._render_queue)
         self._render_queue()
         self._refresh_available()
         ui.timer(1.0, self._refresh_available)
+
+    def _show_status(self, level: str, text: str) -> None:
+        """Show a mission status line in the colour of its level."""
+        self._status_lbl.set_text(text)
+        self._status_lbl.style(f'color:{STATUS_COLOURS[level]}')
 
     def set_run_enabled(self, enabled: bool) -> None:
         """Enable or disable Run Mission, which is off while a mission is running."""

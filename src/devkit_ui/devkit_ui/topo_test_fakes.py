@@ -38,6 +38,9 @@ class FakeTopologyDomain:
         """Store the callback notified when the harness document is replaced."""
         self._callback = callback
 
+    def register_current_node_callback(self, callback) -> None:
+        """Accept the localisation callback; the harness never reports a node."""
+
     def get_doc(self):
         """Return the document currently held by the harness node."""
         return self._state['_topo_doc']

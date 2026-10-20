@@ -11,12 +11,9 @@ from importlib import resources
 # The following imports get generated in the Dockerfile, they aren't available to pylint
 # pylint: disable=import-error
 import rclpy
-from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from sensor_msgs.msg import NavSatFix
-from std_msgs.msg import String
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
@@ -43,35 +40,22 @@ from devkit_ui.application_services.topology_application_service import (
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
 from devkit_ui.constants import FIELD27_CENTER, NODE_NAME
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
-from devkit_ui.domain_services.mission_domain_service import (
-    ERROR,
-    INFO,
-    NAV_TIMEOUT_SEC,
-    OK,
-    PROGRESS,
-    WARN,
-    MissionDomainService,
-    MissionError,
-    resolve_steps,
-)
+from devkit_ui.domain_services.mission_domain_service import MissionDomainService
 from devkit_ui.domain_services.navigation_domain_service import NavigationDomainService
 from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
 from devkit_ui.domain_services.row_discovery_domain_service import RowDiscoveryDomainService
 from devkit_ui.domain_services.telemetry_domain_service import TelemetryDomainService
 from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
 from devkit_ui.missions import MissionStore
-from devkit_ui.models import TopoDoc
 
 # pylint: enable=import-error
 # OBSTACLE: obstacle manager, view model and card helpers
 from devkit_ui.obstacles import ObstacleManager
-from devkit_ui.pages.delete_dialogs import confirm_delete_row
 from devkit_ui.pages.plan.plan_page import PlanPage
 from devkit_ui.pages.run.nav_page import NavPage
 from devkit_ui.pages.sim.sim_page import SimPage
 from devkit_ui.pages.system.system_page import SystemPage
 from devkit_ui.process_registry import shutdown_tools
-from devkit_ui.qos import SENSOR_QOS
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.sim_asset_store import SimAssetStore
 from devkit_ui.view_models.global_view_model import GlobalViewModel
@@ -101,10 +85,6 @@ _APP_CSS = load_css()
 app.on_shutdown(shutdown_tools)
 
 # ── ROS node ──────────────────────────────────────────────────────────────────
-
-MISSION_STATUS_COLOURS = {
-    INFO: '#57606a', PROGRESS: '#0969da', WARN: '#9a6700', ERROR: '#cf222e', OK: '#1a7f37'}
-
 
 class NiceGuiNode:
     """The NiceGUI application. It reaches ROS only through the RosGateway it is given."""
@@ -170,17 +150,11 @@ class NiceGuiNode:
         # Initialize with default demo document
         self._topo_app_service.initialize_with_default()
 
-        self._ros.create_subscription(
-            String,
-            '/current_node',
-            lambda m: self._topo_vm.set_current_node(m.data),
-            SENSOR_QOS,
-        )
-
         # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher; the view model is what
         # the cards bind to. Start after the telemetry service exists so the getters resolve.
         self._obstacle_mgr = ObstacleManager(
-            self._ros, lambda: self.latest_odom, lambda: self.latest_gps)
+            self._ros, lambda: self._telemetry_app_service.latest_odom,
+            lambda: self._telemetry_app_service.latest_gps)
         self._obstacle_vm = ObstacleViewModel(
             ObstacleApplicationService(self._obstacle_mgr, self._telemetry_app_service))
         self._obstacle_mgr.start()
@@ -190,8 +164,11 @@ class NiceGuiNode:
         self._mission_store.attach(self._ros)
 
         self._mission_service = MissionDomainService(self._ros)
-        self._mission_vm = MissionViewModel(MissionApplicationService(
-            self._mission_store, self._mission_service, self._topo_app_service))
+        self._mission_vm = MissionViewModel(
+            MissionApplicationService(
+                self._mission_store, self._mission_service, self._topo_app_service,
+                self._nav_app_service, self._drive_app_service),
+            self._run_vm)
 
         @ui.page('/')
         def page():
@@ -199,35 +176,6 @@ class NiceGuiNode:
             Builds the NiceGUI application content.
             """
             self.content()
-
-    # ── Topology document property (bridge to view model) ──────────────────
-    # All existing code references self._topo_doc; this property transparently
-    # gets the mirrored doc from the view model, which is kept in sync with
-    # the domain service via the callback. Allows gradual refactoring without
-    # changing all call sites at once.
-
-    @property
-    def _topo_doc(self) -> TopoDoc | None:
-        """Get the current topology document (view model's mirror of domain)."""
-        return self._topo_vm.topo_doc
-
-    # ── Telemetry (bridge to the telemetry service) ────────────────────────
-    # ObstacleManager, MissionStore and the F2C/drop-node code read the latest odometry and GPS
-    # fix off the node. These read-only properties keep those call sites unchanged while the
-    # state itself lives in the telemetry service.
-
-    @property
-    def latest_odom(self) -> Odometry | None:
-        """Return the odometry currently driving the UI, or None before any has arrived."""
-        return self._telemetry_app_service.latest_odom
-
-    @property
-    def latest_gps(self) -> NavSatFix | None:
-        """Return the cached GNSS message, including invalid fixes, or None before reception.
-
-        In simulation this may be a fallback fix when no valid real fix is recent.
-        """
-        return self._telemetry_app_service.latest_gps
 
     # ── UI shell ──────────────────────────────────────────────────────────────
 
@@ -264,73 +212,9 @@ class NiceGuiNode:
 
     def _plan_content(self) -> None:
         """Build the Plan tab: field boundary, row planner, mission queue, saved missions and obstacles."""
-        gps = ((self.latest_gps.latitude, self.latest_gps.longitude)
-               if self.latest_gps else None)
-        PlanPage(self._plan_vm, self._mission_vm, self._obstacle_vm, gps,
-                 self._run_mission, self.cancel_mission, self._confirm_delete_row)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# NiceGuiNode mission executor methods
-# ─────────────────────────────────────────────────────────────────────────────
-
-    def _run_mission(self, queue: list, status_lbl) -> None:
-        """Start executing the queued row mission.
-
-        Parameters:
-            queue (list): Tuples containing a row ID, action key, and action parameters.
-            status_lbl: UI status label updated with mission progress and outcome.
-
-        Report an empty queue, an active mission, unavailable navigation, or MissionError
-        in the label and return; other startup errors propagate.
-        Valid missions run on a worker thread.
-        """
-        def show(level: str, text: str) -> None:
-            """Set the status label's text and color for a mission status level."""
-            status_lbl.set_text(text)
-            status_lbl.style(f'color:{MISSION_STATUS_COLOURS[level]}')
-
-        if not queue:
-            show(ERROR, 'ERROR: queue is empty')
-            return
-        if self._mission_service.running:
-            show(ERROR, 'ERROR: mission already running')
-            return
-        if not self._run_vm.navigation_available:
-            show(ERROR, 'ERROR: action client unavailable')
-            return
-        try:
-            steps = resolve_steps(self._topo_doc, queue)
-            self._mission_service.start(
-                steps, self._send_goal_sync, show,
-                lambda: self._global_vm.soft_estop_active)
-        except MissionError as exc:
-            show(ERROR, f'ERROR: {exc}')
-
-    def _send_goal_sync(self, target: str) -> bool:
-        """Navigate to a topology node and block until it ends.
-
-        Call from a worker thread.
-        Use a 300-second wait budget after sending the goal, excluding the server wait.
-        Mission cancellation or soft e-stop requests cancellation while waiting.
-        See NavigationApplicationService.navigate_and_wait for polling and cancellation timing.
-        Synchronous navigation errors propagate.
-
-        Returns:
-            bool: True if the robot arrived, False if navigation failed, was cancelled, timed
-            out, or the action server was unavailable.
-        """
-        return self._run_vm.navigate_and_wait(
-            target, NAV_TIMEOUT_SEC,
-            lambda: self._mission_service.cancel_requested or self._global_vm.soft_estop_active)
-
-    def cancel_mission(self) -> None:
-        """Signal the executor to stop before its next goal and cancel the active goal."""
-        self._mission_service.cancel()
-        self._run_vm.cancel_navigation()
-
-    async def _confirm_delete_row(self, row_id: int) -> None:
-        """Ask for confirmation, then delete the row from the map."""
-        await confirm_delete_row(self._topo_vm, row_id, self._authoring_vm.delete_row)
+        fix = self._telemetry_app_service.latest_gps
+        PlanPage(self._plan_vm, self._mission_vm, self._obstacle_vm, self._topo_vm,
+                 self._authoring_vm, (fix.latitude, fix.longitude) if fix else None)
 
 
 # ── entrypoints ───────────────────────────────────────────────────────────────

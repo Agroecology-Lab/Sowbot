@@ -30,6 +30,7 @@ class TopologyViewModel:
         # Register this view model's callback with the domain via app service
         # This ensures doc changes sync automatically to the UI state
         self._app_service.register_doc_changed_callback(self._on_doc_changed)
+        self._app_service.register_current_node_callback(self.set_current_node)
 
     def set_selected_node(self, name: str | None) -> None:
         """Set the selected node name, or clear the selection."""

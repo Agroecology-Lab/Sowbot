@@ -16,8 +16,15 @@ class DriveApplicationService:
     """
 
     def __init__(self, drive_service: DriveDomainService) -> None:
-        """Store the domain service used to publish drive commands."""
+        """Store the domain service used to publish drive commands and track the confirmed estop."""
         self._drive = drive_service
+        self._soft_estop_active = False
+        drive_service.register_soft_estop_state_callback(self._on_soft_estop_state)
+
+    @property
+    def soft_estop_active(self) -> bool:
+        """Return the soft estop state the driver last confirmed, False before any confirmation."""
+        return self._soft_estop_active
 
     def move_joystick(self, x: float, y: float) -> None:
         """Publish forward speed x (m/s) and negated turn y (rad/s).
@@ -36,3 +43,7 @@ class DriveApplicationService:
     def register_soft_estop_state_callback(self, callback: Callable[[bool], None]) -> None:
         """Call callback with the soft estop state each time the driver confirms it."""
         self._drive.register_soft_estop_state_callback(callback)
+
+    def _on_soft_estop_state(self, active: bool) -> None:
+        """Store the soft estop state the driver confirmed."""
+        self._soft_estop_active = active
