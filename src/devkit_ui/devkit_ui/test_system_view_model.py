@@ -61,6 +61,7 @@ class TestSystemViewModel(unittest.TestCase):
         self.assertEqual(self.vm.stop(TOOL_MEDKIT), ToolStatusView('stopped', 'muted'))
         self.service.stop.assert_called_once_with(TOOL_MEDKIT)
         self.assertEqual(self.vm.status(TOOL_MEDKIT), ToolStatusView('running (pid 9)', 'ok'))
+        # pylint: disable-next=no-member
         self.service.status.assert_called_once_with(TOOL_MEDKIT)
         self.service.stop.return_value = ToolState('busy')
         self.service.status.return_value = ToolState('idle')

@@ -64,8 +64,8 @@ class SystemApplicationService:
     """Start, stop and poll the System page tools; the tool keys are the TOOL_* constants."""
 
     def __init__(self) -> None:
-        """Create one lock per tool."""
-        self._locks = {tool: threading.Lock() for tool in _LOGS}
+        """Use one shared lock per tool across service instances."""
+        self._locks = {tool: shared(f'{tool}_lock', threading.Lock) for tool in _LOGS}
         self._launchers: dict[str, Callable[[], tuple[Any, str]]] = {
             TOOL_EXPLORER: self._launch_explorer,
             TOOL_GRAPHER: self._launch_grapher,

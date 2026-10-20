@@ -306,8 +306,9 @@ class TestOverlappingActions(ServiceTestCase):
     def test_actions_during_a_start_are_busy_and_do_not_spawn_twice(self):
         thread, release, result = self.run_blocked(self.vnc, self.service.start, TOOL_RVIZ)
         try:
-            for action in (self.service.start, self.service.stop, self.service.exited):
-                self.assertEqual(action(TOOL_RVIZ), ToolState('busy'))
+            for service in (self.service, SystemApplicationService()):
+                for action in (service.start, service.stop, service.exited):
+                    self.assertEqual(action(TOOL_RVIZ), ToolState('busy'))
             # Another tool is unaffected, and reading the status never waits.
             self.assertEqual(self.service.start(TOOL_EXPLORER).kind, 'started')
             self.assertEqual(self.service.status(TOOL_RVIZ), ToolState('idle'))
@@ -324,8 +325,9 @@ class TestOverlappingActions(ServiceTestCase):
             self.quiet.reset_mock()
             self.quiet.side_effect = None
             self.quiet.return_value.poll.return_value = 0  # even an exited process cannot be restarted yet
-            for action in (self.service.start, self.service.stop, self.service.exited):
-                self.assertEqual(action(TOOL_MEDKIT), ToolState('busy'))
+            for service in (self.service, SystemApplicationService()):
+                for action in (service.start, service.stop, service.exited):
+                    self.assertEqual(action(TOOL_MEDKIT), ToolState('busy'))
             self.quiet.assert_not_called()
         finally:
             release.set()
