@@ -13,6 +13,7 @@ from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
 from test_run_ui import FakeElement, FakeUi, nicegui
 
 with patch.dict(sys.modules, {'nicegui': nicegui}):
+    # pylint: disable-next=ungrouped-imports  # UI imports require the NiceGUI patch.
     from devkit_ui.pages import obstacle_cards
 
 

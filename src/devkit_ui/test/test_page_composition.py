@@ -52,6 +52,7 @@ packages.get_package_share_directory = Mock(return_value='/ros/topo')
 
 _modules_before = set(sys.modules)
 with patch.dict(sys.modules, {'nicegui': page_nicegui, 'ament_index_python.packages': packages}):
+    # pylint: disable-next=ungrouped-imports  # UI imports require the NiceGUI patch.
     from devkit_ui.pages.sim import gazebo_card, sim_page
     from devkit_ui.pages.sim.sim_page import SimPage
     from devkit_ui.pages.system import system_page, tools_card

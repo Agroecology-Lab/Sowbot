@@ -13,6 +13,7 @@ from devkit_ui.view_models.topology_view_model import TopologyViewModel
 from test_run_ui import fake_ui, nicegui
 
 with patch.dict(sys.modules, {'nicegui': nicegui}):
+    # pylint: disable-next=ungrouped-imports  # UI imports require the NiceGUI patch.
     from devkit_ui.pages.run import joystick_control_card, node_map_card
 
 

@@ -20,6 +20,7 @@ from test_run_ui import fake_ui
 
 _modules_before = set(sys.modules)
 with patch.dict(sys.modules, {'nicegui': page_nicegui}):
+    # pylint: disable-next=ungrouped-imports  # UI imports require the NiceGUI patch.
     from devkit_ui.pages.run import nav_page
     from devkit_ui.pages.run.nav_page import NavPage
     _imported_here = set(sys.modules) - _modules_before

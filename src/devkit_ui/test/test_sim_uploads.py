@@ -14,6 +14,7 @@ with (
     patch.dict(sys.modules, {'nicegui': nicegui}),
     patch.object(nicegui, 'run', SimpleNamespace(), create=True),
 ):
+    # pylint: disable-next=ungrouped-imports  # UI imports require the NiceGUI patch.
     from devkit_ui.pages.sim import plant_placement_card, soil_texture_card
     from devkit_ui.pages.sim.uploads import read_upload
 

@@ -268,7 +268,8 @@ class TestStopOtherTools(ServiceTestCase):
 class TestRvizDisplayReaper(ServiceTestCase):
     def setUp(self):
         super().setUp()
-        self.enterContext(patch.object(sas.threading, 'Thread'))  # keep the reaper off a real thread
+        self.thread = self.enterContext(
+            patch.object(sas.threading, 'Thread'))  # keep the reaper off a real thread
         self.service.start(TOOL_RVIZ)
         self.rviz = self.logged.return_value
         self.daemons = process_registry.shared('rviz_daemons', list)
@@ -276,10 +277,9 @@ class TestRvizDisplayReaper(ServiceTestCase):
         self.reap = lambda: REAL_REAP(self.service, self.rviz)
 
     def test_starting_rviz_watches_the_process(self):
-        thread = sas.threading.Thread
-        thread.assert_called_once_with(
+        self.thread.assert_called_once_with(
             target=self.service._reap_rviz_display, args=(self.rviz,), daemon=True)
-        thread.return_value.start.assert_called_once_with()
+        self.thread.return_value.start.assert_called_once_with()
 
     def test_rviz_exiting_on_its_own_stops_the_display_daemons(self):
         stopped = list(self.daemons)

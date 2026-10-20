@@ -15,6 +15,7 @@ with (
     patch.dict(sys.modules, {'nicegui': nicegui}),
     patch.object(nicegui, 'run', SimpleNamespace(), create=True),
 ):
+    # pylint: disable-next=ungrouped-imports  # UI imports require the NiceGUI patch.
     from devkit_ui.pages.system import tools_card
 
 
