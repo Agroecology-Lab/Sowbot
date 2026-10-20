@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from devkit_ui import test_mission_domain_service  # noqa: F401  # pylint: disable=unused-import
+import test_mission_domain_service  # noqa: F401  # pylint: disable=unused-import
 from devkit_ui.application_services.mission_application_service import MissionApplicationService
 from devkit_ui.missions import MissionStore
 from devkit_ui.view_models.mission_view_model import MissionViewModel

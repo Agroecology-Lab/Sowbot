@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 from devkit_ui.constants import NAV_ACTION
 from devkit_ui.models import TopoDoc, TopoNode
-from devkit_ui.test_f2c_row_metadata import SERVICE_LOGGER, make_node, patch_row_geometry
-from devkit_ui.test_topo_row_builder import targets
+from test_f2c_row_metadata import SERVICE_LOGGER, make_node, patch_row_geometry
+from test_topo_row_builder import targets
 
 SWATHS = [[(51.0, -2.0), (51.5, -1.5)]]
 

@@ -9,8 +9,8 @@ from unittest.mock import Mock
 from devkit_ui.constants import ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
-from devkit_ui.test_map_operations import load_map_harness, persist_and_reload
 from devkit_ui.topo_defaults import default_actions, default_definitions
+from test_map_operations import load_map_harness, persist_and_reload
 
 SERVICE_LOGGER = 'devkit_ui.application_services.topology_application_service'
 

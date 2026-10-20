@@ -6,11 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from devkit_ui.models import TopoDoc, TopoNode
-from devkit_ui.test_run_ui import fake_ui, nicegui
 from devkit_ui.view_models import run_view_model
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
+from test_run_ui import fake_ui, nicegui
 
 with patch.dict(sys.modules, {'nicegui': nicegui}):
     from devkit_ui.pages.run import joystick_control_card, node_map_card

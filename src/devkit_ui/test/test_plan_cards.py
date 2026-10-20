@@ -5,7 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from devkit_ui.constants import FIELD27_BOUNDS, FIELD27_CENTER
-from devkit_ui.plan_fake_ui import (
+from devkit_ui.view_models.plan_view_model import PlanPageState, PlanView, RepairOffer
+from plan_fake_ui import (
     CORNERS,
     FORM,
     GREEN,
@@ -20,7 +21,6 @@ from devkit_ui.plan_fake_ui import (
     repair_dialog,
     run_to_end,
 )
-from devkit_ui.view_models.plan_view_model import PlanPageState, PlanView, RepairOffer
 
 
 class TestBoundaryMapCard(unittest.TestCase):

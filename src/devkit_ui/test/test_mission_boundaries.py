@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import Mock, call, patch
 
-from devkit_ui.test_mission_domain_service import doc, mds, node
+from test_mission_domain_service import doc, mds, node
 
 
 class TestResolutionBoundaries(unittest.TestCase):

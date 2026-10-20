@@ -93,7 +93,7 @@ ignored-modules = [
 ]
 
 [tool.ruff]
-src = [".", "tools", "worldgen"]  # scripts in tools/ and worldgen/ are first-party for import sorting
+src = [".", "tools", "worldgen", "src/devkit_ui/test"]  # scripts in tools/ and worldgen/, and the UI test modules, are first-party for import sorting
 line-length = 120
 indent-width = 4
 target-version = "py311"

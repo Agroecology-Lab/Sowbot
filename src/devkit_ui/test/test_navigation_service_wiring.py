@@ -5,12 +5,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from devkit_ui.test_run_ui import fake_ui
+from test_run_ui import fake_ui
 
 
 def load_navigation_service_harness():
     """Load the real methods, following the existing navigation test harness pattern."""
-    source = Path(__file__).with_name('ui_node.py')
+    source = Path(__file__).parent.parent / 'devkit_ui' / 'ui_node.py'
     tree = ast.parse(source.read_text(encoding='utf-8'))
     node_class = next(node for node in tree.body
                       if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode')

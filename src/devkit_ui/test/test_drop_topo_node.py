@@ -9,7 +9,7 @@ from devkit_ui.constants import NAV_ACTION, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_defaults import default_actions, default_definitions
-from devkit_ui.topo_test_fakes import attach_authoring, patch_store_io, run_threads_inline
+from topo_test_fakes import attach_authoring, patch_store_io, run_threads_inline
 
 SERVICE_LOGGER = 'devkit_ui.application_services.topology_application_service'
 

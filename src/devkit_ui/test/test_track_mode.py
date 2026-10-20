@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from devkit_ui.models import TopoDoc, TopoNode
-from devkit_ui.topo_test_fakes import attach_authoring
+from topo_test_fakes import attach_authoring
 
 
 class TestTrackMode(unittest.TestCase):

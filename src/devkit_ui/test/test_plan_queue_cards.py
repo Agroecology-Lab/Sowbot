@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from devkit_ui.actions import ActionDef
-from devkit_ui.plan_fake_ui import (
+from devkit_ui.view_models.mission_view_model import MissionQueue
+from devkit_ui.view_models.plan_view_model import PlanPageState
+from plan_fake_ui import (
     GREEN,
     GREY,
     RED,
@@ -20,9 +22,7 @@ from devkit_ui.plan_fake_ui import (
     texts,
     walk,
 )
-from devkit_ui.test_mission_domain_service import mds  # installs ROS message stand-ins
-from devkit_ui.view_models.mission_view_model import MissionQueue
-from devkit_ui.view_models.plan_view_model import PlanPageState
+from test_mission_domain_service import mds  # installs ROS message stand-ins
 
 DEPTH = SimpleNamespace(key='depth', label='Depth', unit='m', default=0.4, min=0.0, max=1.0,
                         step=0.1, precision=2)

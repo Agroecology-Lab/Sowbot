@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch
 from devkit_ui.application_services import plan_application_service as plan_module
 from devkit_ui.models import TopoDoc
 from devkit_ui.plan_types import PlanFailure, PlanMode, PlanRequest
-from devkit_ui.test_f2c_row_metadata import SERVICE_LOGGER, make_node, patch_row_geometry
-from devkit_ui.test_plan_import import ROW0, ROW1, _feat, _plan
+from test_f2c_row_metadata import SERVICE_LOGGER, make_node, patch_row_geometry
+from test_plan_import import ROW0, ROW1, _feat, _plan
 
 CORNERS = [(51.0, -2.0), (51.003, -2.0), (51.0, -1.999)]
 SWATHS = [[(51.0, -2.0), (51.001, -2.0)], [(51.001, -1.999), (51.0, -1.999)]]

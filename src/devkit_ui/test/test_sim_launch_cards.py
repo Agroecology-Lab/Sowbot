@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call, patch
 
 from devkit_ui import process_registry
-from devkit_ui.test_run_ui import fake_ui, nicegui
+from test_run_ui import fake_ui, nicegui
 
 with (
     patch.dict(sys.modules, {'nicegui': nicegui}),

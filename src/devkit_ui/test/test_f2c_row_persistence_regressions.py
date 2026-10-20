@@ -7,9 +7,9 @@ import unittest
 
 from devkit_ui.constants import NAV_ACTION
 from devkit_ui.models import TopoDoc, TopoNode
-from devkit_ui.test_f2c_row_metadata import SERVICE_LOGGER, make_node, patch_row_geometry
-from devkit_ui.test_f2c_row_persistence import SWATHS
-from devkit_ui.test_topo_row_builder import targets
+from test_f2c_row_metadata import SERVICE_LOGGER, make_node, patch_row_geometry
+from test_f2c_row_persistence import SWATHS
+from test_topo_row_builder import targets
 
 
 class TestSaveRegressions(unittest.TestCase):

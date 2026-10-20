@@ -8,8 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from devkit_ui.constants import TOOL_EXPLORER, TOOL_GRAPHER, TOOL_MEDKIT, TOOL_RVIZ
-from devkit_ui.test_run_ui import fake_ui, nicegui
 from devkit_ui.view_models.system_view_model import ToolStatusView
+from test_run_ui import fake_ui, nicegui
 
 with (
     patch.dict(sys.modules, {'nicegui': nicegui}),

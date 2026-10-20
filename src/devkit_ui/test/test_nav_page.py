@@ -11,12 +11,12 @@ from devkit_ui.application_services.telemetry_application_service import (
     TelemetryApplicationService,
 )
 from devkit_ui.models import TopoDoc, TopoNode
-from devkit_ui.test_page_composition import page_nicegui
-from devkit_ui.test_run_ui import fake_ui
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
+from test_page_composition import page_nicegui
+from test_run_ui import fake_ui
 
 _modules_before = set(sys.modules)
 with patch.dict(sys.modules, {'nicegui': page_nicegui}):

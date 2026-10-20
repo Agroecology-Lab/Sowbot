@@ -7,8 +7,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from devkit_ui.test_run_ui import fake_ui, nicegui
 from devkit_ui.view_models.sim_view_model import SimAssetError
+from test_run_ui import fake_ui, nicegui
 
 with (
     patch.dict(sys.modules, {'nicegui': nicegui}),

@@ -5,8 +5,8 @@ import unittest
 
 from devkit_ui.constants import NAV_ACTION, ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
-from devkit_ui.test_topo_row_builder import ANCHOR, settings, straight_rows, swath, targets
 from devkit_ui.topo_row_builder import add_missing_edges, apply_row_nodes, build_row_nodes, plan_row_repair
+from test_topo_row_builder import ANCHOR, settings, straight_rows, swath, targets
 
 
 class TestBuildBoundaries(unittest.TestCase):

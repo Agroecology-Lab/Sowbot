@@ -6,9 +6,9 @@ from unittest.mock import Mock, patch
 
 from devkit_ui import process_registry  # noqa: F401  # pylint: disable=unused-import
 from devkit_ui.models import TopoDoc, TopoNode
-from devkit_ui.test_page_composition import page_nicegui
-from devkit_ui.test_run_ui import fake_ui
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
+from test_page_composition import page_nicegui
+from test_run_ui import fake_ui
 
 _modules_before = set(sys.modules)
 with patch.dict(sys.modules, {'nicegui': page_nicegui}):

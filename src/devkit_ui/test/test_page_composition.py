@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 # Imported before the patched block so the cards and every other test module share one registry.
 from devkit_ui import process_registry  # noqa: F401  # pylint: disable=unused-import
-from devkit_ui.test_run_ui import FakeElement, fake_ui
+from test_run_ui import FakeElement, fake_ui
 
 
 class PageUi:

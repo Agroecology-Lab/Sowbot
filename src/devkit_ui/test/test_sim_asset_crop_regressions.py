@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from devkit_ui.application_services.sim_asset_service import SimAssetError
-from devkit_ui.test_sim_asset_service import GLB, SimAssetTestCase
+from test_sim_asset_service import GLB, SimAssetTestCase
 
 
 class TestCropModelPersistence(SimAssetTestCase):

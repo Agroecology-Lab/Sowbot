@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from devkit_ui import test_telemetry_services as fixtures
+import test_telemetry_services as fixtures
 
 
 class TestTelemetryBoundaries(unittest.TestCase):

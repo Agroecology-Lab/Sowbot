@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from devkit_ui.test_run_ui import fake_ui, nicegui
+from test_run_ui import fake_ui, nicegui
 
 with patch.dict(sys.modules, {'nicegui': nicegui}):
     from devkit_ui.pages import widgets

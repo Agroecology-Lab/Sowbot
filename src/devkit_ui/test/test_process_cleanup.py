@@ -12,7 +12,7 @@ from unittest import mock
 
 class TestProcessCleanup(unittest.TestCase):
     def setUp(self):
-        source = Path(__file__).with_name('process_registry.py')
+        source = Path(__file__).parent.parent / 'devkit_ui' / 'process_registry.py'
         tree = ast.parse(source.read_text(encoding='utf-8'))
         function = next(node for node in tree.body
                         if isinstance(node, ast.FunctionDef) and node.name == 'kill_group')

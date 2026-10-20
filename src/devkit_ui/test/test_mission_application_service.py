@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import Mock, call
 
-from devkit_ui import test_mission_domain_service as fixtures
+import test_mission_domain_service as fixtures
 from devkit_ui.application_services.mission_application_service import MissionApplicationService
 
 doc, mds, node = fixtures.doc, fixtures.mds, fixtures.node

@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from devkit_ui.application_services.sim_asset_service import SimAssetError
-from devkit_ui.test_sim_asset_service import SimAssetTestCase, make_zip
+from test_sim_asset_service import SimAssetTestCase, make_zip
 
 
 class TestSoilImportRegressions(SimAssetTestCase):
