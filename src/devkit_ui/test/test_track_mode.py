@@ -25,7 +25,7 @@ class TestTrackMode(unittest.TestCase):
         self.node.create_timer.assert_called_once()
         period, callback = self.node.create_timer.call_args.args
         self.assertEqual(period, 2.5)
-        self.assertIs(self.authoring._track_timer, self.node.create_timer.return_value)
+        self.assertTrue(self.node.track_service.running)
         self.assertEqual(self.authoring.drop_node.call_args_list[0].args, ('ROW_A_1', None, 'entry'))
 
         callback()
@@ -37,7 +37,7 @@ class TestTrackMode(unittest.TestCase):
         self.authoring.start_track('  ', 2.5, None, None)
 
         self.node.create_timer.assert_not_called()
-        self.assertIsNone(self.authoring._track_timer)
+        self.assertFalse(self.node.track_service.running)
         self.assertEqual(self.track.status, 'ERROR: prefix required')
 
     def test_missing_map_reports_an_error_and_creates_no_timer(self) -> None:
@@ -53,14 +53,13 @@ class TestTrackMode(unittest.TestCase):
     def test_existing_timer_prevents_duplicate_timer_and_immediate_drop(self) -> None:
         """Starting twice must keep the original timer and its recording callback."""
         self.authoring.start_track('row', 1.0, 2, 'entry')
-        original_timer = self.authoring._track_timer
         self.authoring.drop_node.reset_mock()
 
         self.authoring.start_track('other', 5.0, 3, 'entry')
 
         self.node.create_timer.assert_called_once()
         self.authoring.drop_node.assert_not_called()
-        self.assertIs(self.authoring._track_timer, original_timer)
+        self.assertTrue(self.node.track_service.running)
         self.assertEqual(self.track.status, 'ERROR: already running')
         self.assertTrue(self.track.running)
 
@@ -98,7 +97,7 @@ class TestTrackMode(unittest.TestCase):
         self.assertFalse(self.track.running)
         self.assertEqual((self.track.prefix, self.track.row_id, self.track.row_role),
                          ('', None, 'entry'))
-        self.assertIsNone(self.authoring._track_timer)
+        self.assertFalse(self.node.track_service.running)
 
     def test_stop_without_a_row_only_reports_the_count(self) -> None:
         """Verify a standard track marks no exit node."""

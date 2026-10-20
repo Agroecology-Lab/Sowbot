@@ -26,10 +26,10 @@ class TestMissionViewModel(unittest.TestCase):
         self.store.attach(Mock())
         self.executor = SimpleNamespace(running=False)
         self.doc = SimpleNamespace(nodes=[row_node('A_1', 1, 'entry'), row_node('A_2', 1, 'exit')])
-        self.run_vm = Mock()
+        self.on_nav_update = Mock()
         self.vm = MissionViewModel(MissionApplicationService(
             self.store, self.executor, SimpleNamespace(get_doc=lambda: self.doc),
-            Mock(), Mock()), self.run_vm)
+            Mock(), Mock()), self.on_nav_update)
 
     def test_save_queue_stores_entry_node_names_and_shared_action(self) -> None:
         """Verify entry names, fallback names, duplicate rows and shared action settings."""
@@ -134,17 +134,17 @@ class TestMissionViewModel(unittest.TestCase):
 
 class TestMissionViewModelRun(unittest.TestCase):
     def setUp(self) -> None:
-        """Bind the VM to a mock application service and a mock run view model."""
-        self.app, self.run_vm = Mock(), Mock()
-        self.vm = MissionViewModel(self.app, self.run_vm)
+        """Bind the VM to a mock application service and a navigation-update callback."""
+        self.app, self.on_nav_update = Mock(), Mock()
+        self.vm = MissionViewModel(self.app, self.on_nav_update)
 
-    def test_run_starts_the_queue_and_routes_navigation_updates_to_the_run_tab(self) -> None:
-        """Verify the Run tab's updater receives the navigation progress of a mission."""
+    def test_run_starts_the_queue_and_routes_navigation_updates_to_the_callback(self) -> None:
+        """Verify the injected callback receives the navigation progress of a mission."""
         queue, on_status = [(1, 'drive', None)], Mock()
 
         self.vm.run(queue, on_status)
 
-        self.app.start.assert_called_once_with(queue, on_status, self.run_vm.on_nav_update)
+        self.app.start.assert_called_once_with(queue, on_status, self.on_nav_update)
 
     def test_cancel_cancels_through_the_application_service(self) -> None:
         """Verify cancelling reaches the application service once."""

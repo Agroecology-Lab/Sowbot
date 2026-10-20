@@ -40,6 +40,7 @@ from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
+from devkit_ui.application_services.track_application_service import TrackApplicationService
 from devkit_ui.constants import FIELD27_CENTER, NODE_NAME
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 from devkit_ui.domain_services.mission_domain_service import MissionDomainService
@@ -62,6 +63,7 @@ from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.sim_asset_store import SimAssetStore
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.map_authoring_view_model import MapAuthoringViewModel
+from devkit_ui.view_models.map_context import MapContext
 from devkit_ui.view_models.mission_view_model import MissionViewModel
 from devkit_ui.view_models.obstacle_view_model import ObstacleViewModel
 from devkit_ui.view_models.plan_view_model import PlanViewModel
@@ -142,10 +144,12 @@ class NiceGuiNode:
         self._run_vm = RunViewModel(
             self._drive_app_service, self._row_discovery_app_service, self._nav_app_service)
         self._topo_vm = TopologyViewModel(self._topo_app_service)
-        self._plan_vm = PlanViewModel(self._plan_app_service, self._topo_vm, self._run_vm)
+        self._plan_vm = PlanViewModel(
+            self._plan_app_service, MapContext(self._topo_vm, self._run_vm))
         self._authoring_vm = MapAuthoringViewModel(
             self._run_vm, self._topo_vm, self._topo_app_service, self._topo_edit_service,
-            self._telemetry_app_service, self._ros.create_timer, is_sim=self._is_sim)
+            self._telemetry_app_service, TrackApplicationService(self._ros.create_timer),
+            is_sim=self._is_sim)
         self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
         self._robot_brain_vm = RobotBrainViewModel(self._robot_brain_app_service)
         self._system_vm = SystemViewModel(SystemApplicationService())
@@ -172,7 +176,7 @@ class NiceGuiNode:
             MissionApplicationService(
                 self._mission_store, self._mission_service, self._topo_app_service,
                 self._nav_app_service, self._drive_app_service),
-            self._run_vm)
+            self._run_vm.on_nav_update)
 
         @ui.page('/')
         def page():

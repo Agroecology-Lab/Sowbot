@@ -12,6 +12,7 @@ from devkit_ui.constants import NAV_ACTION
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 from devkit_ui.plan_types import PlannedRows, PlanRequest
 from devkit_ui.topo_results import PersistResult
+from devkit_ui.view_models.map_context import MapContext
 from devkit_ui.view_models.plan_view_model import PlanViewModel
 
 ROW_ACTION = 'row_follow'
@@ -69,7 +70,7 @@ class PlanHarness:
         self.service = PlanApplicationService(
             self.topology, TopologyEditService(self.topology), self, is_sim=True,
             background=self._background)
-        self.vm = PlanViewModel(self.service, self, self.run_vm)
+        self.vm = PlanViewModel(self.service, MapContext(self, self.run_vm))
         self._planned = {
             'swaths': swaths, 'origin_ll': (51.0, -2.0), 'contour_used': contour_used,
             'break_after': frozenset(),
