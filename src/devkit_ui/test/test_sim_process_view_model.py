@@ -65,6 +65,14 @@ class TestSimProcessViewModel(unittest.TestCase):
         self.service.gazebo_running.return_value = True
         self.assertTrue(self.vm.gazebo_running())
 
+    def test_busy_actions_leave_the_current_label_unchanged(self):
+        """Every start and stop returns no label update while its process is busy."""
+        for name, args in (('launch_gazebo', ('robot.xacro',)), ('stop_gazebo', ()),
+                           ('start_row_follow', ()), ('stop_row_follow', ())):
+            with self.subTest(action=name):
+                getattr(self.service, name).return_value = ToolState('busy')
+                self.assertIsNone(getattr(self.vm, name)(*args))
+
 
 if __name__ == '__main__':
     unittest.main()

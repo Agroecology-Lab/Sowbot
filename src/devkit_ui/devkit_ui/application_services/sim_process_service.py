@@ -7,6 +7,7 @@ environment; pages only ask for a start, a stop or a status. No ROS or NiceGUI i
 from __future__ import annotations
 
 import os
+import threading
 from typing import Literal
 
 from devkit_ui.application_services.tool_state import ToolState
@@ -38,6 +39,11 @@ _GZ_RESOURCES = ('/workspace/models'
 class SimProcessApplicationService:
     """Start, stop and poll the Gazebo simulation and the row-follow stack."""
 
+    def __init__(self) -> None:
+        """Share one lock per process across browser sessions and service instances."""
+        self._gazebo_lock = shared('gazebo_lock', threading.Lock)
+        self._row_follow_lock = shared('neo_lock', threading.Lock)
+
     # ── row follow ────────────────────────────────────────────────────────────
 
     def row_follow_status(self) -> ToolState:
@@ -49,29 +55,39 @@ class SimProcessApplicationService:
 
         It uses /camera/image_raw instead of a V4L2 device, runs the TSM detector and publishes
         /cmd_vel. Return 'already_running', 'error' with the exception text (the handle is left
-        as it was), or 'started'.
+        as it was), or 'started'. Return 'busy' if another start or stop is in flight.
         """
-        handle: list = shared('neo', lambda: [None])
-        if alive(handle[0]):
-            return ToolState('already_running', handle[0].pid, ROW_FOLLOW_LOG)
+        if not self._row_follow_lock.acquire(blocking=False):
+            return ToolState('busy')
         try:
-            proc = spawn_logged(_ROW_FOLLOW_CMD, ROW_FOLLOW_LOG, env=os.environ.copy())
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            return ToolState('error', detail=str(exc))
-        handle[0] = proc
-        return ToolState('started', proc.pid, ROW_FOLLOW_LOG)
+            handle: list = shared('neo', lambda: [None])
+            if alive(handle[0]):
+                return ToolState('already_running', handle[0].pid, ROW_FOLLOW_LOG)
+            try:
+                proc = spawn_logged(_ROW_FOLLOW_CMD, ROW_FOLLOW_LOG, env=os.environ.copy())
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                return ToolState('error', detail=str(exc))
+            handle[0] = proc
+            return ToolState('started', proc.pid, ROW_FOLLOW_LOG)
+        finally:
+            self._row_follow_lock.release()
 
     def stop_row_follow(self) -> ToolState:
         """Stop the row-follow process group; 'idle' if nothing was started.
 
-        Blocking: call off the UI loop.
+        Return 'busy' if another start or stop is in flight. Blocking: call off the UI loop.
         """
-        handle: list = shared('neo', lambda: [None])
-        if handle[0] is None:
-            return ToolState('idle')
-        kill_group(handle[0])
-        handle[0] = None
-        return ToolState('stopped')
+        if not self._row_follow_lock.acquire(blocking=False):
+            return ToolState('busy')
+        try:
+            handle: list = shared('neo', lambda: [None])
+            if handle[0] is None:
+                return ToolState('idle')
+            kill_group(handle[0])
+            handle[0] = None
+            return ToolState('stopped')
+        finally:
+            self._row_follow_lock.release()
 
     # ── gazebo ────────────────────────────────────────────────────────────────
 
@@ -93,36 +109,46 @@ class SimProcessApplicationService:
         mode 'browser' first starts a virtual display with VNC and noVNC, and blocks while it does;
         call off the UI loop. Return 'already_running', 'error' with the exception text (a failed
         display stack means Gazebo is not started and the handle stays empty), or 'started' with
-        the mode in detail.
+        the mode in detail. Return 'busy' if another start or stop is in flight.
         """
-        handle: list = shared('gazebo', lambda: [None])
-        if alive(handle[0]):
-            return ToolState('already_running', handle[0].pid, GAZEBO_LOG)
+        if not self._gazebo_lock.acquire(blocking=False):
+            return ToolState('busy')
         try:
-            if mode == 'browser':
-                start_vnc_stack(_VNC_DISPLAY, _VNC_PORT, _NOVNC_PORT,
-                                shared('gazebo_daemons', list))
-                proc = spawn_logged(self._browser_cmd(xacro), GAZEBO_LOG,
-                                    env=self._browser_env())
-            else:
-                proc = spawn_logged(self._sim_cmd(xacro, headless=mode == 'headless'),
-                                    GAZEBO_LOG, env=self._env())
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            return ToolState('error', detail=str(exc))
-        handle[0] = proc
-        return ToolState('started', proc.pid, GAZEBO_LOG, mode)
+            handle: list = shared('gazebo', lambda: [None])
+            if alive(handle[0]):
+                return ToolState('already_running', handle[0].pid, GAZEBO_LOG)
+            try:
+                if mode == 'browser':
+                    start_vnc_stack(_VNC_DISPLAY, _VNC_PORT, _NOVNC_PORT,
+                                    shared('gazebo_daemons', list))
+                    proc = spawn_logged(self._browser_cmd(xacro), GAZEBO_LOG,
+                                        env=self._browser_env())
+                else:
+                    proc = spawn_logged(self._sim_cmd(xacro, headless=mode == 'headless'),
+                                        GAZEBO_LOG, env=self._env())
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                return ToolState('error', detail=str(exc))
+            handle[0] = proc
+            return ToolState('started', proc.pid, GAZEBO_LOG, mode)
+        finally:
+            self._gazebo_lock.release()
 
     def stop_gazebo(self) -> ToolState:
         """Stop the sim, the robot spawn and the display daemons, and release their handles.
 
-        Blocking: call off the UI loop.
+        Return 'busy' if another start or stop is in flight. Blocking: call off the UI loop.
         """
-        for name in ('gazebo', 'gazebo_spawn'):
-            handle: list = shared(name, lambda: [None])
-            kill_group(handle[0])
-            handle[0] = None
-        stop_all(shared('gazebo_daemons', list))
-        return ToolState('stopped')
+        if not self._gazebo_lock.acquire(blocking=False):
+            return ToolState('busy')
+        try:
+            for name in ('gazebo', 'gazebo_spawn'):
+                handle: list = shared(name, lambda: [None])
+                kill_group(handle[0])
+                handle[0] = None
+            stop_all(shared('gazebo_daemons', list))
+            return ToolState('stopped')
+        finally:
+            self._gazebo_lock.release()
 
     # ── commands ──────────────────────────────────────────────────────────────
 

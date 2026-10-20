@@ -69,6 +69,8 @@ class SimProcessViewModel:
     def _view(state: ToolState) -> ToolStatusView | None:
         """Word a service result; None when there is nothing to show."""
         kind = state.kind
+        if kind == 'busy':
+            return None
         if kind == 'already_running':
             return ToolStatusView('already running', 'muted')
         if kind == 'running':

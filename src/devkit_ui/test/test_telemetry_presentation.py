@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import test_telemetry_services as fixtures
-from devkit_ui.application_services.telemetry_application_service import TelemetryApplicationService
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
+from test_telemetry_services import TelemetryApplicationService
 
 
 class TestTelemetryPresentation(unittest.TestCase):

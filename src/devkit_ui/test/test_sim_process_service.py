@@ -2,7 +2,11 @@
 
 # pylint: disable=protected-access
 import shlex
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from functools import partial
 from unittest.mock import Mock, call, patch
 
 from devkit_ui import process_registry
@@ -86,6 +90,8 @@ class TestGazebo(SimProcessTestCase):
         state = self.service.launch_gazebo('sowbot_01.xacro')
         self.assertEqual((state.kind, state.detail), ('error', 'launch missing'))
         self.assertIsNone(process_registry.shared('gazebo', lambda: [None])[0])
+        self.spawn.side_effect = None
+        self.assertEqual(self.service.launch_gazebo('sowbot_01.xacro').kind, 'started')
 
     def test_browser_launch_uses_virtual_display_without_changing_the_normal_environment(self):
         """Verify browser launch isolates display and software-rendering settings."""
@@ -111,6 +117,8 @@ class TestGazebo(SimProcessTestCase):
         self.spawn.assert_not_called()
         self.assertEqual((state.kind, state.detail), ('error', 'display unavailable'))
         self.assertFalse(self.service.gazebo_running())
+        self.vnc.side_effect = None
+        self.assertEqual(self.service.launch_gazebo('sowbot_01.xacro', 'browser').kind, 'started')
 
     def test_stop_kills_both_processes_then_the_display_and_releases_handles(self):
         """Verify stop terminates the sim and the robot spawn, then the daemons, and clears them."""
@@ -148,6 +156,7 @@ class TestRowFollow(SimProcessTestCase):
         self.assertEqual(self.service.row_follow_status().kind, 'idle')
         self.assertEqual(self.service.stop_row_follow().kind, 'idle')
         self.kill.assert_called_once()
+        self.assertEqual(self.service.start_row_follow().kind, 'started')
 
     def test_failed_start_reports_an_error_and_can_be_retried(self):
         """Verify failed startup reports an error, leaves no handle, and allows a retry."""
@@ -157,6 +166,81 @@ class TestRowFollow(SimProcessTestCase):
         self.assertEqual(self.service.row_follow_status().kind, 'idle')
         self.spawn.side_effect = None
         self.assertEqual(self.service.start_row_follow().kind, 'started')
+
+
+class TestOverlappingActions(SimProcessTestCase):
+    @contextmanager
+    def blocked(self, boundary, action, expected):
+        """Hold a mocked process operation until the caller finishes its overlap checks."""
+        entered, release = threading.Event(), threading.Event()
+
+        def wait(*_args, **_kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return self.spawn.return_value
+
+        boundary.side_effect = wait
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(action)
+            try:
+                self.assertTrue(entered.wait(5))
+                yield
+            finally:
+                release.set()
+                boundary.side_effect = None
+            self.assertEqual(result.result(timeout=5).kind, expected)
+
+    def test_start_blocks_overlapping_actions_across_sessions(self):
+        """A start owns its handle and display stack until the process has been registered."""
+        for start, stop, args, boundary in (
+            ('launch_gazebo', 'stop_gazebo', ('robot.xacro', 'browser'), self.vnc),
+            ('start_row_follow', 'stop_row_follow', (), self.spawn),
+        ):
+            with self.subTest(start=start):
+                action = partial(getattr(self.service, start), *args)
+                with self.blocked(boundary, action, 'started'):
+                    for service in (self.service, SimProcessApplicationService()):
+                        self.assertEqual(getattr(service, start)(*args).kind, 'busy')
+                        self.assertEqual(getattr(service, stop)().kind, 'busy')
+                self.assertEqual(getattr(self.service, start)(*args).kind, 'already_running')
+                self.spawn.assert_called_once()
+                self.assertEqual(getattr(self.service, stop)().kind, 'stopped')
+                self.spawn.reset_mock()
+
+    def test_stop_blocks_actions_through_display_cleanup_and_keeps_other_tool_available(self):
+        """A start cannot race with termination or daemon cleanup, even after handles clear."""
+        for start, stop, args, boundary, other_start, other_args in (
+            ('launch_gazebo', 'stop_gazebo', ('robot.xacro',), self.stop_all,
+             'start_row_follow', ()),
+            ('start_row_follow', 'stop_row_follow', (), self.kill,
+             'launch_gazebo', ('robot.xacro',)),
+        ):
+            with self.subTest(stop=stop):
+                getattr(self.service, start)(*args)
+                with self.blocked(boundary, getattr(self.service, stop), 'stopped'):
+                    for service in (self.service, SimProcessApplicationService()):
+                        self.assertEqual(getattr(service, start)(*args).kind, 'busy')
+                        self.assertEqual(getattr(service, stop)().kind, 'busy')
+                    self.assertEqual(getattr(self.service, other_start)(*other_args).kind,
+                                     'started')
+                self.assertEqual(getattr(self.service, start)(*args).kind, 'started')
+                self.service.stop_gazebo()
+                self.service.stop_row_follow()
+
+    def test_stop_failure_releases_lock_and_preserves_handle_for_retry(self):
+        """A termination exception cannot leave either process permanently busy."""
+        for start, stop, args in (('launch_gazebo', 'stop_gazebo', ('robot.xacro',)),
+                                  ('start_row_follow', 'stop_row_follow', ())):
+            with self.subTest(stop=stop):
+                getattr(self.service, start)(*args)
+                self.kill.side_effect = OSError('stop failed')
+                try:
+                    with self.assertRaisesRegex(OSError, 'stop failed'):
+                        getattr(self.service, stop)()
+                finally:
+                    self.kill.side_effect = None
+                self.assertEqual(getattr(self.service, start)(*args).kind, 'already_running')
+                self.assertEqual(getattr(self.service, stop)().kind, 'stopped')
 
 
 if __name__ == '__main__':
