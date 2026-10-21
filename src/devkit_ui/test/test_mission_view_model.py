@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import test_mission_domain_service  # noqa: F401  # pylint: disable=unused-import
 from devkit_ui.application_services.mission_application_service import MissionApplicationService
 from devkit_ui.missions import MissionStore
+from devkit_ui.topo_results import NavUpdate
 from devkit_ui.view_models.mission_view_model import MissionViewModel
 
 
@@ -151,6 +152,56 @@ class TestMissionViewModelRun(unittest.TestCase):
         self.vm.cancel()
 
         self.app.cancel.assert_called_once_with()
+
+    def test_plain_callable_receives_initial_feedback_and_terminal_updates_in_order(self) -> None:
+        """Navigation updates can reach a callable without any Run view model dependency."""
+        updates = []
+        vm = MissionViewModel(self.app, updates.append)
+        on_status = Mock()
+        queue = [(0, 'drive', None)]
+        initial = NavUpdate('sending goal', True)
+        feedback = NavUpdate('driving', True)
+        terminal = NavUpdate('arrived', False, 'arrived')
+
+        def start(received_queue, received_status, on_nav_update):
+            self.assertIs(received_queue, queue)
+            self.assertIs(received_status, on_status)
+            on_nav_update(initial)
+
+        self.app.start.side_effect = start
+        vm.run(queue, on_status)
+        callback = self.app.start.call_args.args[2]
+        callback(feedback)
+        callback(terminal)
+
+        self.assertEqual(updates, [initial, feedback, terminal])
+        self.assertIs(updates[0], initial)
+        self.assertIs(updates[1], feedback)
+        self.assertIs(updates[2], terminal)
+        on_status.assert_not_called()
+
+    def test_cancellation_updates_use_the_same_injected_callback(self) -> None:
+        """The callback supplied at start remains usable for a cancellation result."""
+        self.vm.run([(0, 'drive', None)], Mock())
+        cancelled = NavUpdate('cancelled', False, 'cancelled')
+        callback = self.app.start.call_args.args[2]
+        self.app.cancel.side_effect = lambda: callback(cancelled)
+
+        self.vm.cancel()
+
+        self.app.cancel.assert_called_once_with()
+        self.on_nav_update.assert_called_once_with(cancelled)
+
+    def test_navigation_callback_errors_propagate_to_the_update_producer(self) -> None:
+        """Forwarding must not swallow an exception from the injected consumer."""
+        self.on_nav_update.side_effect = RuntimeError('consumer unavailable')
+        update = NavUpdate('driving', True)
+        self.app.start.side_effect = lambda _queue, _status, callback: callback(update)
+
+        with self.assertRaisesRegex(RuntimeError, 'consumer unavailable'):
+            self.vm.run([(0, 'drive', None)], Mock())
+
+        self.on_nav_update.assert_called_once_with(update)
 
 
 if __name__ == '__main__':
