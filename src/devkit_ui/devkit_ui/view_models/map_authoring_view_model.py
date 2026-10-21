@@ -127,10 +127,13 @@ class MapAuthoringViewModel:
             interval: Time in seconds between recorded nodes.
             row_id: Optional row identifier; its first node is an entry, and subsequent
                 nodes are middle nodes.
-            row_role: Role assigned when no row identifier is provided.
+            row_role: Role assigned when no row identifier is provided; defaults to 'entry'
+                when None or empty.
 
         Continue numbering after existing nodes with the same prefix. An empty prefix, a
         running track or a missing map is reported in the track status and nothing starts.
+        Drop validation failures are reported in drop_node.status and do not stop tracking.
+        Uncaught drop or timer creation errors propagate without resetting the track state.
         """
         track = self._run_vm.track
         prefix = clean_name(prefix)
@@ -162,7 +165,13 @@ class MapAuthoringViewModel:
                           [n.name for n in doc.nodes], self.drop_node, recorded)
 
     def stop_track(self) -> None:
-        """Stop tracking and mark the last tracked node as the row exit when applicable."""
+        """Stop tracking and schedule marking the last attempted row node as the exit.
+
+        Only schedule the edit when a row_id is set and the last node number is positive.
+        Update track status and clear its running flag, prefix and row settings without waiting
+        for the edit; background edit failures do not change that status. Timer cancellation
+        or edit-thread startup errors propagate before the UI state is reset.
+        """
         count = self._track.stop()
         track = self._run_vm.track
         if track.row_id is not None and count > 0:

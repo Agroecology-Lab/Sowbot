@@ -38,19 +38,27 @@ class TrackApplicationService:
 
     @property
     def count(self) -> int:
-        """Return the number of the last node recorded; it continues from existing nodes."""
+        """Return the last attempted node number, including numbering continued from existing nodes.
+
+        The number advances before drop is called, even if drop or on_recorded raises.
+        Return 0 before starting or after a successful stop.
+        """
         return self._counter
 
     def start(self, prefix: str, interval: float, row_id: int | None, row_role: str,
               existing_names: Iterable[str], drop: DropFunction,
               on_recorded: RecordedCallback) -> bool:
-        """Record one node at once, then one every interval seconds; return False if running.
+        """Record one node at once, then one every interval seconds; return True on startup.
 
-        Names are prefix_N, numbered after the highest existing prefix_N. With a row_id the first
-        node is an 'entry' and the rest are 'middle'; without one every node gets row_role.
+        Return False without changes if already running. Names are prefix_N, starting at 1 or
+        after the highest existing numeric suffix. With a row_id (including 0) the first node
+        is an 'entry' and the rest are 'middle'; without one every node gets row_role.
         drop(name, row_id, role) records a node and on_recorded(name, number) follows each one.
-        Both run on the timer's thread after the first. Errors from drop or the timer factory
-        propagate; a failed start leaves nothing running.
+        The first pair runs synchronously; later calls run in the timer's callback context.
+        interval is passed to the timer factory without validation.
+        Errors from either callback or the timer factory propagate to their caller. A failed
+        initial callback creates no timer; a factory failure does not undo the initial drop.
+        Neither failure resets the counter.
         """
         if self._timer is not None:
             return False
@@ -77,9 +85,11 @@ class TrackApplicationService:
         return True
 
     def stop(self) -> int:
-        """Stop the timer and return the number of the last node recorded.
+        """Stop the timer and return the last attempted node number, including existing numbering.
 
-        Return 0 when nothing was recorded. Numbering restarts at the next start().
+        Reset the counter to 0; the next start derives numbering from existing_names again.
+        Return 0 before starting or after a previous successful stop. Timer cancellation errors
+        propagate without clearing the timer or resetting the counter.
         """
         if self._timer is not None:
             self._timer.cancel()

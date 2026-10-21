@@ -59,7 +59,9 @@ class MissionViewModel:
         """Bind to the mission application service.
 
         on_nav_update receives each navigation update while a mission drives the robot; the Run
-        tab uses it to show progress. It is called on the mission's worker thread.
+        tab uses it to show progress. Calls run on the thread producing the update: the mission
+        worker for initial updates, ROS callbacks for feedback and results, or the thread
+        requesting cancellation.
         """
         self._app_service = app_service
         self._on_nav_update = on_nav_update
