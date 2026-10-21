@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from devkit_ui.plan_types import MIN_CORNERS, PlannedRows
+from devkit_ui.view_models.map_context import MapContext
 from devkit_ui.view_models.mission_view_model import MissionQueue, MissionViewModel
 from devkit_ui.view_models.plan_view_model import (
     STATUS_ERROR,
@@ -368,7 +369,7 @@ class TestPlanViewModelPageHelpers(unittest.TestCase):
         self.doc.has_node = lambda name: name in {n.name for n in self.doc.nodes}
         self.topo = SimpleNamespace(topo_doc=self.doc, current_node='—', selected_node=None)
         self.app = Mock()
-        self.vm = PlanViewModel(self.app, self.topo, Mock())
+        self.vm = PlanViewModel(self.app, MapContext(self.topo, Mock()))
 
     def test_open_page_returns_fresh_state_each_time(self) -> None:
         """Verify pages never share state."""

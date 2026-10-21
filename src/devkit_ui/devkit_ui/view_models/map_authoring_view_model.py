@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from devkit_ui.application_services.topology_edit_service import clean_name
 from devkit_ui.constants import ROW_ACTION, VISION_ROW_ACTION
@@ -17,20 +17,11 @@ if TYPE_CHECKING:
         TopologyApplicationService,
     )
     from devkit_ui.application_services.topology_edit_service import TopologyEditService
+    from devkit_ui.application_services.track_application_service import TrackApplicationService
     from devkit_ui.view_models.run_view_model import RunViewModel
     from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 _LOG = logging.getLogger(__name__)
-
-
-class Cancellable(Protocol):
-    """A repeating timer that can be stopped."""
-
-    def cancel(self) -> None:
-        """Stop the timer."""
-
-
-TimerFactory = Callable[[float, Callable[[], None]], Cancellable]
 
 
 class MapAuthoringViewModel:
@@ -45,18 +36,15 @@ class MapAuthoringViewModel:
                  topo_app_service: TopologyApplicationService,
                  edit_service: TopologyEditService,
                  telemetry_app_service: TelemetryApplicationService,
-                 create_timer: TimerFactory, *, is_sim: bool) -> None:
-        """Bind to the Run state and services; create_timer makes the track-mode timer."""
+                 track_service: TrackApplicationService, *, is_sim: bool) -> None:
+        """Bind to the Run state and services; track_service records nodes in track mode."""
         self._run_vm = run_vm
         self._topo_vm = topo_vm
         self._topo = topo_app_service
         self._edits = edit_service
         self._telemetry = telemetry_app_service
-        self._create_timer = create_timer
+        self._track = track_service
         self._is_sim = is_sim
-        self._track_timer: Cancellable | None = None
-        self._track_counter = 0
-        self._track_first = True
         topo_vm.register_map_archived_callback(self._on_map_archived)
 
     # ── row action ────────────────────────────────────────────────────────────
@@ -139,10 +127,13 @@ class MapAuthoringViewModel:
             interval: Time in seconds between recorded nodes.
             row_id: Optional row identifier; its first node is an entry, and subsequent
                 nodes are middle nodes.
-            row_role: Role assigned when no row identifier is provided.
+            row_role: Role assigned when no row identifier is provided; defaults to 'entry'
+                when None or empty.
 
         Continue numbering after existing nodes with the same prefix. An empty prefix, a
         running track or a missing map is reported in the track status and nothing starts.
+        Drop validation failures are reported in drop_node.status and do not stop tracking.
+        Uncaught drop or timer creation errors propagate without resetting the track state.
         """
         track = self._run_vm.track
         prefix = clean_name(prefix)
@@ -150,7 +141,7 @@ class MapAuthoringViewModel:
             track.running = False
             track.status = 'ERROR: prefix required'
             return
-        if self._track_timer is not None:
+        if self._track.running:
             track.running = True
             track.status = 'ERROR: already running'
             return
@@ -158,11 +149,6 @@ class MapAuthoringViewModel:
         if doc is None:
             track.status = 'ERROR: map not loaded'
             return
-        existing = [n.name for n in doc.nodes
-                    if n.name.startswith(prefix + '_') and n.name[len(prefix) + 1:].isdigit()]
-        self._track_counter = (max(int(n[len(prefix) + 1:]) for n in existing)
-                               if existing else 0)
-        self._track_first = True
 
         track.prefix = prefix
         track.interval = interval
@@ -171,39 +157,30 @@ class MapAuthoringViewModel:
         track.running = True
         track.status = ''
 
-        is_row = row_id is not None
+        def recorded(name: str, number: int) -> None:
+            """Show the node that was just recorded."""
+            track.status = f'recording  {name}  (#{number})'
 
-        def drop() -> None:
-            """Record the next node in the tracking sequence and update the status."""
-            self._track_counter += 1
-            node_name = f'{prefix}_{self._track_counter}'
-            if is_row:
-                role = 'entry' if self._track_first else 'middle'
-                self._track_first = False
-            else:
-                role = row_role or 'entry'
-            self.drop_node(node_name, row_id, role)
-            track.status = f'recording  {node_name}  (#{self._track_counter})'
-
-        drop()
-        self._track_timer = self._create_timer(interval, drop)
+        self._track.start(prefix, interval, row_id, track.row_role,
+                          [n.name for n in doc.nodes], self.drop_node, recorded)
 
     def stop_track(self) -> None:
-        """Stop tracking and mark the last tracked node as the row exit when applicable."""
-        if self._track_timer is not None:
-            self._track_timer.cancel()
-            self._track_timer = None
+        """Stop tracking and schedule marking the last attempted row node as the exit.
+
+        Only schedule the edit when a row_id is set and the last node number is positive.
+        Update track status and clear its running flag, prefix and row settings without waiting
+        for the edit; background edit failures do not change that status. Timer cancellation
+        or edit-thread startup errors propagate before the UI state is reset.
+        """
+        count = self._track.stop()
         track = self._run_vm.track
-        if track.row_id is not None and self._track_counter > 0:
-            last_name = f'{track.prefix}_{self._track_counter}'
+        if track.row_id is not None and count > 0:
+            last_name = f'{track.prefix}_{count}'
             self._topo.patch_node_role_async(last_name, 'exit')
-            track.status = (f'stopped — {last_name} marked exit'
-                            f'  (#{self._track_counter} nodes)')
+            track.status = f'stopped — {last_name} marked exit  (#{count} nodes)'
         else:
-            track.status = f'stopped at #{self._track_counter}'
+            track.status = f'stopped at #{count}'
         track.running = False
-        self._track_counter = 0
-        self._track_first = True
         track.prefix = ''
         track.row_id = None
         track.row_role = 'entry'

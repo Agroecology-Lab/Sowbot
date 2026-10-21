@@ -91,3 +91,14 @@ forbidden_modules =
     devkit_ui.row_planning
     devkit_ui.plan_import
 allow_indirect_imports = True
+
+[importlinter:contract:plan-mission-no-sibling-view-models]
+name = Plan and Mission view models do not depend on the Run or Topology view models
+type = forbidden
+source_modules =
+    devkit_ui.view_models.plan_view_model
+    devkit_ui.view_models.mission_view_model
+forbidden_modules =
+    devkit_ui.view_models.run_view_model
+    devkit_ui.view_models.topology_view_model
+allow_indirect_imports = True

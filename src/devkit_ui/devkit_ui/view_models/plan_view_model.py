@@ -9,8 +9,7 @@ from devkit_ui.plan_types import MIN_CORNERS, PlanFailure, PlanMode, PlanRequest
 if TYPE_CHECKING:
     from devkit_ui.application_services.plan_application_service import PlanApplicationService
     from devkit_ui.plan_types import PlannedRows, PlanOutcome
-    from devkit_ui.view_models.run_view_model import RunViewModel
-    from devkit_ui.view_models.topology_view_model import TopologyViewModel
+    from devkit_ui.view_models.map_context import MapContext
 
 
 @dataclass(frozen=True)
@@ -158,20 +157,15 @@ class PlanPageState:
 class PlanViewModel:
     """UI-facing state and user intents for the Plan tab: row planning, saving and repair."""
 
-    def __init__(self, app_service: PlanApplicationService, topo_vm: TopologyViewModel,
-                 run_vm: RunViewModel) -> None:
-        """Bind to the plan service and the view models that hold the map and row action.
-
-        The row action is the Run tab's drop_node.row_action; this view model only reads it.
-        """
+    def __init__(self, app_service: PlanApplicationService, map_context: MapContext) -> None:
+        """Bind to the plan service and the read-only view of the map and its row action."""
         self._app_service = app_service
-        self._topo_vm = topo_vm
-        self._run_vm = run_vm
+        self._map = map_context
 
     @property
     def _row_action(self) -> str:
         """Return the row action selected on the Run tab."""
-        return self._run_vm.drop_node.row_action
+        return self._map.row_action
 
     @property
     def save_status(self) -> str:
@@ -213,7 +207,7 @@ class PlanViewModel:
         """
         self._app_service.save_rows(
             planned, prefix, row_id_start, overwrite, row_action=self._row_action,
-            current_node=self._topo_vm.current_node, selected_node=self._topo_vm.selected_node)
+            current_node=self._map.current_node, selected_node=self._map.selected_node)
 
     def repair_offer(self) -> RepairOffer | None:
         """Return what the repair dialog shows, or None if no map is loaded.
@@ -221,11 +215,11 @@ class PlanViewModel:
         The suggested base node is the robot's current node, else the selected one, as long
         as it exists in the map; empty if neither does.
         """
-        doc = self._topo_vm.topo_doc
+        doc = self._map.topo_doc
         if doc is None:
             return None
-        current = self._topo_vm.current_node
-        selected = self._topo_vm.selected_node
+        current = self._map.current_node
+        selected = self._map.selected_node
         default_base = ''
         if current not in ('—', 'none', 'None', '', None) and doc.has_node(current):
             default_base = current
@@ -242,7 +236,7 @@ class PlanViewModel:
         None if no map is loaded. Equal snapshots mean available_rows would be equal too,
         including after a node's row metadata is edited in place.
         """
-        doc = self._topo_vm.topo_doc
+        doc = self._map.topo_doc
         if doc is None:
             return None
         return frozenset((node.name, node.meta.get('row_id'), node.meta.get('row_role'))
@@ -250,7 +244,7 @@ class PlanViewModel:
 
     def available_rows(self) -> dict[int, str]:
         """Return row id -> entry node name for every row in the loaded map; empty if none."""
-        doc = self._topo_vm.topo_doc
+        doc = self._map.topo_doc
         rows: dict[int, str] = {}
         for node in (doc.nodes if doc is not None else ()):
             row_id = node.meta.get('row_id')
@@ -267,7 +261,7 @@ class PlanViewModel:
         An unknown connect_to node is rejected in save_status and nothing is repaired.
         See PlanApplicationService.repair_connectivity for the rest.
         """
-        doc = self._topo_vm.topo_doc
+        doc = self._map.topo_doc
         if connect_to and doc is not None and not doc.has_node(connect_to):
             self._app_service.set_status(f'ERROR: base node {connect_to!r} not in map')
             return

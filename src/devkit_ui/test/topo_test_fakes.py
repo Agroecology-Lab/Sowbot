@@ -16,6 +16,7 @@ from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
+from devkit_ui.application_services.track_application_service import TrackApplicationService
 from devkit_ui.domain_services import topo_map_store
 from devkit_ui.domain_services.topo_map_store import TopoMapStore
 from devkit_ui.topo_results import SwitchResult
@@ -77,7 +78,8 @@ def attach_authoring(node, maps_dir, *, is_sim=True):
     """Wire the Run tab's view models onto node and return its MapAuthoringViewModel.
 
     The harness gets simulated telemetry at (1.234, 5.678) with no GPS fix, a mock timer
-    factory at ``node.create_timer`` and the view model at ``node.authoring``.
+    factory at ``node.create_timer`` (behind ``node.track_service``) and the view model at
+    ``node.authoring``.
     """
     attach_topology(node, maps_dir)
     node._run_vm = RunViewModel(Mock())
@@ -86,9 +88,10 @@ def attach_authoring(node, maps_dir, *, is_sim=True):
         latest_odom=SimpleNamespace(pose=SimpleNamespace(
             pose=SimpleNamespace(position=SimpleNamespace(x=1.234, y=5.678)))))
     node.create_timer = Mock()
+    node.track_service = TrackApplicationService(node.create_timer)
     node.authoring = MapAuthoringViewModel(
         node._run_vm, node._topo_vm, node._topo_app_service, node._topo_edit_service,
-        node.telemetry, node.create_timer, is_sim=is_sim)
+        node.telemetry, node.track_service, is_sim=is_sim)
     return node.authoring
 
 
