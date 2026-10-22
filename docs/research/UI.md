@@ -9,6 +9,7 @@ With the #168 and #169 change it is 354, and `NiceGuiNode` no longer subclasses 
 With #170, #171 and #166 it is 376.
 With the mission start glue and the `/current_node` subscription moved out it is 260, and the node only builds and wires the layers.
 Wiring `SystemViewModel` adds four lines, so it is 264.
+Sim process control brings it to 267, the `MapAnchor` source for `ObstacleManager` to 265, and `MapContext` with `TrackApplicationService` to 269.
 
 <table>
 <tr><th>PR</th><th>Change</th></tr>
@@ -55,10 +56,21 @@ The node's <code>_topo_doc</code>, <code>latest_odom</code> and <code>latest_gps
 <code>ToolsCard</code> is one generic control builder per tool and no longer touches <code>subprocess</code> or <code>process_registry</code>.
 <code>process_registry</code> gains <code>spawn_quiet</code> and <code>interrupt_stop</code>.
 The import-linter ignore for <code>tools_card</code> importing <code>subprocess</code> is gone.
-Medkit's handle is now shared across browser sessions and stopped at app shutdown, every tool shows an interim <code>stopping</code> label, and a start or stop while another is in flight is ignored.
-The Sim cards still use <code>process_registry</code> directly</td></tr>
+Medkit's handle is now shared across browser sessions and stopped at app shutdown, every tool shows an interim <code>stopping</code> label, and a start or stop while another is in flight is ignored</td></tr>
 <tr><td>Remaining #116 items (PR number to add)</td><td>The soft e-stop state is held once, in <code>DriveApplicationService</code>.
 <code>GlobalViewModel.soft_estop_active</code> is a read-only property that reads it, and no longer registers a callback</td></tr>
+<tr><td>Sim process control (PR number to add)</td><td><code>SimProcessApplicationService</code> owns the Gazebo and row-follow launch commands, environment and handles.
+One lock per process is shared across browser sessions and service instances, and a start or stop while another is in flight returns <code>busy</code>.
+<code>SimProcessViewModel</code> words the result as a <code>ToolStatusView</code>, and the Gazebo and row-follow cards show what it returns.
+<code>ToolState</code> moves to <code>tool_state.py</code>, and <code>widgets.restore_label</code> is replaced by <code>show_status</code>, shared with the System tools card.
+<code>pages-no-process-control</code> and <code>view-models-no-backend</code> now forbid <code>process_registry</code></td></tr>
+<tr><td>Map anchor (PR number to add)</td><td><code>TelemetryApplicationService.map_anchor()</code> builds a <code>MapAnchor</code> (map x and y, lat, lon) from the latest odometry and GPS, and returns none without both or without a finite fix.
+<code>ObstacleManager</code> takes one callable returning <code>MapAnchor | None</code> and no longer reads ROS message fields</td></tr>
+<tr><td>Sibling view models (PR number to add)</td><td><code>MapContext</code> gives <code>PlanViewModel</code> read-only access to the loaded map, the current and selected node and the row action, so it no longer takes <code>RunViewModel</code> or <code>TopologyViewModel</code>.
+<code>MissionViewModel</code> takes an <code>on_nav_update</code> callable instead of <code>RunViewModel</code>.
+<code>ui_node.py</code> is the only place that joins them.
+<code>TrackApplicationService</code> owns the track-mode timer, node counter and entry/middle role sequence, and <code>MapAuthoringViewModel</code> keeps input validation and result mapping.
+An eighth import-linter contract keeps <code>plan_view_model</code> and <code>mission_view_model</code> off <code>run_view_model</code> and <code>topology_view_model</code></td></tr>
 </table>
 
 #155 (optical flow in Docker) and #157 (vendored skills) are unrelated to the refactor.
@@ -68,12 +80,12 @@ The three items listed as outstanding in the 9 October comment are done: the sub
 ## Diagram as built
 
 Solid arrows follow the dependency rule.
-Dashed arrows and red dashed boxes are known deviations, each listed under "Still open" below.
-The dotted arrows labelled "callback" are runtime callbacks.
+Dashed arrows are reads between view models and callables passed in by `ui_node`, and runtime callbacks.
+Each is labelled.
 
 ```mermaid
 flowchart TB
-  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 264 lines)"]
+  subgraph P1["Phase 1: same NiceGUI process and ROS node (NiceGuiNode, ui_node.py, 269 lines)"]
     subgraph UI["View (NiceGUI)"]
       Content["content(): four tabs"]
       NavPage["NavPage (class)"]
@@ -85,6 +97,7 @@ flowchart TB
       SimCards["pages/sim cards<br/>(plant placement, Gazebo, row follow,<br/>soil texture, map archive)"]
       SysCards["pages/system cards<br/>(odometry, battery, safety, ESP, GPS, tools)"]
       ObsCards["pages/obstacle_cards"]
+      DeleteDlg["pages/delete_dialogs<br/>(confirm node and row delete)"]
     end
 
     subgraph PROC["Process helper (UI-neutral, no ROS)"]
@@ -102,7 +115,9 @@ flowchart TB
       MissionVM["MissionViewModel<br/>(saved missions, run and cancel, MissionQueue per session)"]
       ObstacleVM["ObstacleViewModel"]
       SimVM["SimViewModel"]
+      SimProcVM["SimProcessViewModel<br/>(Gazebo and row-follow status wording)"]
       SystemVM["SystemViewModel<br/>(tool status wording and levels)"]
+      MapCtx["MapContext<br/>(read-only map, node, selection, row action)"]
     end
 
     subgraph APPSVC["ApplicationService (use-case logic)"]
@@ -119,6 +134,8 @@ flowchart TB
       SimAssets["SimAssetService<br/>(crop models, soil textures; files only)"]
       SimWorld["SimWorldService<br/>(rebuild Gazebo world via worldgen.sh)"]
       SystemApp["SystemApplicationService<br/>(start, stop and poll the System page tools)"]
+      SimProcApp["SimProcessApplicationService<br/>(start, stop and poll Gazebo and row follow)"]
+      TrackApp["TrackApplicationService<br/>(track-mode timer, counter, entry and middle roles;<br/>timer factory passed in by ui_node)"]
     end
 
     subgraph DOMSVC["DomainService (live state, ROS pub/sub)"]
@@ -162,28 +179,34 @@ flowchart TB
   RunCards --> TopoVM
   NavPage --> TelemetryVM
   NavPage --> AuthoringVM
+  NavPage --> DeleteDlg
   PlanCards --> PlanVM
   PlanCards --> MissionVM
   PlanCards --> TopoVM
   PlanCards --> AuthoringVM
-  PlanCards --> DeleteDlg
-  PlanVM -.->|"reads map"| TopoVM
-  PlanVM -.->|"reads row action"| RunVM
-  MissionVM -.->|"navigation updates for the Run tab"| RunVM
+  PlanPage --> DeleteDlg
+  DeleteDlg --> TopoVM
+  PlanVM --> MapCtx
+  MapCtx -.->|"reads map"| TopoVM
+  MapCtx -.->|"reads row action"| RunVM
+  MissionVM -.->|"on_nav_update callback, wired in ui_node"| RunVM
   SimCards --> SimVM
+  SimCards --> SimProcVM
   SimCards --> TopoVM
   SysCards --> TelemetryVM
   SysCards --> RobotBrainVM
   SysCards --> SystemVM
   ObsCards --> ObstacleVM
 
-  SimCards -.-> ProcReg
+  SimProcVM --> SimProcApp
+  SimProcApp --> ProcReg
   SystemVM --> SystemApp
   SystemApp --> ProcReg
 
   AuthoringVM --> TopologyEdit
   AuthoringVM --> TopologyApp
   AuthoringVM --> TelemetryApp
+  AuthoringVM --> TrackApp
   AuthoringVM --> TopoVM
   AuthoringVM --> RunVM
 
@@ -238,9 +261,9 @@ flowchart TB
   MissionDom --> RosGateway
   MissionStore --> RosGateway
   ObstacleManager --> RosGateway
+  ObstacleManager -.->|"map_anchor callable, wired in ui_node"| TelemetryApp
 
   classDef view fill:#dbeafe,stroke:#1e40af,color:#111827,stroke-width:1px
-  classDef todo fill:#ffffff,stroke:#b91c1c,color:#111827,stroke-width:1px,stroke-dasharray:4 3
   classDef vm fill:#dcfce7,stroke:#166534,color:#111827,stroke-width:1px
   classDef app fill:#fef9c3,stroke:#854d0e,color:#111827,stroke-width:1px
   classDef dom fill:#fae8ff,stroke:#86198f,color:#111827,stroke-width:1px
@@ -248,10 +271,10 @@ flowchart TB
   classDef infra fill:#e5e7eb,stroke:#374151,color:#111827,stroke-width:1px
   classDef proc fill:#f3f4f6,stroke:#374151,color:#111827,stroke-width:1px
 
-  class Content,NavPage,PlanPage,SimPage,SystemPage,RunCards,PlanCards,SimCards,SysCards,ObsCards view
+  class Content,NavPage,PlanPage,SimPage,SystemPage,RunCards,PlanCards,SimCards,SysCards,ObsCards,DeleteDlg view
   class ProcReg proc
-  class GlobalVM,RunVM,AuthoringVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM,SystemVM vm
-  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,ObstacleApp,SimAssets,SimWorld,SystemApp app
+  class GlobalVM,RunVM,AuthoringVM,TopoVM,TelemetryVM,RobotBrainVM,PlanVM,MissionVM,ObstacleVM,SimVM,SimProcVM,SystemVM,MapCtx vm
+  class DriveApp,NavApp,RowDiscApp,RobotBrainApp,TelemetryApp,TopologyApp,TopologyEdit,PlanApp,MissionApp,ObstacleApp,SimAssets,SimWorld,SystemApp,SimProcApp,TrackApp app
   class DriveDom,NavDom,RowDiscDom,RobotBrainDom,TelemetryDom,TopologyDom,MissionDom dom
   class RowBuilder,RowPlanning,F2CPkg pure
   class TopoMapStore,MissionStore,SimAssetStore,ObstacleManager,RosGateway infra
@@ -268,7 +291,8 @@ flowchart TB
 
 The Run, Plan, Sim and System tabs are page classes.
 `NavPage` reaches `TopologyEditService` through `MapAuthoringViewModel`.
-The Plan page reaches only ViewModels; the node passes it three callbacks (run, cancel and delete row), so the mission executor is not drawn as a dependency of the page.
+The Plan page reaches only ViewModels.
+`PlanViewModel` reads the map and row action through `MapContext`, and `MissionViewModel` passes navigation updates to `RunViewModel` through a callback; `ui_node` wires both.
 
 ## Decision: drop "Facade" as a layer name
 
@@ -282,7 +306,7 @@ The ViewModels can't take it on, because they are NiceGUI-specific.
 <tr><th>Layer</th><th>Name</th><th>Rule</th></tr>
 <tr><td>UI</td><td>Page</td><td>Layout only.
 Imports ViewModels only (enforced by import-linter).
-The Sim cards are the one exception: they start Gazebo and row follow through <code>process_registry</code> from the page</td></tr>
+Pages do not spawn or track processes</td></tr>
 <tr><td>UI state</td><td>ViewModel</td><td>UI state and user intents.
 It is the NiceGUI adapter, and the only place presentation formatting happens</td></tr>
 <tr><td>Boundary</td><td>Application service</td><td>The "Robot API".
@@ -311,15 +335,16 @@ Not built</td></tr>
 **Dependency rule:** Page → ViewModel → Application service → Domain service / Store / Pure module → RosGateway.
 Nothing points upward or skips a layer.
 
-import-linter enforces this in CI (`make lint-imports`, `.importlinter`) with seven contracts:
+import-linter enforces this in CI (`make lint-imports`, `.importlinter`) with eight contracts:
 
 1. Pages import only ViewModels.
-2. Pages do not spawn processes.
-3. ViewModels do not reach domain services, stores or ROS.
+2. Pages do not import `subprocess` or `process_registry`.
+3. ViewModels do not reach domain services, stores, `process_registry` or ROS.
 4. Services are UI-neutral.
 5. Domain services do not import application services.
 6. The `rclpy-via-gateway` contract forbids direct `rclpy` imports in pages, view models, application and domain services, `missions`, `obstacles` and `qos`; `RosGateway` provides ROS access for UI services, while `ui_node.py` retains ROS startup imports and creates and spins the `Node` in `ros_main`.
 7. Field planning and plan import go through the Plan service: `ui_node`, the pages and the view models do not import `devkit_f2c_planner`, `row_planning` or `plan_import`.
+8. `plan_view_model` and `mission_view_model` do not import `run_view_model` or `topology_view_model`.
 
 `.importlinter` lists no exceptions now.
 Any exception added there carries a `TODO(#116)`, and the `pages-no-process-control` contract fails if one becomes stale.
@@ -349,10 +374,10 @@ Any exception added there carries a `TODO(#116)`, and the `pages-no-process-cont
 <tr><th>Proposed</th><th>Built</th></tr>
 <tr><td>Facade layer (comment of 15 and 20 August: <code>NavFacade</code>, <code>MissionFacade</code>, <code>TopologyFacade</code>, <code>SystemFacade</code>)</td><td>Dropped.
 <code>ApplicationService</code> is the boundary (comment of 9 October)</td></tr>
-<tr><td>Three ViewModels: <code>NavViewModel</code>, <code>MissionViewModel</code>, <code>SystemViewModel</code>, plus <code>GlobalViewModel</code></td><td>Ten: <code>Global</code>, <code>Run</code>, <code>MapAuthoring</code>, <code>Topology</code>, <code>Telemetry</code>, <code>RobotBrain</code>, <code>Plan</code>, <code>Mission</code>, <code>Obstacle</code>, <code>Sim</code></td></tr>
+<tr><td>Three ViewModels: <code>NavViewModel</code>, <code>MissionViewModel</code>, <code>SystemViewModel</code>, plus <code>GlobalViewModel</code></td><td>Twelve: <code>Global</code>, <code>Run</code>, <code>MapAuthoring</code>, <code>Topology</code>, <code>Telemetry</code>, <code>RobotBrain</code>, <code>Plan</code>, <code>Mission</code>, <code>Obstacle</code>, <code>Sim</code>, <code>SimProcess</code>, <code>System</code>, plus <code>MapContext</code> (read-only, used by <code>Plan</code>)</td></tr>
 <tr><td>Pages: Nav, Mission, System</td><td>Four tabs: Run, Plan, Sim, System.
 All four are page classes: <code>NavPage</code>, <code>PlanPage</code>, <code>SimPage</code>, <code>SystemPage</code></td></tr>
-<tr><td><code>NavigationService</code>, <code>MissionService</code>, <code>TopologyService</code>, <code>SystemService</code></td><td>Drive, Navigation, RowDiscovery, RobotBrain, Telemetry, Topology, TopologyEdit, Plan and Mission application services, each with a domain service, plus <code>SimAssetService</code> and <code>SimWorldService</code> (no ROS), and <code>ObstacleApplicationService</code> over <code>ObstacleManager</code></td></tr>
+<tr><td><code>NavigationService</code>, <code>MissionService</code>, <code>TopologyService</code>, <code>SystemService</code></td><td>Drive, Navigation, RowDiscovery, RobotBrain, Telemetry, Topology, TopologyEdit, Plan and Mission application services, each with a domain service where it talks to ROS, plus <code>SimAssetService</code>, <code>SimWorldService</code>, <code>SimProcessApplicationService</code>, <code>SystemApplicationService</code> and <code>TrackApplicationService</code> (no ROS), and <code>ObstacleApplicationService</code> over <code>ObstacleManager</code></td></tr>
 <tr><td><code>PlanningService (F2C)</code> / <code>PlanningDomainService</code></td><td><code>PlanApplicationService</code>, with no domain service of its own.
 F2C is the <code>devkit_f2c_planner</code> package, called from <code>PlanApplicationService</code>.
 Row geometry, row building and plan import are pure modules.
@@ -360,8 +385,7 @@ Edit rules are in <code>TopologyEditService</code></td></tr>
 <tr><td><code>TopoRepo</code></td><td><code>TopoMapStore</code>, owned by <code>TopologyApplicationService</code></td></tr>
 <tr><td><code>ROSGateway</code> as the ROS clients layer</td><td><code>RosGateway</code> wraps the rclpy node.
 All seven domain services, <code>MissionStore</code> and <code>ObstacleManager</code> use it</td></tr>
-<tr><td>"All UI contact points go through the Facade"</td><td>True for drive, navigation, row discovery, robot brain, telemetry, topology, planning, missions and obstacles.
-Not true for process control (see below)</td></tr>
+<tr><td>"All UI contact points go through the Facade"</td><td>True for drive, navigation, row discovery, robot brain, telemetry, topology, planning, missions, obstacles, System tools and Sim processes</td></tr>
 <tr><td>Enforce the dependency rule</td><td>Done: import-linter in CI</td></tr>
 <tr><td>Phase 2: Edge API (REST, MQTT, VDA 5050), Fleet Gateway, standalone UI</td><td>Not started.
 No adapters in the code</td></tr>
@@ -374,5 +398,5 @@ Tracked in #116 and `.importlinter`:
 - **Plan page state** is per browser session (`PlanPageState`, `MissionQueue`), but `PlanViewModel.save_status` is shared by every session.
 - **Plan page threading**: `PlanViewModel.plan` blocks, so the controls card calls it through `nicegui.run.io_bound`.
   Any other adapter has to run it on a worker thread too.
-- **Process control**: the Sim cards (Gazebo, row follow) start processes through `process_registry` from the page.
-  A ViewModel and application service, as the System tools have, would complete the rule.
+- **Phase 2**: not started.
+  Edge adapters, Fleet Gateway and a standalone UI are absent from the code.
