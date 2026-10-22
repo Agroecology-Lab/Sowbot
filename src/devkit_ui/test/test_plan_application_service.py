@@ -1,6 +1,7 @@
 """Planning, plan import and write behavior of the Plan tab's application service and view model."""
 # PlanHarness supplies the services and fixes normally provided by the ROS node.
 # pylint: disable=missing-docstring,no-member,protected-access
+import asyncio
 import threading
 import unittest
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from unittest.mock import Mock, patch
 from devkit_ui.application_services import plan_application_service as plan_module
 from devkit_ui.models import TopoDoc
 from devkit_ui.plan_types import PlanFailure, PlanMode, PlanRequest
+from devkit_ui.view_models.plan_view_model import PlanPageState, PlanViewModel
 from test_f2c_row_metadata import SERVICE_LOGGER, make_node, patch_row_geometry
 from test_plan_import import ROW0, ROW1, _feat, _plan
 
@@ -177,11 +179,11 @@ class TestSaveWritesTheRowsItIsGiven(unittest.TestCase):
         patch_row_geometry(self)
         node = make_node([])
         with patch.object(plan_module, 'run_f2c', Mock(return_value=SWATHS[:1])):
-            mine = node.vm.plan(PlanRequest(corners_ll=CORNERS)).planned
+            mine = asyncio.run(node.vm.plan(PlanRequest(corners_ll=CORNERS))).planned
         with patch.object(plan_module, 'run_f2c', Mock(return_value=SWATHS)):
-            node.vm.plan(PlanRequest(corners_ll=CORNERS))
+            asyncio.run(node.vm.plan(PlanRequest(corners_ll=CORNERS)))
 
-        node.vm.save_rows(mine, 'crop', 1, False)
+        node.vm.save_rows(mine, 'crop', 1, False, node.page.set_save_status)
 
         self.assertEqual({n.name for n in node.doc.nodes}, {'CROP_R1_IN', 'CROP_R1_OUT'})
 
@@ -355,7 +357,8 @@ class TestViewModel(unittest.TestCase):
 
         node.repair(None)
 
-        node.service.repair_connectivity.assert_called_once_with('limbic_row_follow', None)
+        node.service.repair_connectivity.assert_called_once_with(
+            'limbic_row_follow', None, on_status=node.page.set_save_status)
 
     def test_save_uses_the_current_row_action_and_selection(self) -> None:
         """Verify saving forwards row options, the selected action, and both candidate nodes."""
@@ -369,8 +372,73 @@ class TestViewModel(unittest.TestCase):
 
         node.service.save_rows.assert_called_once_with(
             node.draft, 'crop', 4, True, row_action='row_traversal', current_node='HERE',
-            selected_node='THERE')
+            selected_node='THERE', on_status=node.page.set_save_status)
 
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestSessionsKeepTheirOwnStatus(unittest.TestCase):
+    def test_two_pages_saving_one_service_each_see_only_their_own_status(self) -> None:
+        """Verify one session's save or error never appears on another session's page."""
+        patch_row_geometry(self)
+        node = make_node(SWATHS)
+        other = PlanPageState()
+        node.queue_writes()
+
+        node.save('crop', 1)
+        node.vm.save_rows(None, 'crop', 1, False, other.set_save_status)
+
+        self.assertEqual(other.save_status, 'ERROR: no rows planned — click Plan Rows first')
+        self.assertNotEqual(node.save_status, other.save_status)
+        self.assertEqual(node.save_status, 'writing 2 rows · CROP · standalone…')
+
+        node.queued.pop()()
+
+        self.assertEqual(node.save_status, 'saved 2 rows · CROP · standalone')
+        self.assertEqual(other.save_status, 'ERROR: no rows planned — click Plan Rows first')
+
+    def test_the_service_keeps_no_status_of_its_own(self) -> None:
+        """Verify the service holds nothing a second caller could read."""
+        node = make_node(SWATHS)
+
+        self.assertFalse(hasattr(node.service, 'save_status'))
+        self.assertFalse(hasattr(node.service, '_save_status'))
+
+
+class TestPlanDoesNotBlockTheCaller(unittest.TestCase):
+    def test_planning_runs_off_the_event_loop_thread(self) -> None:
+        """Verify an awaiting caller needs no worker thread: the planner runs on another one."""
+        threads = []
+        service = Mock()
+        service.plan.side_effect = lambda _request: (
+            threads.append(threading.current_thread()), Mock(ok=False, failure=None))[1]
+        vm = PlanViewModel(service, Mock())
+        vm._describe_plan = Mock(return_value='x')  # pylint: disable=protected-access
+
+        asyncio.run(vm.plan(PlanRequest(corners_ll=CORNERS)))
+
+        self.assertEqual(len(threads), 1)
+        self.assertIsNot(threads[0], threading.main_thread())
+
+    def test_the_event_loop_keeps_running_while_a_plan_is_in_flight(self) -> None:
+        """Verify other tasks make progress while the planner is still busy."""
+        release = threading.Event()
+        service = Mock()
+        service.plan.side_effect = lambda _request: (release.wait(5), Mock(ok=False))[1]
+        vm = PlanViewModel(service, Mock())
+        vm._describe_plan = Mock(return_value='x')  # pylint: disable=protected-access
+        ticks = []
+
+        async def scenario() -> None:
+            task = asyncio.create_task(vm.plan(PlanRequest(corners_ll=CORNERS)))
+            for _ in range(3):
+                await asyncio.sleep(0)
+                ticks.append(task.done())
+            release.set()
+            await task
+
+        asyncio.run(scenario())
+
+        self.assertEqual(ticks, [False, False, False])

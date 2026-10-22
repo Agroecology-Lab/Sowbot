@@ -1,5 +1,6 @@
 # PlanHarness supplies the services and fixes normally provided by the ROS node.
 # pylint: disable=attribute-defined-outside-init,no-member,protected-access
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -13,7 +14,7 @@ from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 from devkit_ui.plan_types import PlannedRows, PlanRequest
 from devkit_ui.topo_results import PersistResult
 from devkit_ui.view_models.map_context import MapContext
-from devkit_ui.view_models.plan_view_model import PlanViewModel
+from devkit_ui.view_models.plan_view_model import PlanPageState, PlanViewModel
 
 ROW_ACTION = 'row_follow'
 SERVICE_LOGGER = plan_module.__name__
@@ -60,6 +61,7 @@ class PlanHarness:
             status=SimpleNamespace(status=0),
         )
         self.topo_vm = SimpleNamespace(current_node=None, selected_node=None)
+        self.page = PlanPageState()
         self.queued: list = []
         self._queue_writes = False
 
@@ -110,7 +112,7 @@ class PlanHarness:
 
     @property
     def save_status(self) -> str:
-        return self.vm.save_status
+        return self.page.save_status
 
     def _apply(self, modify):
         modify(self.doc)
@@ -137,7 +139,7 @@ class PlanHarness:
 
     def plan(self, request):
         """Plan as the page does: keep the rows of a successful run as the draft."""
-        view = self.vm.plan(request)
+        view = asyncio.run(self.vm.plan(request))
         if view.ok:
             self._keep(view.planned)
         return view
@@ -155,10 +157,10 @@ class PlanHarness:
         self._sync()
 
     def save(self, prefix, row_id_start, overwrite=False) -> None:
-        self.vm.save_rows(self.draft, prefix, row_id_start, overwrite)
+        self.vm.save_rows(self.draft, prefix, row_id_start, overwrite, self.page.set_save_status)
 
     def repair(self, connect_to=None) -> None:
-        self.vm.repair(connect_to)
+        self.vm.repair(connect_to, self.page.set_save_status)
 
 
 def _planned_property(name):

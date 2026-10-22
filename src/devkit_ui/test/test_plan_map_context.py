@@ -16,24 +16,25 @@ class TestPlanMapContext(unittest.TestCase):
         doc.insert_node(TopoNode(name='HOME'))
         self.topo = SimpleNamespace(topo_doc=doc, current_node='HOME', selected_node=None)
         self.run = SimpleNamespace(drop_node=SimpleNamespace(row_action='row_traversal'))
-        self.app = Mock(spec=['save_rows', 'repair_connectivity', 'set_status'])
+        self.app = Mock(spec=['save_rows', 'repair_connectivity'])
+        self.status = Mock()
         self.vm = PlanViewModel(self.app, MapContext(self.topo, self.run))
 
     def test_each_save_uses_the_latest_action_current_node_and_selection(self) -> None:
         """Saving must not cache any of the three values taken from the context."""
         planned = PlannedRows([[(51.0, -2.0), (51.001, -2.0)]], (51.0, -2.0))
         self.topo.selected_node = 'SELECTED'
-        self.vm.save_rows(planned, 'crop', 0, False)
+        self.vm.save_rows(planned, 'crop', 0, False, self.status)
 
         self.run.drop_node = SimpleNamespace(row_action='limbic_row_follow')
         self.topo.current_node, self.topo.selected_node = None, 'NEW_SELECTION'
-        self.vm.save_rows(planned, 'new crop', 7, True)
+        self.vm.save_rows(planned, 'new crop', 7, True, self.status)
 
         self.assertEqual(self.app.save_rows.call_args_list, [
             call(planned, 'crop', 0, False, row_action='row_traversal',
-                 current_node='HOME', selected_node='SELECTED'),
+                 current_node='HOME', selected_node='SELECTED', on_status=self.status),
             call(planned, 'new crop', 7, True, row_action='limbic_row_follow',
-                 current_node=None, selected_node='NEW_SELECTION'),
+                 current_node=None, selected_node='NEW_SELECTION', on_status=self.status),
         ])
 
     def test_save_without_a_draft_or_map_still_forwards_current_context(self) -> None:
@@ -41,34 +42,35 @@ class TestPlanMapContext(unittest.TestCase):
         self.topo.topo_doc = None
         self.topo.current_node, self.topo.selected_node = 'none', None
 
-        self.vm.save_rows(None, '', 0, False)
+        self.vm.save_rows(None, '', 0, False, self.status)
 
         self.app.save_rows.assert_called_once_with(
             None, '', 0, False, row_action='row_traversal',
-            current_node='none', selected_node=None)
+            current_node='none', selected_node=None, on_status=self.status)
 
     def test_repair_uses_a_replacement_map_and_the_latest_row_action(self) -> None:
         """Map switching must refresh both base-node validation and the row action."""
-        self.vm.repair('HOME')
+        self.vm.repair('HOME', self.status)
         replacement = TopoDoc(name='other.yaml')
         replacement.insert_node(TopoNode(name='NEW_BASE'))
         self.topo.topo_doc = replacement
         self.run.drop_node.row_action = 'limbic_row_follow'
 
-        self.vm.repair('NEW_BASE')
+        self.vm.repair('NEW_BASE', self.status)
 
         self.assertEqual(self.app.repair_connectivity.call_args_list, [
-            call('row_traversal', 'HOME'), call('limbic_row_follow', 'NEW_BASE'),
+            call('row_traversal', 'HOME', on_status=self.status),
+            call('limbic_row_follow', 'NEW_BASE', on_status=self.status),
         ])
-        self.app.set_status.assert_not_called()
+        self.status.assert_not_called()
 
     def test_repair_rejects_a_base_that_only_exists_in_the_previous_map(self) -> None:
         """A stale node name cannot reach the repair service after a map switch."""
         self.topo.topo_doc = TopoDoc(name='other.yaml')
 
-        self.vm.repair('HOME')
+        self.vm.repair('HOME', self.status)
 
-        self.app.set_status.assert_called_once_with("ERROR: base node 'HOME' not in map")
+        self.status.assert_called_once_with("ERROR: base node 'HOME' not in map")
         self.app.repair_connectivity.assert_not_called()
 
     def test_repair_without_a_map_delegates_to_service_validation(self) -> None:
@@ -76,10 +78,11 @@ class TestPlanMapContext(unittest.TestCase):
         self.topo.topo_doc = None
         self.run.drop_node.row_action = 'limbic_row_follow'
 
-        self.vm.repair('NEW_BASE')
+        self.vm.repair('NEW_BASE', self.status)
 
-        self.app.repair_connectivity.assert_called_once_with('limbic_row_follow', 'NEW_BASE')
-        self.app.set_status.assert_not_called()
+        self.app.repair_connectivity.assert_called_once_with(
+            'limbic_row_follow', 'NEW_BASE', on_status=self.status)
+        self.status.assert_not_called()
 
     def test_replacing_map_refreshes_rows_snapshot_and_repair_offer(self) -> None:
         """All map-derived helpers use the new document and current selection."""
