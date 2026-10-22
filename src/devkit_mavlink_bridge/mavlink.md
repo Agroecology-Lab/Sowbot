@@ -21,9 +21,7 @@ U8 (USART6, SERIAL2)               Avaota (MAVLink)
   3 GND  ------------------------  GND
   4 +5V_SYS  leave unconnected, power the Avaota separately
 
-
-
-
+U19 here, with 5V on pin 1 and CS1 on pin 6. The hwdef already defines the pixartflow device, so the sensor could go straight to the FC. 
 
 +------------------ Limbic SBC -----------------------------+
    |                                                            |
