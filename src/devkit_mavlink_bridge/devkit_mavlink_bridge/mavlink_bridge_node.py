@@ -3,7 +3,8 @@
 The LEVIA-H7 EKF3 is the sole estimator (see mavlink.md). FusionCore, if run, is shadow
 only and nothing here feeds the flight controller a position.
 
-Outbound: cmd_vel -> SET_POSITION_TARGET_LOCAL_NED, plus a ground-station HEARTBEAT.
+Outbound: cmd_vel -> SET_POSITION_TARGET_LOCAL_NED, RTCM3 corrections (rtcm topic) ->
+GPS_RTCM_DATA, and a ground-station HEARTBEAT.
 Inbound: EKF3 state and GPS status, published as:
 
   fc/odom         nav_msgs/Odometry     LOCAL_POSITION_NED + ATTITUDE_QUATERNION, ENU/FLU,
@@ -30,6 +31,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from pymavlink import mavutil
 from rclpy.node import Node
+from rtcm_msgs.msg import Message as RtcmMessage
 from sensor_msgs.msg import NavSatFix
 
 from devkit_mavlink_bridge.modules import gps_status_handler as gps
@@ -44,6 +46,7 @@ from devkit_mavlink_bridge.modules.link_monitor import LOST, NEVER, OK, Heartbea
 from devkit_mavlink_bridge.modules.position_target_handler import (
     twist_to_position_target,
 )
+from devkit_mavlink_bridge.modules.rtcm_handler import SEQUENCE_MODULUS, rtcm_to_gps_rtcm_data
 from devkit_mavlink_bridge.modules.velocity_limits import limit_velocity
 from devkit_mavlink_bridge.modules.velocity_watchdog import CmdVelWatchdog
 
@@ -79,6 +82,8 @@ _DEFAULT_EKF_STATUS_TIMEOUT_S = 2.0
 _DEFAULT_GPS_TIMEOUT_S = 3.0
 _DEFAULT_DIAGNOSTICS_PERIOD_S = 1.0
 _INTERVAL_REREQUEST_PERIOD_S = 10.0
+_RTCM_QUEUE_DEPTH = 50  # one NTRIP epoch is several frames, delivered together
+_RTCM_LOG_PERIOD_S = 10.0
 _MAX_MESSAGES_PER_POLL = 200
 
 # Message ids for MAV_CMD_SET_MESSAGE_INTERVAL. Checked against pymavlink in the tests.
@@ -112,8 +117,10 @@ class MavlinkBridgeNode(Node):
         attitude_timeout_s [0.3], ekf_status_timeout_s [2.0], gps_timeout_s [3.0],
         diagnostics_period_s [1.0], odom_frame_id ['odom'], base_frame_id ['base_link'],
         gps_frame_id ['gps_link'].
-        With require_fc_heartbeat the bridge forwards zero velocity unless the flight controller's
-        HEARTBEAT was seen within fc_heartbeat_timeout_s. MAVLINK_ENDPOINT selects the connection;
+        Corrections: rtcm_topic ['rtcm'], an rtcm_msgs/Message per RTCM3 frame (as published by
+        ntrip_client), forwarded as GPS_RTCM_DATA.
+        With require_fc_heartbeat the bridge forwards zero velocity, and no RTCM, unless the flight
+        controller's HEARTBEAT was seen within fc_heartbeat_timeout_s. MAVLINK_ENDPOINT selects the connection;
         MAVLINK_BAUD defaults to 115200. The bridge does not arm or change mode.
         Raise ValueError for a nonpositive period or limit, a nonpositive or nonfinite timeout,
         a nonpositive or nonfinite rate, a missing or placeholder endpoint, or a baud value that
@@ -140,6 +147,7 @@ class MavlinkBridgeNode(Node):
         self.declare_parameter('odom_frame_id', 'odom')
         self.declare_parameter('base_frame_id', 'base_link')
         self.declare_parameter('gps_frame_id', 'gps_link')
+        self.declare_parameter('rtcm_topic', 'rtcm')
         republish_period_s = float(self.get_parameter('republish_period_s').value)
         cmd_vel_timeout_s = float(self.get_parameter('cmd_vel_timeout_s').value)
         heartbeat_period_s = float(self.get_parameter('heartbeat_period_s').value)
@@ -176,6 +184,7 @@ class MavlinkBridgeNode(Node):
         self._watchdog = CmdVelWatchdog(cmd_vel_timeout_s)
         self._was_stale = True
         self._latest = LatestMessages()
+        self._rtcm_sequence = 0
         self._odom_blocked: str | None = 'no data yet'
 
         mavlink_endpoint = os.environ.get(_MAVLINK_ENDPOINT_ENV, '').strip()
@@ -187,6 +196,8 @@ class MavlinkBridgeNode(Node):
         self._mav = mavutil.mavlink_connection(mavlink_endpoint, baud=baud)
 
         self.create_subscription(Twist, 'cmd_vel', self._on_cmd_vel, 10)
+        self.create_subscription(
+            RtcmMessage, str(self.get_parameter('rtcm_topic').value), self._on_rtcm, _RTCM_QUEUE_DEPTH)
         self._odom_pub = self.create_publisher(Odometry, 'fc/odom', 10)
         self._ekf_fix_pub = self.create_publisher(NavSatFix, 'fc/ekf_fix', 10)
         self._gps_pubs = {
@@ -226,6 +237,27 @@ class MavlinkBridgeNode(Node):
         If either component is nonfinite, leave the previous command and arrival time unchanged.
         """
         self._watchdog.update(msg.linear.x, msg.angular.z)
+
+    def _on_rtcm(self, msg: RtcmMessage) -> None:
+        """Forward one RTCM3 frame to the flight controller as GPS_RTCM_DATA.
+
+        Frames are dropped, with a throttled warning, while the flight controller link is not ok
+        and require_fc_heartbeat is set, and when a frame is empty or longer than the 720 bytes
+        four fragments can carry. Send errors that are OSError are logged; the next frame tries
+        again. Which receivers get the data is the flight controller's GPS_INJECT_TO setting.
+        """
+        if self._require_fc_heartbeat and self._monitor.state() != OK:
+            self.get_logger().warn(
+                'dropping RTCM: no flight controller heartbeat', throttle_duration_sec=_RTCM_LOG_PERIOD_S)
+            return
+        try:
+            fragments = rtcm_to_gps_rtcm_data(bytes(msg.message), self._rtcm_sequence)
+        except ValueError as error:
+            self.get_logger().warn(f'dropping RTCM: {error}', throttle_duration_sec=_RTCM_LOG_PERIOD_S)
+            return
+        self._rtcm_sequence = (self._rtcm_sequence + 1) % SEQUENCE_MODULUS
+        for fields in fragments:
+            self._send(self._mav.mav.gps_rtcm_data_send, **fields)
 
     def _republish(self) -> None:
         """Send the current velocity target, or zero if no command exists or it has gone stale.

@@ -6,6 +6,9 @@ cmd_vel. Run one controller path at a time. The connection comes from the enviro
     MAVLINK_ENDPOINT   serial device or connection string (required, no default)
     MAVLINK_BAUD       defaults to 115200; must match SERIALn_BAUD on the flight controller
 
+RTCM3 corrections are read from the rtcm_topic argument (default rtcm, what ntrip_client publishes)
+and sent on as GPS_RTCM_DATA.
+
 Limits below are starting values: measure the real stopping distance and turn rate.
 """
 
@@ -23,6 +26,7 @@ def generate_launch_description():
         'max_angular_z_radps': ('1.0', float),
         'fc_heartbeat_timeout_s': ('3.0', float),
         'require_fc_heartbeat': ('true', bool),
+        'rtcm_topic': ('rtcm', str),
     }
     declarations = [DeclareLaunchArgument(name, default_value=default)
                     for name, (default, _) in arguments.items()]

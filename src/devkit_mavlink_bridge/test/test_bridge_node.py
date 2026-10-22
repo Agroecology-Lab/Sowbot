@@ -53,6 +53,7 @@ class FakeNode:
         self._logger = FakeLogger()
         self.timers = []
         self.publishers = {}
+        self.subscriptions = {}
 
     def declare_parameter(self, name, default):
         """Store a parameter's test override or its declared default."""
@@ -62,8 +63,9 @@ class FakeNode:
         """Wrap a stored parameter value in the interface expected by the node."""
         return SimpleNamespace(value=self._parameters[name])
 
-    def create_subscription(self, *_args):
-        """Return a passive subscription double without connecting to ROS."""
+    def create_subscription(self, _message_type, topic, callback, *_args):
+        """Return a passive subscription double, recording its callback under the topic name."""
+        self.subscriptions[topic] = callback
         return Mock()
 
     def create_publisher(self, _message_type, topic, *_args):
@@ -120,6 +122,7 @@ with patch.dict(sys.modules, {
         'rclpy': rclpy, 'rclpy.node': rclpy_node,
         **_fake_package('geometry_msgs', Twist=type('Twist', (), {})),
         **_fake_package('nav_msgs', Odometry=FakeMsg),
+        **_fake_package('rtcm_msgs', Message=FakeMsg),
         **_fake_package('sensor_msgs', NavSatFix=FakeMsg),
         **_fake_package('diagnostic_msgs', DiagnosticArray=FakeMsg, KeyValue=FakeMsg,
                         DiagnosticStatus=FakeDiagnosticStatus)}):
@@ -1032,6 +1035,84 @@ class InboundTest(BridgeNodeTest):
         self.now += 0.501
         self.feed(node, refused)
         self.assertEqual(node.get_logger().levels().count('warn'), 2)  # link-loss warning only
+
+    def rtcm_frame(self, node, size):
+        """Deliver an RTCM3 frame of the given size, as ntrip_client would publish it."""
+        node._on_rtcm(SimpleNamespace(message=bytes(i % 251 for i in range(size))))
+
+    def rtcm_sent(self):
+        """Return (flags, len) of each GPS_RTCM_DATA message sent."""
+        send = self.connection.mav.gps_rtcm_data_send
+        return [(c.kwargs['flags'], c.kwargs['len']) for c in send.call_args_list]
+
+    def test_rtcm_is_subscribed_on_the_configured_topic(self):
+        """Verify corrections come from rtcm by default and from rtcm_topic when set."""
+        node = self.make()
+        self.assertEqual(node.subscriptions['rtcm'], node._on_rtcm)
+        node = self.make(rtcm_topic='ntrip/rtcm')
+        self.assertEqual(node.subscriptions['ntrip/rtcm'], node._on_rtcm)
+
+    def test_rtcm_is_forwarded_as_gps_rtcm_data_while_the_link_is_ok(self):
+        """Verify a short frame goes out whole and a long one in numbered fragments."""
+        node = self.make()
+        self.feed(node, _heartbeat())
+        self.rtcm_frame(node, 100)
+        self.rtcm_frame(node, 400)
+        self.assertEqual(self.rtcm_sent(), [
+            (0 << 3, 100),
+            ((1 << 3) | 1, 180), ((1 << 3) | (1 << 1) | 1, 180), ((1 << 3) | (2 << 1) | 1, 40)])
+        kwargs = self.connection.mav.gps_rtcm_data_send.call_args_list[0].kwargs
+        self.assertEqual(kwargs['data'][:100], list(bytes(i % 251 for i in range(100))))
+        self.assertEqual(len(kwargs['data']), 180)
+
+    def test_rtcm_is_dropped_without_a_live_link(self):
+        """Verify nothing is sent before the first heartbeat or after it goes overdue."""
+        node = self.make()
+        self.rtcm_frame(node, 100)
+        self.assertEqual(self.rtcm_sent(), [])
+        self.assertIn('warn', node.get_logger().levels())
+        self.feed(node, _heartbeat())
+        self.now += 3.5
+        self.rtcm_frame(node, 100)
+        self.assertEqual(self.rtcm_sent(), [])
+
+    def test_rtcm_heartbeat_requirement_can_be_disabled(self):
+        """Verify require_fc_heartbeat=False forwards corrections without a heartbeat."""
+        node = self.make(require_fc_heartbeat=False)
+        self.rtcm_frame(node, 100)
+        self.assertEqual(self.rtcm_sent(), [(0, 100)])
+
+    def test_rtcm_sequence_advances_per_frame_and_wraps(self):
+        """Verify each frame gets the next sequence number, modulo 32."""
+        node = self.make(require_fc_heartbeat=False)
+        for _ in range(33):
+            self.rtcm_frame(node, 10)
+        sequences = [flags >> 3 for flags, _ in self.rtcm_sent()]
+        self.assertEqual(sequences, [*range(32), 0])
+
+    def test_unsendable_frames_are_dropped_and_do_not_use_a_sequence_number(self):
+        """Verify an empty or oversized frame is warned about and the next one still follows on."""
+        node = self.make(require_fc_heartbeat=False)
+        self.rtcm_frame(node, 10)
+        self.rtcm_frame(node, 0)
+        self.rtcm_frame(node, 721)
+        self.rtcm_frame(node, 10)
+        self.assertEqual(node.get_logger().levels().count('warn'), 2)
+        self.assertEqual([flags >> 3 for flags, _ in self.rtcm_sent()], [0, 1])
+
+    def test_rtcm_send_errors_are_logged_and_do_not_escape(self):
+        """Verify a serial error does not kill the subscription callback."""
+        node = self.make(require_fc_heartbeat=False)
+        self.connection.mav.gps_rtcm_data_send.side_effect = OSError('port gone')
+        self.rtcm_frame(node, 400)
+        self.assertGreaterEqual(node.get_logger().levels().count('error'), 1)
+
+    def test_rtcm_does_not_change_the_velocity_output(self):
+        """Verify corrections neither refresh the command watchdog nor alter the target."""
+        node = self.make(require_fc_heartbeat=False)
+        self.rtcm_frame(node, 100)
+        node._republish()
+        self.assertEqual(self.sent(), [(0.0, 0.0)])
 
 
 if __name__ == '__main__':
