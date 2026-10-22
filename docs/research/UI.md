@@ -71,6 +71,11 @@ One lock per process is shared across browser sessions and service instances, an
 <code>ui_node.py</code> is the only place that joins them.
 <code>TrackApplicationService</code> owns the track-mode timer, node counter and entry/middle role sequence, and <code>MapAuthoringViewModel</code> keeps input validation and result mapping.
 An eighth import-linter contract keeps <code>plan_view_model</code> and <code>mission_view_model</code> off <code>run_view_model</code> and <code>topology_view_model</code></td></tr>
+<tr><td>Plan session status and threading (PR number to add)</td><td>The save and repair status is per browser session.
+<code>PlanApplicationService</code> keeps no status: <code>save_rows</code> and <code>repair_connectivity</code> report to the <code>on_status</code> callback each call is given, including when the background write ends.
+<code>PlanPageState.save_status</code> receives it, and the controls card polls it.
+<code>PlanViewModel.save_status</code> and the service's <code>save_status</code> and <code>set_status</code> are gone.
+<code>PlanViewModel.plan</code> is a coroutine that runs the planner with <code>asyncio.to_thread</code>, so the controls card awaits it and no longer uses <code>nicegui.run.io_bound</code>, and another adapter needs no worker thread of its own</td></tr>
 </table>
 
 #155 (optical flow in Docker) and #157 (vendored skills) are unrelated to the refactor.
@@ -395,8 +400,5 @@ No adapters in the code</td></tr>
 
 Tracked in #116 and `.importlinter`:
 
-- **Plan page state** is per browser session (`PlanPageState`, `MissionQueue`), but `PlanViewModel.save_status` is shared by every session.
-- **Plan page threading**: `PlanViewModel.plan` blocks, so the controls card calls it through `nicegui.run.io_bound`.
-  Any other adapter has to run it on a worker thread too.
 - **Phase 2**: not started.
   Edge adapters, Fleet Gateway and a standalone UI are absent from the code.
