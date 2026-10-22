@@ -110,6 +110,19 @@ class DiagnosticTest(unittest.TestCase):
         """Verify the MAVLink 36000 centidegree encoding of north reads as 0."""
         self.assertEqual(gps.gps_diagnostic(_report(yaw=36000))[2]['yaw_deg'], '0')
 
+    def test_unknown_heading_sentinels(self):
+        """Verify absent and unavailable headings are reported as unknown."""
+        for yaw in (0, 0xFFFF):
+            with self.subTest(yaw=yaw):
+                self.assertEqual(gps.gps_diagnostic(_report(yaw=yaw))[2]['yaw_deg'], 'unknown')
+
+    def test_unknown_satellite_count(self):
+        """Verify UINT8_MAX is unknown while zero remains a reported count."""
+        for satellites_visible, expected in ((255, 'unknown'), (0, '0'), (254, '254')):
+            with self.subTest(satellites_visible=satellites_visible):
+                values = gps.gps_diagnostic(_report(satellites_visible=satellites_visible))[2]
+                self.assertEqual(values['satellites_visible'], expected)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -117,16 +117,18 @@ def gps_diagnostic(message):
         return LEVEL_STALE, 'no GPS report', {}
     fix_type = int(message.fix_type)
     name = FIX_TYPE_NAMES.get(fix_type, f'UNKNOWN_{fix_type}')
+    satellites_visible = int(message.satellites_visible)
     values = {
         'fix_type': name,
-        'satellites_visible': str(int(message.satellites_visible)),
+        'satellites_visible': 'unknown' if satellites_visible == 255 else str(satellites_visible),
         'hdop': _format(dop(int(message.eph))),
         'vdop': _format(dop(int(message.epv))),
         'h_acc_m': _format(accuracy_m(int(getattr(message, 'h_acc', 0)))),
         'v_acc_m': _format(accuracy_m(int(getattr(message, 'v_acc', 0)))),
     }
     yaw_cdeg = int(getattr(message, 'yaw', 0))
-    values['yaw_deg'] = 'unknown' if yaw_cdeg == 0 else _format((yaw_cdeg % 36000) / 100.0)
+    values['yaw_deg'] = (
+        'unknown' if yaw_cdeg in (0, _UINT16_UNKNOWN) else _format((yaw_cdeg % 36000) / 100.0))
     if fix_type <= FIX_NO_FIX:
         return LEVEL_ERROR, name, values
     if fix_type == FIX_2D:
