@@ -1,0 +1,115 @@
+"""GPS status conversion to NavSatFix fields and diagnostics."""
+
+import math
+import unittest
+from types import SimpleNamespace
+
+from devkit_mavlink_bridge.modules import gps_status_handler as gps
+from pymavlink import mavutil
+
+MAV = mavutil.mavlink
+
+
+def _report(fix_type=gps.FIX_RTK_FIXED, satellites_visible=20, eph=80, epv=120,
+            h_acc=14, v_acc=22, yaw=0):
+    """Build a GPS_RAW_INT double."""
+    return SimpleNamespace(fix_type=fix_type, satellites_visible=satellites_visible,
+                           eph=eph, epv=epv, h_acc=h_acc, v_acc=v_acc, yaw=yaw)
+
+
+class FixTypeTest(unittest.TestCase):
+    def test_fix_type_constants_match_mavlink(self):
+        """Verify the literals here are the MAVLink GPS_FIX_TYPE values."""
+        self.assertEqual((gps.FIX_NO_GPS, gps.FIX_NO_FIX, gps.FIX_2D, gps.FIX_3D, gps.FIX_DGPS,
+                          gps.FIX_RTK_FLOAT, gps.FIX_RTK_FIXED),
+                         (MAV.GPS_FIX_TYPE_NO_GPS, MAV.GPS_FIX_TYPE_NO_FIX, MAV.GPS_FIX_TYPE_2D_FIX,
+                          MAV.GPS_FIX_TYPE_3D_FIX, MAV.GPS_FIX_TYPE_DGPS, MAV.GPS_FIX_TYPE_RTK_FLOAT,
+                          MAV.GPS_FIX_TYPE_RTK_FIXED))
+        self.assertEqual((MAV.GPS_FIX_TYPE_STATIC, MAV.GPS_FIX_TYPE_PPP), (7, 8))
+
+    def test_navsat_status_follows_the_carrier_solution_convention(self):
+        """Verify RTK float is SBAS, RTK fixed is GBAS and no fix is -1."""
+        expected = {0: gps.STATUS_NO_FIX, 1: gps.STATUS_NO_FIX, 2: gps.STATUS_FIX, 3: gps.STATUS_FIX,
+                    4: gps.STATUS_SBAS_FIX, 5: gps.STATUS_SBAS_FIX, 6: gps.STATUS_GBAS_FIX,
+                    7: gps.STATUS_FIX, 8: gps.STATUS_GBAS_FIX, 99: gps.STATUS_NO_FIX}
+        for fix_type, status in expected.items():
+            with self.subTest(fix_type=fix_type):
+                self.assertEqual(gps.fix_type_to_navsat_status(fix_type), status)
+
+
+class UnitTest(unittest.TestCase):
+    def test_accuracy_converts_millimetres_and_hides_unknown(self):
+        """Verify zero and all-ones accuracies are unknown, not zero metres."""
+        self.assertEqual(gps.accuracy_m(14), 0.014)
+        self.assertIsNone(gps.accuracy_m(0))
+        self.assertIsNone(gps.accuracy_m(0xFFFFFFFF))
+
+    def test_dop_converts_hundredths_and_hides_unknown(self):
+        """Verify UINT16_MAX is unknown."""
+        self.assertEqual(gps.dop(80), 0.8)
+        self.assertIsNone(gps.dop(0xFFFF))
+
+
+class NavSatFieldsTest(unittest.TestCase):
+    def test_known_accuracy_gives_a_diagonal_covariance(self):
+        """Verify the covariance is the squared accuracy and is marked approximate."""
+        fields = gps.gps_raw_to_navsat(gps.FIX_RTK_FIXED, 513000000, -25000000, 12500, 20, 50)
+        self.assertEqual(fields['status'], gps.STATUS_GBAS_FIX)
+        self.assertEqual((fields['latitude'], fields['longitude'], fields['altitude']), (51.3, -2.5, 12.5))
+        self.assertAlmostEqual(fields['position_covariance'][0], 0.0004)
+        self.assertAlmostEqual(fields['position_covariance'][4], 0.0004)
+        self.assertAlmostEqual(fields['position_covariance'][8], 0.0025)
+        self.assertEqual(fields['position_covariance_type'], gps.COVARIANCE_DIAGONAL_KNOWN)
+
+    def test_unknown_accuracy_gives_an_unknown_covariance(self):
+        """Verify no accuracy is never reported as perfect."""
+        fields = gps.gps_raw_to_navsat(gps.FIX_3D, 1, 1, 0, 0, 50)
+        self.assertEqual(fields['position_covariance'], [0.0] * 9)
+        self.assertEqual(fields['position_covariance_type'], gps.COVARIANCE_UNKNOWN)
+
+    def test_no_fix_has_no_position(self):
+        """Verify a receiver without a fix reports NaN, not its last coordinates."""
+        for fix_type in (gps.FIX_NO_GPS, gps.FIX_NO_FIX):
+            fields = gps.gps_raw_to_navsat(fix_type, 513000000, -25000000, 12500, 20, 50)
+            self.assertEqual(fields['status'], gps.STATUS_NO_FIX)
+            for key in ('latitude', 'longitude', 'altitude'):
+                self.assertTrue(math.isnan(fields[key]))
+
+    def test_missing_ellipsoid_height_is_nan(self):
+        """Verify the MSL altitude is never passed off as ellipsoidal."""
+        fields = gps.gps_raw_to_navsat(gps.FIX_3D, 513000000, -25000000, 0, 20, 50)
+        self.assertTrue(math.isnan(fields['altitude']))
+
+
+class DiagnosticTest(unittest.TestCase):
+    def test_no_report_is_stale(self):
+        """Verify missing data is STALE."""
+        self.assertEqual(gps.gps_diagnostic(None)[0], gps.LEVEL_STALE)
+
+    def test_levels_follow_the_fix_type(self):
+        """Verify no fix is an error, 2D a warning and 3D or better ok."""
+        expected = {0: gps.LEVEL_ERROR, 1: gps.LEVEL_ERROR, 2: gps.LEVEL_WARN, 3: gps.LEVEL_OK,
+                    5: gps.LEVEL_OK, 6: gps.LEVEL_OK}
+        for fix_type, level in expected.items():
+            with self.subTest(fix_type=fix_type):
+                self.assertEqual(gps.gps_diagnostic(_report(fix_type=fix_type))[0], level)
+
+    def test_values_report_dop_accuracy_and_heading(self):
+        """Verify the receiver's own numbers are passed through, with unknowns named as such."""
+        _, summary, values = gps.gps_diagnostic(_report(yaw=9000))
+        self.assertEqual(summary, 'RTK_FIXED')
+        self.assertEqual(values['satellites_visible'], '20')
+        self.assertEqual((values['hdop'], values['vdop']), ('0.8', '1.2'))
+        self.assertEqual((values['h_acc_m'], values['v_acc_m']), ('0.014', '0.022'))
+        self.assertEqual(values['yaw_deg'], '90')
+        _, _, unknown = gps.gps_diagnostic(_report(eph=0xFFFF, h_acc=0, yaw=0))
+        self.assertEqual((unknown['hdop'], unknown['h_acc_m'], unknown['yaw_deg']),
+                         ('unknown', 'unknown', 'unknown'))
+
+    def test_heading_of_north_is_zero_degrees(self):
+        """Verify the MAVLink 36000 centidegree encoding of north reads as 0."""
+        self.assertEqual(gps.gps_diagnostic(_report(yaw=36000))[2]['yaw_deg'], '0')
+
+
+if __name__ == '__main__':
+    unittest.main()

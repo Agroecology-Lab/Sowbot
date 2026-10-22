@@ -6,8 +6,9 @@
   <description>
     MAVLink bridge between the Sowbot ROS2 stack and ArduPilot Rover on
     LEVIA-H7 (GUIDED mode). Outbound: cmd_vel -> SET_POSITION_TARGET_LOCAL_NED.
-    Inbound: FusionCore fused pose -> GPS_INPUT. See
-    research/ardurover.md in Sowbot_Data for the message-level design.
+    Inbound: EKF3 state and GPS status published as fc/odom, fc/ekf_fix,
+    fc/gps1/fix, fc/gps2/fix and fc/diagnostics. The LEVIA-H7 EKF3 is the sole
+    estimator; nothing is fed back to it. See mavlink.md.
   </description>
   <maintainer email="ros@agroecologylab.org">Agroecology Lab Ltd</maintainer>
   <license>MIT</license>
@@ -20,7 +21,9 @@
   <test_depend>python3-pytest</test_depend>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>python3-pymavlink-pip</exec_depend>
 
