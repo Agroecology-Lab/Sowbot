@@ -32,13 +32,22 @@ jobs:
         run: pip install -r requirements-dev.txt coverage
 
       - name: Run tests
-        env:
-          PYTHONPATH: src/devkit_ui
         run: |
-          coverage run \
-            --source=src/devkit_ui/devkit_ui,src/devkit_driver/devkit_driver,src/devkit_mavlink_bridge/devkit_mavlink_bridge,src/devkit_f2c_planner/devkit_f2c_planner \
-            --omit='*/test_*.py' \
-            -m unittest discover -s src/devkit_ui/test
+          # Each package's tests expect to run from the package directory,
+          # as in `make test`. Every run writes its own data file, then the
+          # files are combined into one report.
+          run_suite() {
+            pkg="$1"; start="$2"
+            (cd "src/$pkg" && coverage run \
+              --data-file="$GITHUB_WORKSPACE/.coverage.$pkg" \
+              --source="$pkg" --omit='*/test_*.py' \
+              -m unittest discover -s "$start")
+          }
+          run_suite devkit_ui test
+          run_suite devkit_driver test
+          run_suite devkit_mavlink_bridge test
+          run_suite devkit_f2c_planner .
+          coverage combine --keep
           coverage xml -o coverage.xml
 
       - name: Upload results to Codecov
