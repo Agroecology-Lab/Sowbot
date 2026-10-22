@@ -1,0 +1,72 @@
+name: manage.py smoke
+
+# manage.py drives `docker build` and `docker run`, so it cannot run inside
+# industrial_ci (that job is itself a container with no Docker). This job runs
+# it on the plain runner instead. It builds the whole image from the Dockerfile,
+# so it is slow: nightly, manual, and PRs that touch manage.py or docker/ only.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 3 * * *'
+  pull_request:
+    paths:
+      - 'manage.py'
+      - 'docker/**'
+      - '.github/workflows/manage_smoke.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  manage_smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+
+      # The image is large (ROS Jazzy, Nav2, Fields2Cover built from source).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - name: ./manage.py build
+        run: ./manage.py build
+
+      # Runs the real `up` path in simulation. FORCE_SIM keeps it off the
+      # hardware path (no USB, no fixusb.py, no password/lever-arm checks).
+      - name: ./manage.py up --sim (start, check, stop)
+        env:
+          FORCE_SIM: '1'
+        run: |
+          ./manage.py up --sim > manage_up.log 2>&1 &
+          up_pid=$!
+
+          # Wait for the container to appear.
+          for _ in $(seq 1 60); do
+            docker ps --format '{{.Names}}' | grep -qx sowbot_runtime && break
+            kill -0 "$up_pid" 2>/dev/null || { echo 'manage.py exited early'; break; }
+            sleep 2
+          done
+          docker ps --format '{{.Names}}' | grep -qx sowbot_runtime \
+            || { echo '::error::container never started'; cat manage_up.log; exit 1; }
+
+          # Give the launch time, then require the container to be alive and
+          # the ROS graph to contain nodes.
+          sleep 90
+          docker ps --format '{{.Names}}' | grep -qx sowbot_runtime \
+            || { echo '::error::container exited during startup'; cat manage_up.log; exit 1; }
+          nodes=$(docker exec sowbot_runtime bash -c \
+            'source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash && ros2 node list')
+          echo "$nodes"
+          [ -n "$nodes" ] || { echo '::error::no ROS nodes running'; cat manage_up.log; exit 1; }
+
+      - name: Show log and stop
+        if: always()
+        run: |
+          tail -n 200 manage_up.log || true
+          docker stop sowbot_runtime || true
