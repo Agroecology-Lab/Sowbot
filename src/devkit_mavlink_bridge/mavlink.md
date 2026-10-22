@@ -1,4 +1,30 @@
 ```
+
+LEVIA H7 all-in-one (connectors are 1.0 mm SH)
+
+U24 (USART2, SERIAL3)              F9P #1 (base)
+  1 TX  PD5  ------------------->  RX
+  2 RX  PD6  <-------------------  TX
+  3 GND  ------------------------  GND
+  4 +5V_SYS ---------------------> VCC
+
+U20 (UART4, SERIAL5)               F9P #2 (rover)
+  1 +9V   DO NOT CONNECT
+  3 TX  PB9  ------------------->  RX
+  4 RX  PB8  <-------------------  TX
+  5 GND  ------------------------  GND
+  VCC <-- 5V tapped from another connector
+
+U8 (USART6, SERIAL2)               Avaota (MAVLink)
+  1 TX  PC6  ------------------->  RX
+  2 RX  PC7  <-------------------  TX
+  3 GND  ------------------------  GND
+  4 +5V_SYS  leave unconnected, power the Avaota separately
+
+
+
+
+
 +------------------ Limbic SBC -----------------------------+
    |                                                            |
    |   Nav2  <---- pose, velocity (from FC EKF) ----+           |
