@@ -151,6 +151,22 @@ class AttitudeTest(unittest.TestCase):
         self.assertVectorAlmostEqual(_rotate(orientation, (0, 1, 0)), (0, 0, 1))
         self.assertVectorAlmostEqual(_rotate(orientation, (0, 0, 1)), (0, -1, 0))
 
+    def test_south_and_west_headings_preserve_forward_and_up_axes(self):
+        """Verify headings across the quaternion sign change retain their physical direction."""
+        for heading, forward in ((180.0, (0, -1, 0)), (270.0, (-1, 0, 0))):
+            with self.subTest(heading=heading):
+                orientation = ekf.attitude_to_enu_flu(*_yaw_quaternion(heading))
+                self.assertVectorAlmostEqual(_rotate(orientation, (1, 0, 0)), forward)
+                self.assertVectorAlmostEqual(_rotate(orientation, (0, 0, 1)), (0, 0, 1))
+                self.assertGreaterEqual(orientation[3], 0.0)
+
+    def test_inverted_vehicle_keeps_its_forward_axis_and_reverses_up(self):
+        """Verify a half roll is accepted even though the output scalar component is zero."""
+        orientation = ekf.attitude_to_enu_flu(0.0, 1.0, 0.0, 0.0)
+        self.assertVectorAlmostEqual(_rotate(orientation, (1, 0, 0)), (0, 1, 0))
+        self.assertVectorAlmostEqual(_rotate(orientation, (0, 1, 0)), (1, 0, 0))
+        self.assertVectorAlmostEqual(_rotate(orientation, (0, 0, 1)), (0, 0, -1))
+
 
 class OdometryTest(unittest.TestCase):
     def build(self, ned=(0, 0, 0), v_ned=(0, 0, 0), q=(1, 0, 0, 0), rates=(0, 0, 0)):
@@ -208,6 +224,24 @@ class OdometryTest(unittest.TestCase):
                     inputs = valid.copy()
                     inputs[index] = bad
                     self.assertIsNone(ekf.build_odometry(*inputs))
+
+    def test_oblique_heading_mixes_north_and_east_velocity(self):
+        """Verify world velocity is rotated into the body rather than just swapping axes."""
+        odometry = self.build(v_ned=(3.0, 1.0, -2.0), q=_yaw_quaternion(45.0))
+        expected = (4.0 * SQRT_HALF, 2.0 * SQRT_HALF, 2.0)
+        for actual, value in zip(odometry.linear_velocity, expected, strict=True):
+            self.assertAlmostEqual(actual, value)
+
+    def test_scaled_attitude_does_not_scale_body_velocity(self):
+        """Verify quaternion normalization applies to twist as well as orientation."""
+        reference = self.build(v_ned=(2, 3, 4), q=(0.5, 0.5, 0.5, 0.5))
+        for scale in (0.6, 1.4, -1.2):
+            with self.subTest(scale=scale):
+                odometry = self.build(v_ned=(2, 3, 4), q=(0.5 * scale,) * 4)
+                for actual, expected in zip(
+                    odometry.linear_velocity, reference.linear_velocity, strict=True
+                ):
+                    self.assertAlmostEqual(actual, expected)
 
 
 if __name__ == '__main__':

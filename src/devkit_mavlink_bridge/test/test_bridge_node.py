@@ -839,6 +839,200 @@ class InboundTest(BridgeNodeTest):
         self.assertEqual(self.pending, [])
         self.assertEqual(len(self.published(node, 'fc/odom')), 1)
 
+    def test_new_invalid_ekf_status_immediately_revokes_both_state_outputs(self):
+        """Verify a previously valid status cannot survive a newer invalid report."""
+        invalid_flags = (
+            GOOD_EKF_FLAGS & ~MAV.EKF_ATTITUDE,
+            GOOD_EKF_FLAGS & ~MAV.EKF_VELOCITY_HORIZ,
+            GOOD_EKF_FLAGS & ~(MAV.EKF_POS_HORIZ_REL | MAV.EKF_POS_HORIZ_ABS),
+            GOOD_EKF_FLAGS | MAV.EKF_CONST_POS_MODE,
+            GOOD_EKF_FLAGS | MAV.EKF_UNINITIALIZED,
+        )
+        for flags in invalid_flags:
+            with self.subTest(flags=flags):
+                node = self.make()
+                position = _message('GLOBAL_POSITION_INT', lat=513000000, lon=-25000000)
+                self.good_state(node)
+                self.feed(node, _local_position(), position)
+                self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+                self.assertEqual(self.published(node, 'fc/ekf_fix')[-1].status.status, 0)
+
+                self.feed(node, _ekf_status(flags), _local_position(), position)
+                self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+                invalid = self.published(node, 'fc/ekf_fix')[-1]
+                self.assertEqual(invalid.status.status, -1)
+                self.assertTrue(math.isnan(invalid.latitude))
+                self.assertTrue(math.isnan(invalid.longitude))
+                self.assertEqual(self.level(node, 'ekf3')[0], FakeDiagnosticStatus.ERROR)
+
+                self.feed(node, _ekf_status(), _local_position(), position)
+                self.assertEqual(len(self.published(node, 'fc/odom')), 2)
+                self.assertEqual(self.published(node, 'fc/ekf_fix')[-1].status.status, 0)
+
+    def test_relative_ekf_position_publishes_odometry_without_a_geodetic_fix(self):
+        """Verify local estimation can work without claiming an absolute GPS position."""
+        node = self.make()
+        relative = MAV.EKF_ATTITUDE | MAV.EKF_VELOCITY_HORIZ | MAV.EKF_POS_HORIZ_REL
+        self.feed(
+            node, _heartbeat(), _ekf_status(relative), _attitude(), _local_position(),
+            _message('GLOBAL_POSITION_INT', lat=513000000, lon=-25000000),
+        )
+        self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+        self.assertEqual(self.level(node, 'ekf3')[0], FakeDiagnosticStatus.OK)
+        self.assertEqual(self.published(node, 'fc/ekf_fix')[-1].status.status, -1)
+
+    def test_late_attitude_and_status_do_not_replay_an_earlier_position(self):
+        """Verify publication waits for a new position after missing inputs arrive."""
+        for inputs in ((_ekf_status(), _attitude()), (_attitude(), _ekf_status())):
+            with self.subTest(first=inputs[0].get_type()):
+                node = self.make()
+                self.feed(node, _heartbeat(), _local_position(north=99.0), *inputs)
+                self.assertEqual(self.published(node, 'fc/odom'), [])
+                self.feed(node, _local_position(north=4.0, east=5.0, down=6.0))
+                (odometry,) = self.published(node, 'fc/odom')
+                position = odometry.pose.pose.position
+                self.assertEqual((position.x, position.y, position.z), (5.0, 4.0, -6.0))
+
+    def test_receiver_fixes_remain_independent_of_ekf_health_and_each_other(self):
+        """Verify EKF failure and one receiver losing fix do not suppress the other receiver."""
+        node = self.make()
+        self.feed(node, _heartbeat(), _ekf_status(flags=0), _gps(), _gps('GPS2_RAW'))
+        self.feed(node, _gps(fix_type=1), _gps('GPS2_RAW', lat=-330000000, lon=1510000000))
+        first, lost = self.published(node, 'fc/gps1/fix')
+        second, retained = self.published(node, 'fc/gps2/fix')
+        self.assertEqual((first.status.status, second.status.status), (2, 2))
+        self.assertEqual(lost.status.status, -1)
+        for value in (lost.latitude, lost.longitude, lost.altitude):
+            self.assertTrue(math.isnan(value))
+        self.assertEqual((retained.latitude, retained.longitude), (-33.0, 151.0))
+        self.assertEqual(self.level(node, 'gps1')[0], FakeDiagnosticStatus.ERROR)
+        self.assertEqual(self.level(node, 'gps2')[0], FakeDiagnosticStatus.OK)
+        self.assertEqual(self.level(node, 'ekf3')[0], FakeDiagnosticStatus.ERROR)
+        self.feed(node, _gps(fix_type=5))
+        self.assertEqual(self.published(node, 'fc/gps1/fix')[-1].status.status, 1)
+        self.assertEqual(self.level(node, 'gps1')[0], FakeDiagnosticStatus.OK)
+        self.assertEqual(len(self.published(node, 'fc/gps2/fix')), 2)
+
+    def test_expired_heartbeat_rejects_telemetry_before_the_next_poll_detects_loss(self):
+        """Verify fresh telemetry cannot substitute for a live controller heartbeat."""
+        node = self.make(
+            fc_heartbeat_timeout_s=0.5, attitude_timeout_s=20.0,
+            ekf_status_timeout_s=20.0, gps_timeout_s=20.0,
+        )
+        self.good_state(node)
+        self.now += 0.501
+        self.feed(
+            node, _ekf_status(), _attitude(), _local_position(),
+            _message('GLOBAL_POSITION_INT', lat=513000000, lon=-25000000),
+            _gps(), _gps('GPS2_RAW'),
+        )
+        for topic in ('fc/odom', 'fc/ekf_fix', 'fc/gps1/fix', 'fc/gps2/fix'):
+            self.assertEqual(self.published(node, topic), [])
+        for name in ('ekf3', 'gps1', 'gps2'):
+            self.assertEqual(self.level(node, name)[0], FakeDiagnosticStatus.STALE)
+        self.feed(node, _heartbeat(), _local_position())
+        self.assertEqual(self.published(node, 'fc/odom'), [])
+
+    def test_diagnostics_keep_innovation_ratios_without_treating_them_as_covariance(self):
+        """Verify all EKF ratios remain diagnostic values even when they exceed one."""
+        node = self.make()
+        report = _ekf_status()
+        ratios = {
+            'velocity_variance': 1.25, 'pos_horiz_variance': 2.5,
+            'pos_vert_variance': 3.75, 'compass_variance': 4.5,
+            'terrain_alt_variance': 5.25,
+        }
+        for name, value in ratios.items():
+            setattr(report, name, value)
+        self.feed(node, _heartbeat(), report, _attitude(), _local_position())
+        level, summary, values = self.level(node, 'ekf3')
+        self.assertEqual((level, summary), (FakeDiagnosticStatus.OK, 'pose valid'))
+        for name, value in ratios.items():
+            self.assertEqual(float(values[name]), value)
+        (odometry,) = self.published(node, 'fc/odom')
+        self.assertEqual(odometry.pose.covariance, [-1.0] + [0.0] * 35)
+        self.assertEqual(odometry.twist.covariance, [-1.0] + [0.0] * 35)
+
+    def test_diagnostic_array_identifies_hardware_and_uses_the_ros_timestamp(self):
+        """Verify diagnostic consumers can identify every status and its publication time."""
+        node = self.make()
+        node._publish_diagnostics()
+        (array,) = self.published(node, 'fc/diagnostics')
+        self.assertEqual(array.header.stamp, 'stamp')
+        self.assertEqual(
+            [status.name for status in array.status],
+            [f'devkit_mavlink_bridge: {name}' for name in
+             ('flight_controller', 'ekf3', 'gps1', 'gps2')],
+        )
+        for status in array.status:
+            self.assertEqual(status.hardware_id, 'levia_h7')
+            self.assertEqual(status.level, FakeDiagnosticStatus.STALE)
+
+    def test_poll_read_error_still_expires_the_link_and_clears_state(self):
+        """Verify a failed serial read cannot preserve pre-loss state after reconnection."""
+        node = self.make(fc_heartbeat_timeout_s=0.5)
+        self.good_state(node)
+        self.feed(node, _gps(), _gps('GPS2_RAW'))
+        receive = self.connection.recv_match.side_effect
+        self.connection.recv_match.side_effect = OSError('device disconnected')
+        self.now += 0.501
+        node._poll_link()
+        self.assertIn('error', node.get_logger().levels())
+        self.assertEqual(self.level(node, 'flight_controller')[0], FakeDiagnosticStatus.ERROR)
+        self.connection.recv_match.side_effect = receive
+        self.feed(node, _heartbeat(), _local_position())
+        self.assertEqual(self.published(node, 'fc/odom'), [])
+        for name in ('ekf3', 'gps1', 'gps2'):
+            self.assertEqual(self.level(node, name)[0], FakeDiagnosticStatus.STALE)
+
+    def test_poll_does_not_swallow_non_io_receive_or_handler_errors(self):
+        """Verify malformed messages and programming errors are visible to the executor."""
+        node = self.make()
+        receive = self.connection.recv_match.side_effect
+        self.connection.recv_match.side_effect = TypeError('invalid receive argument')
+        with self.assertRaisesRegex(TypeError, 'invalid receive argument'):
+            node._poll_link()
+        self.connection.recv_match.side_effect = receive
+        self.good_state(node)
+        with self.assertRaises(AttributeError):
+            self.feed(node, _message('LOCAL_POSITION_NED', x=1.0))
+        self.assertEqual(self.published(node, 'fc/odom'), [])
+        self.feed(node, _local_position())
+        self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+
+    def test_interval_requests_use_the_selected_system_and_component(self):
+        """Verify rate configuration addresses a controller whose IDs differ from defaults."""
+        self.connection.target_system = 7
+        self.connection.target_component = 42
+        node = self.make(state_rate_hz=3.0)
+        self.feed(node, _heartbeat(source_system=7))
+        calls = self.connection.mav.command_long_send.call_args_list
+        self.assertEqual(len(calls), 6)
+        for request in calls:
+            self.assertEqual(request.args[:4], (7, 42, MAV.MAV_CMD_SET_MESSAGE_INTERVAL, 0))
+        intervals = {request.args[4]: request.args[5] for request in calls}
+        self.assertEqual(intervals[MAV.MAVLINK_MSG_ID_ATTITUDE_QUATERNION], 333333)
+        self.assertEqual(intervals[MAV.MAVLINK_MSG_ID_LOCAL_POSITION_NED], 333333)
+        self.assertEqual(intervals[MAV.MAVLINK_MSG_ID_GLOBAL_POSITION_INT], 333333)
+
+    def test_foreign_command_ack_cannot_report_a_controller_refusal(self):
+        """Verify acknowledgement warnings obey the same source and live-link gates as state."""
+        node = self.make(fc_heartbeat_timeout_s=0.5)
+        refused = _message(
+            'COMMAND_ACK', command=MAV.MAV_CMD_SET_MESSAGE_INTERVAL, result=MAV.MAV_RESULT_DENIED
+        )
+        self.feed(node, refused, _heartbeat())
+        self.feed(node, _message(
+            'COMMAND_ACK', source_system=42,
+            command=MAV.MAV_CMD_SET_MESSAGE_INTERVAL, result=MAV.MAV_RESULT_DENIED,
+        ))
+        self.assertEqual(node.get_logger().levels().count('warn'), 0)
+        self.feed(node, refused)
+        self.assertEqual(node.get_logger().levels().count('warn'), 1)
+        self.now += 0.501
+        self.feed(node, refused)
+        self.assertEqual(node.get_logger().levels().count('warn'), 2)  # link-loss warning only
+
 
 if __name__ == '__main__':
     unittest.main()

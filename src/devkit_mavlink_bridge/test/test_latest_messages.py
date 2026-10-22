@@ -73,6 +73,37 @@ class LatestMessagesTest(unittest.TestCase):
         self.assertEqual(self.store.age_s('a'), 0.0)
         self.assertIsNone(self.store.fresh('b', 100.0))
 
+    def test_repeated_reads_do_not_refresh_arrival_time(self):
+        """Verify diagnostic consumers cannot keep a stopped telemetry stream fresh."""
+        message = object()
+        self.store.put('attitude', message)
+        for elapsed in (0.25, 0.5, 1.0):
+            with self.subTest(elapsed=elapsed):
+                self.now = 100.0 + elapsed
+                self.assertIs(self.store.fresh('attitude', 1.0), message)
+                self.assertEqual(self.store.age_s('attitude'), elapsed)
+        self.now += 0.001
+        self.assertIsNone(self.store.fresh('attitude', 1.0))
+
+    def test_zero_age_limit_expires_when_the_clock_advances(self):
+        """Verify a zero age limit admits only messages arriving at the current instant."""
+        message = object()
+        self.store.put('attitude', message)
+        self.assertIs(self.store.fresh('attitude', 0.0), message)
+        self.now += 0.001
+        self.assertIsNone(self.store.fresh('attitude', 0.0))
+
+    def test_separate_stores_cannot_share_or_clear_each_others_messages(self):
+        """Verify reconnecting one bridge cannot clear another bridge's telemetry."""
+        other = LatestMessages(clock=lambda: self.now)
+        first, second = object(), object()
+        self.store.put('attitude', first)
+        self.assertIsNone(other.fresh('attitude', 1.0))
+        other.put('attitude', second)
+        self.store.clear()
+        self.assertIs(other.fresh('attitude', 1.0), second)
+        self.assertIsNone(self.store.fresh('attitude', 1.0))
+
 
 if __name__ == '__main__':
     unittest.main()

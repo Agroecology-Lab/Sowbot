@@ -105,6 +105,35 @@ class NavSatFieldsTest(unittest.TestCase):
         for key in ('latitude', 'longitude', 'altitude'):
             self.assertTrue(math.isnan(fields[key]))
 
+    def test_no_fix_preserves_reported_accuracy_without_exposing_position(self):
+        """Verify accuracy does not turn an invalid receiver solution into a usable fix."""
+        fields = gps.gps_raw_to_navsat(gps.FIX_NO_FIX, 513000000, -25000000, 12500, 300, 500)
+        self.assertEqual(fields['status'], gps.STATUS_NO_FIX)
+        for key in ('latitude', 'longitude', 'altitude'):
+            self.assertTrue(math.isnan(fields[key]))
+        self.assertEqual(fields['position_covariance_type'], gps.COVARIANCE_DIAGONAL_KNOWN)
+        expected = (0.09, 0.0, 0.0, 0.0, 0.09, 0.0, 0.0, 0.0, 0.25)
+        for actual, value in zip(fields['position_covariance'], expected, strict=True):
+            self.assertAlmostEqual(actual, value)
+
+    def test_navsat_fields_requires_both_accuracy_values(self):
+        """Verify either missing accuracy keeps covariance unknown at the shared boundary."""
+        for horizontal, vertical in ((None, None), (None, 0.5), (0.3, None)):
+            with self.subTest(horizontal=horizontal, vertical=vertical):
+                fields = gps.navsat_fields(gps.STATUS_FIX, 0, 0, -12.5, horizontal, vertical)
+                self.assertEqual(fields['altitude'], -12.5)
+                self.assertEqual(fields['position_covariance_type'], gps.COVARIANCE_UNKNOWN)
+                self.assertEqual(fields['position_covariance'], [0.0] * 9)
+
+    def test_covariance_is_independent_between_fixes(self):
+        """Verify changing one result cannot affect another receiver or a later fix."""
+        first = gps.gps_raw_to_navsat(gps.FIX_3D, 1, 1, 12500, 20, 50)
+        second = gps.gps_raw_to_navsat(gps.FIX_3D, 1, 1, 12500, 20, 50)
+        first['position_covariance'][0] = 99.0
+        self.assertAlmostEqual(second['position_covariance'][0], 0.0004)
+        unknown = gps.navsat_fields(gps.STATUS_NO_FIX, 0, 0, math.nan)
+        self.assertEqual(unknown['position_covariance'], [0.0] * 9)
+
 
 class DiagnosticTest(unittest.TestCase):
     def test_no_report_is_stale(self):
