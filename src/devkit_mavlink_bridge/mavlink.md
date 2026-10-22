@@ -24,13 +24,16 @@ U20 (UART4, SERIAL5)               Avaota (MAVLink)
   5 GND  ------------------------  GND
   Power the Avaota separately
 
-U19 (SPI)                          Optical flow sensor
-  1 +5V  ------------------------> VCC
-  6 CS1  ------------------------  CS
-  (remaining pins: SCK/MISO/MOSI/GND per the connector pinout)
+U19 (SPI3)                         Optical flow sensor
+  1 +5V_SYS  --------------------> VCC
+  2 GND  ------------------------  GND
+  3 SCLK PB3  ------------------>  SCK
+  4 MISO PB4  <------------------  MISO
+  5 MOSI PB5  ------------------>  MOSI
+  6 CS1  PD4  ------------------>  CS
 ```
 
-The hwdef already defines the pixartflow device, so the sensor goes straight to the FC. No hwdef edit, no SBC involvement.
+The hwdef already defines the pixartflow device (SPI3, EXT_CS1 = PD4), which matches U19 pin 6. The sensor goes straight to the FC. No hwdef edit, no SBC involvement.
 
 ## Architecture
 
@@ -108,6 +111,6 @@ The bridge asks the LEVIA-H7 for these messages with MAV_CMD_SET_MESSAGE_INTERVA
 - Serial protocols are not default. Set SERIAL2_PROTOCOL and SERIAL3_PROTOCOL to GPS (5), SERIAL5_PROTOCOL to MAVLink2, GPS_TYPE=17 (moving-base base) and GPS_TYPE2=18 (rover). ArduPilot assigns GPS1 to the lowest-numbered port set to GPS, so the base must stay on SERIAL2 (U8) and the rover on SERIAL3 (U24). Swapping them makes the base GPS2 and breaks the moving baseline.
 - USART6 (U8) may be NODMA in the hwdef, as on Matek H743. Check it. If so, the base F9P link has no DMA; fine at modest baud rates.
 - Both F9Ps now draw from +5V_SYS, plus antenna bias current. Check the rail.
-- Set the flow params (FLOW_TYPE for PixArt) and confirm the U19 SPI pins against the hwdef before powering the sensor.
+- Set FLOW_TYPE for the PixArt driver.
+- The sensor board must take 5V power and work with 3.3V SPI logic. U19 supplies 5V and the MCU pins are 3.3V.
 - Wheel encoders are in the architecture diagram but have no connector in the wiring section. Add one or drop them.
-- The U19 pinout is incomplete. Only 5V (pin 1) and CS1 (pin 6) are specified.
