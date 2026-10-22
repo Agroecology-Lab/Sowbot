@@ -4,7 +4,7 @@
    |   Nav2  <---- pose, velocity (from FC EKF) ----+           |
    |     |                                          |           |
    |     | cmd_vel                    devkit_mavlink_bridge     |
-   |     +----------------------------->  (needs inbound half)  |
+   |     +----------------------------->  (inbound + outbound)  |
    |                                          ^   |             |
    |   FusionCore (OPTIONAL, shadow only)     |   |             |
    |     logs and compares, never feeds FC    |   |             |
@@ -47,3 +47,21 @@
    EKF unhealthy / GNSS lost --> EKF variance failsafe
    stale cmd_vel             --> bridge sends zero (built)
    fence breach              --> HOLD (not RTL)
+
+Bridge topics (inbound, from the LEVIA-H7; no TF is broadcast):
+
+| Topic | Type | Source message | Notes |
+|---|---|---|---|
+| `fc/odom` | `nav_msgs/Odometry` | LOCAL_POSITION_NED + ATTITUDE_QUATERNION | ENU, body FLU, from the EKF origin. |
+| | | | Covariances unknown (-1 in element 0). |
+| | | | Withheld unless EKF3 flags a valid pose and both inputs are fresh |
+| `fc/ekf_fix` | `sensor_msgs/NavSatFix` | GLOBAL_POSITION_INT | EKF3 geodetic position. |
+| | | | No fix unless EKF3 flags an absolute position. |
+| | | | Altitude NaN (message is MSL) |
+| `fc/gps1/fix`, `fc/gps2/fix` | `sensor_msgs/NavSatFix` | GPS_RAW_INT, GPS2_RAW | Receiver output, not EKF3. |
+| | | | RTK float is SBAS_FIX, RTK fixed is GBAS_FIX |
+| `fc/diagnostics` | `diagnostic_msgs/DiagnosticArray` | HEARTBEAT, EKF_STATUS_REPORT, GPS_RAW_INT, GPS2_RAW | Link, EKF3 flags and variance ratios, GPS fix type, DOP, accuracy, heading. |
+| | | | STALE when data stops |
+
+The bridge asks the LEVIA-H7 for these messages with MAV_CMD_SET_MESSAGE_INTERVAL when its
+heartbeat appears and every 10 s after, so SRn_* parameters need not be set.
