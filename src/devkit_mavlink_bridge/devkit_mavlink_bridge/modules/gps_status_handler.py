@@ -73,10 +73,13 @@ def dop(raw_hundredths: int):
 
 def navsat_fields(status: int, lat_e7: int, lon_e7: int, altitude_m: float,
                   h_acc_m=None, v_acc_m=None) -> dict:
-    """Build NavSatFix fields.
+    """Build NavSatFix fields from a NavSatStatus status and MAVLink coordinates.
 
-    With no fix the position is NaN. The covariance is diagonal and known only when
-    both accuracies are given; otherwise it is all zeros and marked unknown.
+    Latitude and longitude are degrees scaled by 1e7; altitude is meters above the
+    WGS84 ellipsoid, and horizontal and vertical accuracies are in meters.
+    With STATUS_NO_FIX the position is NaN.
+    The covariance is diagonal with squared accuracies only when both are given,
+    even with no fix; otherwise it is all zeros and marked unknown.
     """
     covariance = [0.0] * 9
     covariance_type = COVARIANCE_UNKNOWN
@@ -109,9 +112,10 @@ def gps_raw_to_navsat(fix_type, lat_e7, lon_e7, alt_ellipsoid_mm, h_acc_mm, v_ac
 def gps_diagnostic(message):
     """Return (level, summary, values) for a GPS_RAW_INT or GPS2_RAW message.
 
-    Pass None when no recent report exists: the level is then STALE. ERROR means no fix and
-    WARN a 2D fix. The fix type and accuracies are always reported so a consumer can apply
-    its own threshold.
+    Pass None when no recent report exists: the level is then STALE and values is empty.
+    For a report, fix types at or below NO_FIX give ERROR, 2D gives WARN, and all others give OK.
+    Values contains strings for fix type, satellite count, DOP, accuracy in meters and yaw
+    in degrees, with unavailable measurements represented as 'unknown'.
     """
     if message is None:
         return LEVEL_STALE, 'no GPS report', {}

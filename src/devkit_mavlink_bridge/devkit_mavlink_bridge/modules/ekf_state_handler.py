@@ -76,7 +76,7 @@ def ekf_pose_valid(flags: int) -> bool:
 
 
 def ekf_absolute_position_valid(flags: int) -> bool:
-    """Return True when EKF3 reports an absolute (geodetic) horizontal position."""
+    """Return True when ekf_pose_valid passes and the absolute horizontal position bit is set."""
     return ekf_pose_valid(flags) and bool(flags & EKF_POS_HORIZ_ABS)
 
 
@@ -105,7 +105,8 @@ def _rotate_inverse(q, v):
 def attitude_to_enu_flu(w: float, x: float, y: float, z: float):
     """Convert an FRD-to-NED attitude quaternion to an (x, y, z, w) FLU-in-ENU quaternion.
 
-    Return None when a component is nonfinite or the quaternion is not close to unit length.
+    Return None for nonfinite components or a norm outside the open interval (0.5, 1.5).
+    Accepted inputs are normalized, and the result has a nonnegative w component.
     """
     components = (w, x, y, z)
     if not all(math.isfinite(c) for c in components):

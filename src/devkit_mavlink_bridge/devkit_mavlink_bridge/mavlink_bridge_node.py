@@ -102,7 +102,7 @@ class MavlinkBridgeNode(Node):
     """Bridges cmd_vel out to, and EKF3 state and GPS status in from, ArduPilot Rover over MAVLink."""
 
     def __init__(self):
-        """Connect to MAVLink and register the ROS subscription and timer.
+        """Connect to MAVLink and register the ROS subscription, publishers and timers.
 
         ROS parameters (seconds unless noted, default in brackets): republish_period_s [0.1],
         cmd_vel_timeout_s [0.5], max_linear_x_mps [1.6], max_angular_z_radps [1.0],
@@ -273,8 +273,10 @@ class MavlinkBridgeNode(Node):
         """Read pending messages, dispatch them, and log link changes.
 
         HEARTBEATs from the flight controller drive the link monitor. State messages are used
-        only while the link is ok and only from the flight controller's system id. At most
-        _MAX_MESSAGES_PER_POLL messages are handled per call so a flood cannot starve the timers.
+        only while the link is ok, with the source system checked when a target is selected.
+        Each call handles at most _MAX_MESSAGES_PER_POLL messages so a flood cannot starve timers.
+        An OSError during receive ends this poll without propagating.
+        Other receive errors and errors from message handlers propagate.
         """
         for _ in range(_MAX_MESSAGES_PER_POLL):
             try:
@@ -293,7 +295,10 @@ class MavlinkBridgeNode(Node):
         self._log_link_change()
 
     def _from_flight_controller(self, message) -> bool:
-        """Return True for a message from the selected flight controller while its link is ok."""
+        """Return True while the link is ok if the source matches the selected system.
+
+        When no target system is selected, accept any source system while the link is ok.
+        """
         if self._monitor.state() != OK:
             return False
         target = self._mav.target_system
@@ -366,7 +371,7 @@ class MavlinkBridgeNode(Node):
         self._latest.put('attitude', message)
 
     def _on_ekf_status(self, message) -> None:
-        """Keep the latest EKF_STATUS_REPORT, which gates every EKF3-derived publication."""
+        """Keep the latest EKF_STATUS_REPORT for odometry gating, fix validity and diagnostics."""
         self._latest.put('ekf_status', message)
 
     def _on_local_position(self, message) -> None:
@@ -417,10 +422,13 @@ class MavlinkBridgeNode(Node):
         self._odom_blocked = blocked
 
     def _on_global_position(self, message) -> None:
-        """Publish fc/ekf_fix from GLOBAL_POSITION_INT when EKF3 reports an absolute position.
+        """Publish fc/ekf_fix from GLOBAL_POSITION_INT.
 
+        Mark the fix valid only with a recent EKF_STATUS_REPORT satisfying
+        ekf_absolute_position_valid; otherwise publish no-fix status and NaN coordinates.
         The altitude is NaN: the message carries height above mean sea level, and NavSatFix
-        wants height above the WGS84 ellipsoid. The covariance is unknown.
+        wants height above the WGS84 ellipsoid.
+        The covariance is unknown.
         """
         ekf_status = self._latest.fresh('ekf_status', self._ekf_status_timeout_s)
         valid = ekf_status is not None and ekf_absolute_position_valid(ekf_status.flags)
