@@ -5,24 +5,24 @@
 LEVIA H7 all-in-one. All connectors are 1.0 mm SH.
 
 ```
-U24 (USART2, SERIAL3)              F9P #1 (base)
+U8 (USART6, SERIAL2)               F9P #1 (base)
+  1 TX  PC6  ------------------->  RX
+  2 RX  PC7  <-------------------  TX
+  3 GND  ------------------------  GND
+  4 +5V_SYS ---------------------> VCC
+
+U24 (USART2, SERIAL3)              F9P #2 (rover)
   1 TX  PD5  ------------------->  RX
   2 RX  PD6  <-------------------  TX
   3 GND  ------------------------  GND
   4 +5V_SYS ---------------------> VCC
 
-U20 (UART4, SERIAL5)               F9P #2 (rover)
+U20 (UART4, SERIAL5)               Avaota (MAVLink)
   1 +9V   DO NOT CONNECT
   3 TX  PB9  ------------------->  RX
   4 RX  PB8  <-------------------  TX
   5 GND  ------------------------  GND
-  VCC <-- 5V tapped from another connector
-
-U8 (USART6, SERIAL2)               Avaota (MAVLink)
-  1 TX  PC6  ------------------->  RX
-  2 RX  PC7  <-------------------  TX
-  3 GND  ------------------------  GND
-  4 +5V_SYS  leave unconnected, power the Avaota separately
+  Power the Avaota separately
 
 U19 (SPI)                          Optical flow sensor
   1 +5V  ------------------------> VCC
@@ -46,15 +46,15 @@ The hwdef already defines the pixartflow device, so the sensor goes straight to 
 |     logs and compares, never feeds FC    |   |             |
 +------------------------------------------|---|-------------+
                                            |   |
-     MAVLink (UART: U8 / USART6 / SERIAL2) |   |
+     MAVLink (UART: U20 / UART4 / SERIAL5) |   |
      in : pose/vel, GPS status, HEARTBEAT  |   |
      out: SET_POSITION_TARGET (drive),     |   |
           GPS_RTCM_DATA, HEARTBEAT         |   |
                                            |   v
 +---------------- LEVIA-H7 (ArduPilot Rover) -------------------+
 |                                                               |
-|  F9P #1 (GPS1, base, U24)  --RTCM3, routed by FC-->           |
-|                            F9P #2 (GPS2, rover, U20)          |
+|  F9P #1 (GPS1, base, U8)  --RTCM3, routed by FC-->            |
+|                           F9P #2 (GPS2, rover, U24)           |
 |        |  position, RTK                 |  moving-baseline    |
 |        |                                |  heading (yaw)      |
 |        +-------------+------------------+                     |
@@ -63,7 +63,7 @@ The hwdef already defines the pixartflow device, so the sensor goes straight to 
 |  optical flow -------+--->  EKF3  (sole estimator)            |
 |   (SPI, U19, pixartflow     |  fuses GNSS + yaw + encoders    |
 |    already in hwdef)        |  + flow + IMUs, innovation      |
-|  IMU x2 (BMI270) -----------+  gating                         |
+|  IMU x2 (ICM-42688-P) ------+  gating                         |
 |                             |                                 |
 |                             |  ahrs.get_location()            |
 |                             v                                 |
@@ -105,7 +105,9 @@ The bridge asks the LEVIA-H7 for these messages with MAV_CMD_SET_MESSAGE_INTERVA
 
 ## To check
 
-- Serial protocols are not default. GPS2 defaults to SERIAL4, so set SERIAL3_PROTOCOL and SERIAL5_PROTOCOL to GPS (5), SERIAL2_PROTOCOL to MAVLink2, GPS_TYPE=17 (moving-base base) and GPS_TYPE2=18 (rover).
+- Serial protocols are not default. Set SERIAL2_PROTOCOL and SERIAL3_PROTOCOL to GPS (5), SERIAL5_PROTOCOL to MAVLink2, GPS_TYPE=17 (moving-base base) and GPS_TYPE2=18 (rover). ArduPilot assigns GPS1 to the lowest-numbered port set to GPS, so the base must stay on SERIAL2 (U8) and the rover on SERIAL3 (U24). Swapping them makes the base GPS2 and breaks the moving baseline.
+- USART6 (U8) may be NODMA in the hwdef, as on Matek H743. Check it. If so, the base F9P link has no DMA; fine at modest baud rates.
+- Both F9Ps now draw from +5V_SYS, plus antenna bias current. Check the rail.
 - Set the flow params (FLOW_TYPE for PixArt) and confirm the U19 SPI pins against the hwdef before powering the sensor.
 - Wheel encoders are in the architecture diagram but have no connector in the wiring section. Add one or drop them.
 - The U19 pinout is incomplete. Only 5V (pin 1) and CS1 (pin 6) are specified.
