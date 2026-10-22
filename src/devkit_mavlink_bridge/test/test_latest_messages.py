@@ -40,6 +40,39 @@ class LatestMessagesTest(unittest.TestCase):
         self.assertIsNone(self.store.fresh('a', 10.0))
         self.assertIsNone(self.store.fresh('b', 10.0))
 
+    def test_message_kinds_keep_independent_arrival_times(self):
+        """Verify refreshing GPS cannot keep an old attitude alive."""
+        attitude, gps = object(), object()
+        self.store.put('attitude', attitude)
+        self.now += 2.0
+        self.store.put('gps', gps)
+        self.assertIsNone(self.store.fresh('attitude', 1.0))
+        self.assertEqual(self.store.age_s('attitude'), 2.0)
+        self.assertIs(self.store.fresh('gps', 1.0), gps)
+        self.assertEqual(self.store.age_s('gps'), 0.0)
+
+    def test_freshness_limit_is_applied_per_read_without_discarding_the_message(self):
+        """Verify a strict consumer does not delete data still fresh for another consumer."""
+        message = object()
+        self.store.put('a', message)
+        self.now += 2.0
+        self.assertIsNone(self.store.fresh('a', 1.0))
+        self.assertIs(self.store.fresh('a', 3.0), message)
+        self.assertEqual(self.store.age_s('a'), 2.0)
+
+    def test_clear_resets_ages_and_allows_a_new_session(self):
+        """Verify a new link session gets new arrival times and no old message kinds."""
+        self.store.put('a', 'old')
+        self.store.put('b', 'old')
+        self.store.clear()
+        self.assertIsNone(self.store.age_s('a'))
+        self.assertIsNone(self.store.age_s('b'))
+        self.now += 10.0
+        self.store.put('a', 'new')
+        self.assertEqual(self.store.fresh('a', 0.0), 'new')
+        self.assertEqual(self.store.age_s('a'), 0.0)
+        self.assertIsNone(self.store.fresh('b', 100.0))
+
 
 if __name__ == '__main__':
     unittest.main()

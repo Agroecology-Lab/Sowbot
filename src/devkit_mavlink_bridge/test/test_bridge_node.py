@@ -650,6 +650,195 @@ class InboundTest(BridgeNodeTest):
                 with self.subTest(name=name, bad=bad), self.assertRaises(ValueError):
                     self.make(**{name: bad})
 
+    def test_odometry_timeouts_are_inclusive_and_refresh_recovers_publication(self):
+        """Verify each configured timeout gates odometry independently at its boundary."""
+        for parameter, refresh in (('attitude_timeout_s', _attitude),
+                                   ('ekf_status_timeout_s', _ekf_status)):
+            with self.subTest(parameter=parameter):
+                overrides = {'attitude_timeout_s': 5.0, 'ekf_status_timeout_s': 5.0}
+                overrides[parameter] = 0.5
+                node = self.make(**overrides)
+                self.good_state(node)
+                self.now += 0.5
+                self.feed(node, _local_position())
+                self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+                self.now += 0.001
+                self.feed(node, _local_position())
+                self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+                self.feed(node, refresh(), _local_position())
+                self.assertEqual(len(self.published(node, 'fc/odom')), 2)
+
+    def test_missing_and_invalid_attitude_withhold_odometry_until_replaced(self):
+        """Verify absent, zero and nonfinite attitudes cannot produce or reuse a pose."""
+        node = self.make()
+        self.feed(node, _heartbeat(), _ekf_status(), _local_position())
+        self.assertEqual(self.published(node, 'fc/odom'), [])
+        self.feed(node, _attitude(), _local_position())
+        self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+        for invalid in (_attitude(w=0.0), _attitude(y=math.nan),
+                        _attitude(rates=(0.0, math.inf, 0.0))):
+            with self.subTest(invalid=invalid):
+                self.feed(node, invalid, _local_position())
+                self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+        self.feed(node, _attitude(), _local_position())
+        self.assertEqual(len(self.published(node, 'fc/odom')), 2)
+
+    def test_latest_attitude_and_body_rates_are_used(self):
+        """Verify a newer east-facing attitude replaces the earlier north-facing sample."""
+        node = self.make()
+        self.good_state(node)
+        half = math.sqrt(0.5)
+        self.feed(node, _attitude(w=half, z=half, rates=(0.1, 0.2, 0.3)),
+                  _local_position(vn=0.0, ve=2.0))
+        (odometry,) = self.published(node, 'fc/odom')
+        orientation = odometry.pose.pose.orientation
+        self.assertAlmostEqual(orientation.z, 0.0)
+        self.assertAlmostEqual(orientation.w, 1.0)
+        linear = odometry.twist.twist.linear
+        angular = odometry.twist.twist.angular
+        self.assertAlmostEqual(linear.x, 2.0)
+        self.assertAlmostEqual(linear.y, 0.0)
+        self.assertEqual((angular.x, angular.y, angular.z), (0.1, -0.2, -0.3))
+
+    def test_disabling_outbound_heartbeat_gate_does_not_enable_unlinked_telemetry(self):
+        """Verify inbound state still needs a live link when outbound commands do not."""
+        node = self.make(require_fc_heartbeat=False)
+        global_position = _message('GLOBAL_POSITION_INT', lat=513000000, lon=-25000000)
+        self.feed(node, _ekf_status(), _attitude(), _local_position(), global_position,
+                  _gps(), _gps('GPS2_RAW'))
+        for topic in ('fc/odom', 'fc/ekf_fix', 'fc/gps1/fix', 'fc/gps2/fix'):
+            self.assertEqual(self.published(node, topic), [])
+        self.feed(node, _heartbeat(), _local_position())
+        self.assertEqual(self.published(node, 'fc/odom'), [])
+        self.feed(node, _ekf_status(), _attitude(), _local_position(), global_position,
+                  _gps(), _gps('GPS2_RAW'))
+        for topic in ('fc/odom', 'fc/ekf_fix', 'fc/gps1/fix', 'fc/gps2/fix'):
+            self.assertEqual(len(self.published(node, topic)), 1)
+
+    def test_foreign_telemetry_cannot_overwrite_selected_controller_state(self):
+        """Verify foreign state is neither published nor mixed into the selected pose."""
+        node = self.make()
+        self.good_state(node)
+        self.feed(node, _gps(), _gps('GPS2_RAW'))
+        self.feed(node, _ekf_status(flags=0, source_system=42),
+                  _attitude(w=math.nan, source_system=42), _local_position(source_system=42),
+                  _message('GLOBAL_POSITION_INT', source_system=42, lat=0, lon=0),
+                  _gps(source_system=42), _gps('GPS2_RAW', source_system=42))
+        self.assertEqual(self.published(node, 'fc/odom'), [])
+        self.assertEqual(self.published(node, 'fc/ekf_fix'), [])
+        for topic in ('fc/gps1/fix', 'fc/gps2/fix'):
+            self.assertEqual(len(self.published(node, topic)), 1)
+        self.feed(node, _local_position(),
+                  _message('GLOBAL_POSITION_INT', lat=513000000, lon=-25000000))
+        self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+        self.assertEqual(self.published(node, 'fc/ekf_fix')[-1].status.status, 0)
+
+    def test_foreign_reports_do_not_refresh_expired_state(self):
+        """Verify another system cannot extend the arrival time of either pose input."""
+        for parameter, foreign in (('attitude_timeout_s', _attitude),
+                                   ('ekf_status_timeout_s', _ekf_status)):
+            with self.subTest(parameter=parameter):
+                overrides = {'attitude_timeout_s': 5.0, 'ekf_status_timeout_s': 5.0}
+                overrides[parameter] = 0.5
+                node = self.make(**overrides)
+                self.good_state(node)
+                self.now += 0.501
+                self.feed(node, foreign(source_system=42), _local_position())
+                self.assertEqual(self.published(node, 'fc/odom'), [])
+                self.feed(node, foreign(), _local_position())
+                self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+
+    def test_receiver_reports_without_extensions_have_unknown_altitude_and_accuracy(self):
+        """Verify MAVLink 1 GPS reports never substitute MSL height for ellipsoid height."""
+        node = self.make(gps_frame_id='antenna')
+        self.feed(node, _heartbeat())
+        for kind, topic in (('GPS_RAW_INT', 'fc/gps1/fix'), ('GPS2_RAW', 'fc/gps2/fix')):
+            with self.subTest(kind=kind):
+                self.feed(node, _message(kind, fix_type=3, lat=513000000, lon=-25000000,
+                                         alt=100000, satellites_visible=12, eph=100, epv=200))
+                (fix,) = self.published(node, topic)
+                self.assertEqual((fix.latitude, fix.longitude), (51.3, -2.5))
+                self.assertEqual((fix.status.status, fix.status.service), (0, 1))
+                self.assertTrue(math.isnan(fix.altitude))
+                self.assertEqual(fix.position_covariance_type, 0)
+                self.assertEqual(fix.position_covariance, [0.0] * 9)
+                self.assertEqual((fix.header.frame_id, fix.header.stamp), ('antenna', 'stamp'))
+
+    def test_ekf_fix_loses_validity_when_status_expires_and_recovers(self):
+        """Verify a stale EKF report cannot keep a geodetic fix valid."""
+        node = self.make(ekf_status_timeout_s=0.5)
+        position = _message('GLOBAL_POSITION_INT', lat=513000000, lon=-25000000)
+        self.feed(node, _heartbeat(), _ekf_status())
+        self.now += 0.5
+        self.feed(node, position)
+        self.now += 0.001
+        self.feed(node, position)
+        self.feed(node, _ekf_status(), position)
+        first, expired, recovered = self.published(node, 'fc/ekf_fix')
+        self.assertEqual((first.status.status, expired.status.status, recovered.status.status),
+                         (0, -1, 0))
+        for value in (expired.latitude, expired.longitude, expired.altitude):
+            self.assertTrue(math.isnan(value))
+        self.assertEqual((recovered.latitude, recovered.longitude), (51.3, -2.5))
+
+    def test_gps_diagnostic_freshness_is_independent_per_receiver(self):
+        """Verify refreshing GPS1 cannot mask a stale GPS2, and GPS2 can recover with no fix."""
+        node = self.make(gps_timeout_s=0.5)
+        self.feed(node, _heartbeat(), _gps(), _gps('GPS2_RAW'))
+        self.now += 0.5
+        self.feed(node, _gps())
+        self.assertEqual(self.level(node, 'gps2')[0], FakeDiagnosticStatus.OK)
+        self.now += 0.001
+        self.assertEqual(self.level(node, 'gps1')[0], FakeDiagnosticStatus.OK)
+        self.assertEqual(self.level(node, 'gps2'),
+                         (FakeDiagnosticStatus.STALE, 'no GPS report', {}))
+        self.feed(node, _gps('GPS2_RAW', fix_type=1))
+        self.assertEqual(self.level(node, 'gps2')[0], FakeDiagnosticStatus.ERROR)
+
+    def test_link_loss_clears_all_state_even_with_long_telemetry_timeouts(self):
+        """Verify reconnection cannot reuse any pre-loss GPS, EKF or attitude sample."""
+        node = self.make(fc_heartbeat_timeout_s=0.5, attitude_timeout_s=20.0,
+                         ekf_status_timeout_s=20.0, gps_timeout_s=20.0)
+        self.good_state(node)
+        self.feed(node, _gps(), _gps('GPS2_RAW'))
+        self.now += 0.501
+        node._poll_link()
+        self.feed(node, _heartbeat(), _local_position(),
+                  _message('GLOBAL_POSITION_INT', lat=513000000, lon=-25000000))
+        self.assertEqual(self.published(node, 'fc/odom'), [])
+        self.assertEqual(self.published(node, 'fc/ekf_fix')[-1].status.status, -1)
+        for name in ('ekf3', 'gps1', 'gps2'):
+            self.assertEqual(self.level(node, name)[0], FakeDiagnosticStatus.STALE)
+        self.feed(node, _ekf_status(), _attitude(), _local_position(), _gps(), _gps('GPS2_RAW'))
+        self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+        for name in ('ekf3', 'gps1', 'gps2'):
+            self.assertEqual(self.level(node, name)[0], FakeDiagnosticStatus.OK)
+
+    def test_interval_request_failure_does_not_skip_other_requests_or_future_retries(self):
+        """Verify a transient send error leaves the remaining requests and next retry usable."""
+        node = self.make()
+        send = self.connection.mav.command_long_send
+        send.side_effect = [OSError('port busy'), *([None] * 5)]
+        self.feed(node, _heartbeat())
+        self.assertEqual(send.call_count, 6)
+        self.assertEqual(node.get_logger().levels().count('error'), 1)
+        send.side_effect = None
+        node._rerequest_message_intervals()
+        self.assertEqual(send.call_count, 12)
+        self.assertEqual(send.call_args_list[:6], send.call_args_list[6:])
+
+    def test_polling_resumes_queued_telemetry_after_the_message_budget(self):
+        """Verify the bounded poll leaves useful queued messages for the next callback."""
+        node = self.make()
+        self.good_state(node)
+        self.pending += [_message('STATUSTEXT') for _ in range(200)] + [_local_position()]
+        node._poll_link()
+        self.assertEqual(len(self.pending), 1)
+        self.assertEqual(self.published(node, 'fc/odom'), [])
+        node._poll_link()
+        self.assertEqual(self.pending, [])
+        self.assertEqual(len(self.published(node, 'fc/odom')), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

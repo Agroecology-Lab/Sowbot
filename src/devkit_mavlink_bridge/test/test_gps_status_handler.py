@@ -80,6 +80,31 @@ class NavSatFieldsTest(unittest.TestCase):
         fields = gps.gps_raw_to_navsat(gps.FIX_3D, 513000000, -25000000, 0, 20, 50)
         self.assertTrue(math.isnan(fields['altitude']))
 
+    def test_either_unknown_accuracy_keeps_the_whole_covariance_unknown(self):
+        """Verify both axes need accuracy, including the all-ones sentinel on either axis."""
+        for horizontal, vertical in ((0, 50), (20, 0), (0xFFFFFFFF, 50),
+                                     (20, 0xFFFFFFFF), (0xFFFFFFFF, 0xFFFFFFFF)):
+            with self.subTest(horizontal=horizontal, vertical=vertical):
+                fields = gps.gps_raw_to_navsat(gps.FIX_3D, 1, 1, 12500, horizontal, vertical)
+                self.assertEqual(fields['position_covariance_type'], gps.COVARIANCE_UNKNOWN)
+                self.assertEqual(fields['position_covariance'], [0.0] * 9)
+
+    def test_geographic_boundaries_and_negative_ellipsoid_height(self):
+        """Verify signed coordinates and below-ellipsoid altitudes retain their units."""
+        for lat, lon in ((0, 0), (-900000000, -1800000000), (900000000, 1800000000)):
+            with self.subTest(lat=lat, lon=lon):
+                fields = gps.gps_raw_to_navsat(gps.FIX_3D, lat, lon, -12500, 20, 50)
+                self.assertEqual((fields['latitude'], fields['longitude']), (lat / 1e7, lon / 1e7))
+                self.assertEqual(fields['altitude'], -12.5)
+                self.assertEqual(fields['service'], gps.SERVICE_GPS)
+
+    def test_unrecognised_fix_type_does_not_expose_coordinates(self):
+        """Verify an unsupported fix type cannot publish apparently usable coordinates."""
+        fields = gps.gps_raw_to_navsat(99, 513000000, -25000000, 12500, 20, 50)
+        self.assertEqual(fields['status'], gps.STATUS_NO_FIX)
+        for key in ('latitude', 'longitude', 'altitude'):
+            self.assertTrue(math.isnan(fields[key]))
+
 
 class DiagnosticTest(unittest.TestCase):
     def test_no_report_is_stale(self):
@@ -122,6 +147,20 @@ class DiagnosticTest(unittest.TestCase):
             with self.subTest(satellites_visible=satellites_visible):
                 values = gps.gps_diagnostic(_report(satellites_visible=satellites_visible))[2]
                 self.assertEqual(values['satellites_visible'], expected)
+
+    def test_missing_mavlink_extension_fields_are_unknown(self):
+        """Verify MAVLink 1 reports without accuracy and yaw extensions remain usable."""
+        report = SimpleNamespace(fix_type=gps.FIX_3D, satellites_visible=12, eph=100, epv=200)
+        level, summary, values = gps.gps_diagnostic(report)
+        self.assertEqual((level, summary), (gps.LEVEL_OK, '3D_FIX'))
+        self.assertEqual((values['hdop'], values['vdop']), ('1', '2'))
+        for key in ('h_acc_m', 'v_acc_m', 'yaw_deg'):
+            self.assertEqual(values[key], 'unknown')
+
+    def test_zero_dop_and_fractional_heading_are_reported(self):
+        """Verify zero DOP is known and heading keeps centidegree precision."""
+        values = gps.gps_diagnostic(_report(eph=0, epv=0, yaw=12345))[2]
+        self.assertEqual((values['hdop'], values['vdop'], values['yaw_deg']), ('0', '0', '123.45'))
 
 
 if __name__ == '__main__':

@@ -57,6 +57,28 @@ class FlagTest(unittest.TestCase):
                          ['attitude', 'pos_horiz_abs'])
         self.assertEqual(ekf.ekf_flag_names(0), [])
 
+    def test_predicted_position_does_not_replace_a_current_position(self):
+        """Verify predicted horizontal positions cannot enable pose publication."""
+        base = ekf.EKF_ATTITUDE | ekf.EKF_VELOCITY_HORIZ
+        for predicted in (ekf.EKF_PRED_POS_HORIZ_REL, ekf.EKF_PRED_POS_HORIZ_ABS):
+            with self.subTest(predicted=predicted):
+                self.assertFalse(ekf.ekf_pose_valid(base | predicted))
+                self.assertFalse(ekf.ekf_absolute_position_valid(base | predicted))
+
+    def test_absolute_position_still_requires_a_valid_pose(self):
+        """Verify the absolute-position bit cannot bypass missing inputs or veto flags."""
+        for flags in (
+            ekf.EKF_POS_HORIZ_ABS,
+            ekf.EKF_POS_HORIZ_ABS | ekf.EKF_ATTITUDE,
+            ekf.EKF_POS_HORIZ_ABS | ekf.EKF_VELOCITY_HORIZ,
+            ekf.EKF_POS_HORIZ_ABS | ekf.EKF_ATTITUDE | ekf.EKF_VELOCITY_HORIZ
+            | ekf.EKF_CONST_POS_MODE,
+            ekf.EKF_POS_HORIZ_ABS | ekf.EKF_ATTITUDE | ekf.EKF_VELOCITY_HORIZ
+            | ekf.EKF_UNINITIALIZED,
+        ):
+            with self.subTest(flags=flags):
+                self.assertFalse(ekf.ekf_absolute_position_valid(flags))
+
 
 class AttitudeTest(unittest.TestCase):
     def assertVectorAlmostEqual(self, actual, expected):
@@ -104,6 +126,31 @@ class AttitudeTest(unittest.TestCase):
             with self.subTest(q=q):
                 self.assertIsNone(ekf.attitude_to_enu_flu(*q))
 
+    def test_quaternion_norm_limits_are_exclusive(self):
+        """Verify the norm gates reject their endpoints and normalise values just inside."""
+        for norm in (0.5, 1.5):
+            with self.subTest(norm=norm):
+                self.assertIsNone(ekf.attitude_to_enu_flu(norm, 0.0, 0.0, 0.0))
+        for norm in (0.500001, 1.499999):
+            with self.subTest(norm=norm):
+                orientation = ekf.attitude_to_enu_flu(norm, 0.0, 0.0, 0.0)
+                self.assertVectorAlmostEqual(orientation, (0.0, 0.0, SQRT_HALF, SQRT_HALF))
+
+    def test_quaternion_sign_does_not_change_the_orientation(self):
+        """Verify equivalent q and -q inputs produce the same canonical ROS quaternion."""
+        quaternion = (0.5, 0.5, 0.5, 0.5)
+        self.assertVectorAlmostEqual(
+            ekf.attitude_to_enu_flu(*quaternion),
+            ekf.attitude_to_enu_flu(*(-c for c in quaternion)),
+        )
+
+    def test_combined_rotation_maps_all_body_axes(self):
+        """Verify a rotation cycling FRD axes through NED also respects the frame changes."""
+        orientation = ekf.attitude_to_enu_flu(0.5, 0.5, 0.5, 0.5)
+        self.assertVectorAlmostEqual(_rotate(orientation, (1, 0, 0)), (1, 0, 0))
+        self.assertVectorAlmostEqual(_rotate(orientation, (0, 1, 0)), (0, 0, 1))
+        self.assertVectorAlmostEqual(_rotate(orientation, (0, 0, 1)), (0, -1, 0))
+
 
 class OdometryTest(unittest.TestCase):
     def build(self, ned=(0, 0, 0), v_ned=(0, 0, 0), q=(1, 0, 0, 0), rates=(0, 0, 0)):
@@ -144,6 +191,23 @@ class OdometryTest(unittest.TestCase):
         self.assertIsNone(self.build(v_ned=(0, float('inf'), 0)))
         self.assertIsNone(self.build(rates=(0, 0, float('nan'))))
         self.assertIsNone(self.build(q=(0, 0, 0, 0)))
+
+    def test_combined_rotation_expresses_velocity_in_the_body_frame(self):
+        """Verify a tilted vehicle mixes vertical and lateral world velocities correctly."""
+        odometry = self.build(v_ned=(2, 3, 4), q=(0.5, 0.5, 0.5, 0.5))
+        for actual, expected in zip(odometry.linear_velocity, (3, -4, -2), strict=True):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_every_nonfinite_input_is_rejected(self):
+        """Verify every position, velocity, quaternion and angular-rate component is checked."""
+        valid = [1, 2, 3, 4, 5, 6, 1, 0, 0, 0, 0.1, 0.2, 0.3]
+        self.assertIsNotNone(ekf.build_odometry(*valid))
+        for index in range(len(valid)):
+            for bad in (math.nan, math.inf, -math.inf):
+                with self.subTest(index=index, bad=bad):
+                    inputs = valid.copy()
+                    inputs[index] = bad
+                    self.assertIsNone(ekf.build_odometry(*inputs))
 
 
 if __name__ == '__main__':
