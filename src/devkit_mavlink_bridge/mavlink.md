@@ -108,8 +108,22 @@ Inbound, from the LEVIA-H7. No TF is broadcast.
 
 The bridge asks the LEVIA-H7 for these messages with MAV_CMD_SET_MESSAGE_INTERVAL when its heartbeat appears and every 10 s after, so SRn_* parameters need not be set.
 
+Outbound, to the LEVIA-H7.
+
+| Topic | Type | MAVLink message | Notes |
+|---|---|---|---|
+| `cmd_vel` | `geometry_msgs/Twist` | SET_POSITION_TARGET_LOCAL_NED | Body frame, forward speed and yaw rate only. Clamped to `max_linear_x_mps` and `max_angular_z_radps`. Zero if the command is older than `cmd_vel_timeout_s` or the FC heartbeat is overdue |
+| `rtcm` (`rtcm_topic`) | `rtcm_msgs/Message` | GPS_RTCM_DATA | One RTCM3 frame per message, as `ntrip_client` publishes it. Split into up to four 180-byte fragments; a frame over 720 bytes is dropped with a warning. Dropped while the FC heartbeat is overdue |
+| none | none | HEARTBEAT | Sent once a second as a ground station, so the GCS failsafe sees a live link |
+
+The bridge does not arm the rover or change its mode.
+
+RTCM reaches the flight controller only if something publishes `rtcm`. `ntrip_client` does, but `devkit.launch.py` starts it only when `NTRIP_ENABLED=true` and its `ublox` GPS path is selected, which describes receivers on the SBC, not on the LEVIA-H7. Check that launch condition before relying on NTRIP.
+
 ## To check
 
+- RTCM injection. GPS_INJECT_TO defaults to 127 (all receivers) and ArduPilot already skips the moving-baseline rover, so NTRIP data should reach F9P #1 only. Confirm on the bench that GPS1 reports RTK float or fixed in `fc/gps1/fix` once `rtcm` is flowing, and that the base still feeds the rover (GPS2 heading stays valid).
+- Serial load on SERIAL5. State messages at 10 Hz plus RTCM at about 1 Hz is a few kB/s by my estimate, inside 115200 baud. Measure it on the vehicle rather than trust the estimate.
 - Serial protocols are not default. Set SERIAL2_PROTOCOL and SERIAL3_PROTOCOL to GPS (5), SERIAL5_PROTOCOL to MAVLink2, GPS_TYPE=17 (moving-base base) and GPS_TYPE2=18 (rover). ArduPilot assigns GPS1 to the lowest-numbered port set to GPS, so the base must stay on SERIAL2 (U8) and the rover on SERIAL3 (U24). Swapping them makes the base GPS2 and breaks the moving baseline.
 - USART6 (U8) may be NODMA in the hwdef, as on Matek H743. Check it. If so, the base F9P link has no DMA; fine at modest baud rates.
 - Both F9Ps now draw from +5V_SYS, plus antenna bias current. Check the rail.
