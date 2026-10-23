@@ -231,7 +231,8 @@ class TestRepairPersistence(unittest.TestCase):
         node.topology.persist_and_reload.assert_not_called()
         self.assertEqual(node.queued, [])
         with self.assertLogs(SERVICE_LOGGER, level='WARNING') as logs:
-            node.service.repair_connectivity(node.row_action, connect_to='missing')
+            node.service.repair_connectivity(
+                node.row_action, connect_to='missing', on_status=node.page.set_save_status)
 
         self.assertEqual(targets(node.doc.get_node('IN')), {'W1': 'limbic_row_follow'})
         self.assertEqual(targets(node.doc.get_node('W1')), {'OUT': 'limbic_row_follow'})

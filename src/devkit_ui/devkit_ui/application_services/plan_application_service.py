@@ -3,7 +3,9 @@
 This sits between the Plan view model and the topology services. It runs the field planner
 and turns planned rows into topology rows through TopologyEditService. It keeps no draft:
 planning and import return the rows, and saving takes them from the caller. It returns plain
-data; the view model words the status. No ROS or NiceGUI imports.
+data; the view model words the status. It keeps no save status either: save and repair
+report to the callback each call is given, so every caller sees only its own results.
+No ROS or NiceGUI imports.
 """
 from __future__ import annotations
 
@@ -62,16 +64,6 @@ class PlanApplicationService:
         self._telemetry = telemetry
         self._is_sim = is_sim
         self._background = background
-        self._save_status = ''
-
-    @property
-    def save_status(self) -> str:
-        """Return the last save or repair status, including validation and write results."""
-        return self._save_status
-
-    def set_status(self, text: str) -> None:
-        """Replace the save status, for problems the caller found before any save or repair."""
-        self._save_status = text
 
     def plan(self, request: PlanRequest) -> PlanOutcome:
         """Plan straight or contour rows for the boundary.
@@ -142,19 +134,19 @@ class PlanApplicationService:
 
     def save_rows(self, planned: PlannedRows | None, prefix: str, row_id_start: int,
                   overwrite: bool, *, row_action: str, current_node: str | None,
-                  selected_node: str | None) -> None:
+                  selected_node: str | None, on_status: Callable[[str], None]) -> None:
         """Save the given planned swaths as rows in the loaded topology map.
 
         The rows come from the caller, so a save always writes the plan its caller made. With
-        no rows (None, or an empty plan) the save is rejected in save_status and nothing is
+        no rows (None, or an empty plan) the save is rejected through on_status and nothing is
         written.
 
         In-row edges use row_action and headland edges use point-to-point navigation. The
         new rows connect to current_node, or selected_node when that is not usable.
-        Validation failures are reported in save_status and write nothing. Otherwise the
-        map is written in the background and save_status is updated when that ends. See
-        TopologyEditService.stage_f2c_save for the rules. Errors from the row builder
-        propagate before anything is scheduled.
+        Validation failures are reported through on_status and write nothing. Otherwise the
+        map is written in the background and on_status is called again when that ends, from
+        the writing thread. See TopologyEditService.stage_f2c_save for the rules. Errors from
+        the row builder propagate before anything is scheduled.
 
         Args:
             planned: Rows from plan() or import_plan(), or None if the caller has none.
@@ -164,6 +156,7 @@ class PlanApplicationService:
             row_action: Action for edges along a row.
             current_node: Node the robot is localised on, if any.
             selected_node: Node picked in the map view, if any.
+            on_status: Receives each status line of this save, and only this save's.
         """
         planned = planned or PlannedRows([], None)
         odom = self._telemetry.latest_odom
@@ -178,17 +171,19 @@ class PlanApplicationService:
                 current_node=current_node, selected_node=selected_node)
         except TopologyEditError as exc:
             self._log_edit_lines(exc.warnings, ())
-            self._save_status = str(exc)
+            on_status(str(exc))
             return
-        self._start_write(edit)
+        self._start_write(edit, on_status)
 
-    def repair_connectivity(self, row_action: str, connect_to: str | None = None) -> None:
+    def repair_connectivity(self, row_action: str, connect_to: str | None = None, *,
+                            on_status: Callable[[str], None]) -> None:
         """Rebuild missing in-row and headland edges for the rows already in the loaded map.
 
         New in-row edges use row_action and existing edge actions are kept. The live map
         changes immediately and the write runs in the background; nothing is scheduled when
-        no edges are added. Validation failures are reported in save_status. connect_to only
-        changes the success text; an unknown node is ignored with a warning.
+        no edges are added. Validation failures and write results are reported through
+        on_status, as for save_rows. connect_to only changes the success text; an unknown node
+        is ignored with a warning.
 
         Raises:
             OverflowError: Row metadata contains an infinite row id; raised before any edge is added.
@@ -197,9 +192,9 @@ class PlanApplicationService:
             edit = self._edits.stage_repair(row_action, connect_to)
         except TopologyEditError as exc:
             self._log_edit_lines(exc.warnings, ())
-            self._save_status = str(exc)
+            on_status(str(exc))
             return
-        self._start_write(edit)
+        self._start_write(edit, on_status)
 
     def _plan_straight(self, request: PlanRequest) -> list:
         """Return straight swaths for the boundary at the requested angle."""
@@ -207,20 +202,20 @@ class PlanApplicationService:
             list(request.corners_ll), request.obstacle_rings, request.tool_width,
             request.angle_deg, request.obstacle_pad_m, request.headland_m, request.snake)
 
-    def _start_write(self, edit: StagedEdit) -> None:
-        """Log the staged edit, show its pending status and persist it in the background."""
+    def _start_write(self, edit: StagedEdit, on_status: Callable[[str], None]) -> None:
+        """Log the staged edit, report its pending status and persist it in the background."""
         self._log_edit_lines(edit.warnings, edit.infos)
-        self._save_status = edit.pending
-        self._background(lambda: self._write(edit))
+        on_status(edit.pending)
+        self._background(lambda: self._write(edit, on_status))
 
-    def _write(self, edit: StagedEdit) -> None:
-        """Persist the edit and report how it ended in save_status."""
+    def _write(self, edit: StagedEdit, on_status: Callable[[str], None]) -> None:
+        """Persist the edit and report how it ended through on_status."""
         try:
             result = self._topology.persist_and_reload(edit.modify)
-            self._save_status = result.describe(edit.success)
+            on_status(result.describe(edit.success))
             _LOG.info('plan write: %s', edit.success)
         except Exception as exc:
-            self._save_status = f'ERROR: {exc}'
+            on_status(f'ERROR: {exc}')
             _LOG.exception('plan write failed')
 
     @staticmethod

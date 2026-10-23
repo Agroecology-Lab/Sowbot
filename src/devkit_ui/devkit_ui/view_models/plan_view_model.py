@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -51,9 +52,13 @@ STATUS_ERROR = 'error'
 class PlanPageState:
     """State of one browser session's Plan tab: boundary, rows to save and the status line.
 
-    Each page opens its own, so two browsers never share a boundary or a draft. Cards read
-    the attributes and call subscribe to be told when any of them changed. Nothing here
-    imports the UI.
+    Each page opens its own, so two browsers never share a boundary, a draft or a status.
+    Cards read the attributes and call subscribe to be told when any of them changed. Nothing
+    here imports the UI.
+
+    save_status is the last save or repair status of this page. set_save_status may be called
+    from the thread that writes the map and does not notify, so a card reads save_status on a
+    timer.
 
     A planning run is stamped with a generation when it starts. Clearing or successfully
     importing a plan starts a new one, so a run that finishes later is discarded.
@@ -67,6 +72,7 @@ class PlanPageState:
         self.status_kind = STATUS_INFO
         self.can_plan = True
         self.can_save = False
+        self.save_status = ''
         self._generation = 0
         self._listeners: list[Callable[[], None]] = []
 
@@ -78,6 +84,10 @@ class PlanPageState:
     def subscribe(self, listener: Callable[[], None]) -> None:
         """Call listener, with no arguments, after every change."""
         self._listeners.append(listener)
+
+    def set_save_status(self, text: str) -> None:
+        """Replace the save or repair status; safe to call from a worker thread."""
+        self.save_status = text
 
     def _notify(self) -> None:
         """Tell every subscriber that something changed."""
@@ -167,23 +177,19 @@ class PlanViewModel:
         """Return the row action selected on the Run tab."""
         return self._map.row_action
 
-    @property
-    def save_status(self) -> str:
-        """Return the last save or repair status, including validation and write results."""
-        return self._app_service.save_status
-
     def open_page(self) -> PlanPageState:
         """Return fresh state for one browser session's Plan tab."""
         return PlanPageState()
 
-    def plan(self, request: PlanRequest) -> PlanView:
+    async def plan(self, request: PlanRequest) -> PlanView:
         """Plan rows for the boundary and describe the result.
 
-        Blocks on terrain and planner work: call it from a worker thread. The page keeps
-        the returned rows and passes them to save_rows. See PlanApplicationService.plan for
-        the fallback and failure behavior.
+        The terrain and planner work runs on a worker thread, so awaiting this does not block
+        the event loop and callers need no thread of their own. The page keeps the returned
+        rows and passes them to save_rows. See PlanApplicationService.plan for the fallback
+        and failure behavior.
         """
-        outcome = self._app_service.plan(request)
+        outcome = await asyncio.to_thread(self._app_service.plan, request)
         return PlanView(outcome.ok, self._describe_plan(request, outcome), outcome.planned)
 
     def import_plan(self, text: str) -> PlanView:
@@ -199,15 +205,16 @@ class PlanViewModel:
             planned)
 
     def save_rows(self, planned: PlannedRows | None, prefix: str, row_id_start: int,
-                  overwrite: bool) -> None:
+                  overwrite: bool, on_status: Callable[[str], None]) -> None:
         """Save the given planned rows into the loaded map, joined to the current or selected node.
 
-        Progress and errors appear in save_status.
+        Progress and errors go to on_status, which may be called from the writing thread.
         See PlanApplicationService.save_rows for validation and background-write behavior.
         """
         self._app_service.save_rows(
             planned, prefix, row_id_start, overwrite, row_action=self._row_action,
-            current_node=self._map.current_node, selected_node=self._map.selected_node)
+            current_node=self._map.current_node, selected_node=self._map.selected_node,
+            on_status=on_status)
 
     def repair_offer(self) -> RepairOffer | None:
         """Return what the repair dialog shows, or None if no map is loaded.
@@ -255,17 +262,18 @@ class PlanViewModel:
                     pass
         return rows
 
-    def repair(self, connect_to: str | None = None) -> None:
+    def repair(self, connect_to: str | None, on_status: Callable[[str], None]) -> None:
         """Rebuild missing row edges, optionally naming the node the chain is meant to join.
 
-        An unknown connect_to node is rejected in save_status and nothing is repaired.
-        See PlanApplicationService.repair_connectivity for the rest.
+        Progress and errors go to on_status, as for save_rows. An unknown connect_to node is
+        rejected there and nothing is repaired. See PlanApplicationService.repair_connectivity
+        for the rest.
         """
         doc = self._map.topo_doc
         if connect_to and doc is not None and not doc.has_node(connect_to):
-            self._app_service.set_status(f'ERROR: base node {connect_to!r} not in map')
+            on_status(f'ERROR: base node {connect_to!r} not in map')
             return
-        self._app_service.repair_connectivity(self._row_action, connect_to)
+        self._app_service.repair_connectivity(self._row_action, connect_to, on_status=on_status)
 
     @staticmethod
     def _describe_plan(request: PlanRequest, outcome: PlanOutcome) -> str:

@@ -19,6 +19,7 @@ class PlanServiceCase(unittest.TestCase):
         self.edits = Mock()
         self.telemetry = SimpleNamespace(latest_gps=None, latest_odom=None)
         self.pending = []
+        self.statuses = []
         self.service = plan_module.PlanApplicationService(
             self.topology, self.edits, self.telemetry, is_sim=False, background=self.pending.append)
         self.straight = self.enterContext(patch.object(plan_module, 'run_f2c', return_value=SWATHS))
@@ -190,29 +191,31 @@ class TestStagedWrites(PlanServiceCase):
         self.topology.persist_and_reload.return_value = PersistResult('live')
 
         self.service.save_rows(planned, 'crop', 7, True, row_action='row_follow',
-                               current_node='HOME', selected_node='SELECTED')
+                               current_node='HOME', selected_node='SELECTED',
+                               on_status=self.statuses.append)
 
         self.edits.stage_f2c_save.assert_called_once_with(
             'crop', 7, True, swaths=SWATHS, origin_ll=CORNERS[0], contour_used=True,
             break_after=frozenset({0}), is_sim=False, odom_xy=(12.0, -4.0),
             gps=self.telemetry.latest_gps, row_action='row_follow',
             current_node='HOME', selected_node='SELECTED')
-        self.assertEqual(self.service.save_status, 'saving rows')
+        self.assertEqual(self.statuses, ['saving rows'])
         self.topology.persist_and_reload.assert_not_called()
         self.assertEqual(len(self.pending), 1)
 
         self.pending.pop()()
 
         self.topology.persist_and_reload.assert_called_once_with(edit.modify)
-        self.assertEqual(self.service.save_status, 'saved rows — live')
+        self.assertEqual(self.statuses, ['saving rows', 'saved rows — live'])
 
     def test_rejected_save_or_repair_logs_warnings_and_schedules_nothing(self) -> None:
         """Staging errors preserve their status and never reach the persistence boundary."""
         operations = (
             (self.edits.stage_f2c_save, lambda: self.service.save_rows(
                 None, 'crop', 1, False, row_action='row_follow',
-                current_node=None, selected_node=None)),
-            (self.edits.stage_repair, lambda: self.service.repair_connectivity('row_follow')),
+                current_node=None, selected_node=None, on_status=self.statuses.append)),
+            (self.edits.stage_repair, lambda: self.service.repair_connectivity(
+                'row_follow', on_status=self.statuses.append)),
         )
         for stage, operation in operations:
             with self.subTest(stage=stage):
@@ -220,7 +223,7 @@ class TestStagedWrites(PlanServiceCase):
                 with self.assertLogs(plan_module.__name__, level='WARNING') as logs:
                     operation()
 
-                self.assertEqual(self.service.save_status, 'ERROR: rejected')
+                self.assertEqual(self.statuses[-1], 'ERROR: rejected')
                 self.assertEqual(logs.records[0].getMessage(), 'check map')
                 self.assertEqual(self.pending, [])
                 self.topology.persist_and_reload.assert_not_called()
@@ -230,10 +233,11 @@ class TestStagedWrites(PlanServiceCase):
         self.edits.stage_f2c_save.side_effect = ValueError('geometry failed')
         with self.assertRaisesRegex(ValueError, 'geometry failed'):
             self.service.save_rows(PlannedRows(SWATHS, None), 'crop', 1, False,
-                                   row_action='row_follow', current_node=None, selected_node=None)
+                                   row_action='row_follow', current_node=None, selected_node=None,
+                                   on_status=self.statuses.append)
         self.edits.stage_repair.side_effect = OverflowError('infinite row id')
         with self.assertRaisesRegex(OverflowError, 'infinite row id'):
-            self.service.repair_connectivity('row_follow')
+            self.service.repair_connectivity('row_follow', on_status=self.statuses.append)
 
         self.assertEqual(self.pending, [])
         self.topology.persist_and_reload.assert_not_called()

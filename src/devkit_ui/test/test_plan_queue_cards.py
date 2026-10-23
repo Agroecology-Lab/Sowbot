@@ -370,7 +370,6 @@ class TestPlanPage(unittest.TestCase):
             plan_page, 'attach_mission_obstacle_panel', self.obstacle_panel))
         self.plan_vm = Mock()
         self.plan_vm.open_page.side_effect = PlanPageState
-        self.plan_vm.save_status = ''
         self.plan_vm.topo_snapshot.return_value = frozenset()
         self.plan_vm.available_rows.return_value = {1: 'A_IN'}
         self.mission_vm = Mock()
@@ -462,7 +461,6 @@ class TestPlanPageDeleteRow(unittest.IsolatedAsyncioTestCase):
         confirm.side_effect = _completed
         plan_vm, mission_vm = Mock(), Mock()
         plan_vm.open_page.side_effect = PlanPageState
-        plan_vm.save_status = ''
         plan_vm.topo_snapshot.return_value = frozenset({('A_IN', 1, 'entry')})
         plan_vm.available_rows.return_value = {1: 'A_IN'}
         mission_vm.new_queue.side_effect = MissionQueue

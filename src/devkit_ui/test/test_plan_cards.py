@@ -124,16 +124,13 @@ class ControlsCase(unittest.TestCase):
         self.addCleanup(fake_ui.reset)
         self.state = PlanPageState()
         self.plan_vm = Mock()
-        self.plan_vm.save_status = ''
         self.obstacle_vm = Mock()
         self.obstacle_vm.rings_ll.return_value = []
         self.handle = Mock(obstacle_pad=SimpleNamespace(value=0.5))
         self.attach = Mock(return_value=self.handle)
         self.enterContext(patch.object(plan_controls_card, 'attach_mission_sidebar_controls',
                                        self.attach))
-        self.io_bound = Mock(return_value=Deferred())
-        self.enterContext(patch.object(plan_controls_card, 'ng_run',
-                                       SimpleNamespace(io_bound=self.io_bound)))
+        self.plan_vm.plan = Mock(return_value=Deferred())
         self.map = BoundaryMapCard(self.state, None).map
         self.card = PlanControlsCard(self.state, self.plan_vm, self.obstacle_vm, self.map)
 
@@ -189,7 +186,7 @@ class TestPlanControlsCard(ControlsCase):
 
         self.assertEqual(self.card._status_lbl.text, 'Need at least 3 corners')
         self.assertEqual(self.card._status_lbl.styles[-1], RED)
-        self.io_bound.assert_not_called()
+        self.plan_vm.plan.assert_not_called()
 
     def test_the_form_reaches_the_planner(self) -> None:
         """Verify every setting, the obstacle rings and the padding go into the request."""
@@ -205,8 +202,7 @@ class TestPlanControlsCard(ControlsCase):
 
         self.start_plan()
 
-        self.assertIs(self.io_bound.call_args.args[0], self.plan_vm.plan)
-        request = self.io_bound.call_args.args[1]
+        request = self.plan_vm.plan.call_args.args[0]
         self.assertEqual(
             (request.tool_width, request.angle_deg, request.headland_m, request.snake,
              request.obstacle_pad_m, request.contour, request.recon_path, request.dem_res),
@@ -253,7 +249,8 @@ class TestPlanControlsCard(ControlsCase):
 
         self.button('Save as Topo Rows').click()
 
-        self.plan_vm.save_rows.assert_called_once_with(view.planned, 'N', 7, overwrite=True)
+        self.plan_vm.save_rows.assert_called_once_with(
+            view.planned, 'N', 7, overwrite=True, on_status=self.state.set_save_status)
 
     def test_save_defaults_a_blank_prefix_and_first_id(self) -> None:
         """Verify empty fields fall back to F2C and 1."""
@@ -262,7 +259,8 @@ class TestPlanControlsCard(ControlsCase):
 
         self.button('Save as Topo Rows').click()
 
-        self.plan_vm.save_rows.assert_called_once_with(None, 'F2C', 1, overwrite=False)
+        self.plan_vm.save_rows.assert_called_once_with(
+            None, 'F2C', 1, overwrite=False, on_status=self.state.set_save_status)
 
     def test_clear_discards_pending_success_and_failure(self) -> None:
         """Verify cleared work cannot restore rows, a draft, a status or an enabled Save."""
@@ -347,12 +345,12 @@ class TestPlanControlsCard(ControlsCase):
         self.assertTrue(angle.enabled)
         self.assertFalse(any(e.visible for e in self.card._contour_only))
 
-    def test_the_save_status_follows_the_plan_service_and_only_when_it_changes(self) -> None:
+    def test_the_save_status_follows_this_pages_state_and_only_when_it_changes(self) -> None:
         """Verify the label colours for an error, a success and a blank status."""
         timer = next(cb for interval, cb in fake_ui.timers if interval == 0.4)
         for status, colour in (('ERROR: disk', RED), ('saved 3 rows', GREEN), ('', GREY)):
             with self.subTest(status=status):
-                self.plan_vm.save_status = status
+                self.state.save_status = status
 
                 timer()
                 timer()
@@ -409,7 +407,7 @@ class TestRepair(ControlsCase):
 
         self.repair()
 
-        self.plan_vm.repair.assert_called_once_with('B_IN')
+        self.plan_vm.repair.assert_called_once_with('B_IN', self.state.set_save_status)
 
     def test_confirming_with_a_blank_base_wires_the_chain_alone(self) -> None:
         """Verify blank means no base node."""
@@ -417,7 +415,7 @@ class TestRepair(ControlsCase):
 
         self.repair()
 
-        self.plan_vm.repair.assert_called_once_with(None)
+        self.plan_vm.repair.assert_called_once_with(None, self.state.set_save_status)
 
     def test_cancelling_repairs_nothing(self) -> None:
         """Verify Cancel leaves the map alone."""

@@ -1,4 +1,3 @@
-from nicegui import run as ng_run
 from nicegui import ui
 
 from devkit_ui.pages.obstacle_cards import attach_mission_sidebar_controls
@@ -145,8 +144,8 @@ class PlanControlsCard(ui.card):
         self._save_btn.set_enabled(self._state.can_save)
 
     def _refresh_save_status(self) -> None:
-        """Show the plan service's save or repair status when it changes."""
-        current = self._plan_vm.save_status
+        """Show this page's save or repair status when it changes."""
+        current = self._state.save_status
         if current == self._save_status_seen:
             return
         self._save_status_seen = current
@@ -165,11 +164,11 @@ class PlanControlsCard(ui.card):
         }
 
     async def _plan(self) -> None:
-        """Plan rows for the drawn boundary on a worker thread; the state discards stale results."""
+        """Plan rows for the drawn boundary without blocking; the state discards stale results."""
         run = self._state.begin_plan(self._obstacle_vm.rings_ll(), **self._form())
         if run is None:
             return
-        view = await ng_run.io_bound(self._plan_vm.plan, run.request)
+        view = await self._plan_vm.plan(run.request)
         self._state.finish_plan(run, view)
 
     async def _import(self, e) -> None:
@@ -184,6 +183,7 @@ class PlanControlsCard(ui.card):
             self._prefix.value or 'F2C',
             int(self._row_id_start.value or 1),
             overwrite=self._overwrite.value,
+            on_status=self._state.set_save_status,
         )
 
     def _clear(self) -> None:
@@ -205,4 +205,4 @@ class PlanControlsCard(ui.card):
         base = await ask_repair_base(offer)
         if base is None:
             return
-        self._plan_vm.repair(base or None)
+        self._plan_vm.repair(base or None, self._state.set_save_status)
