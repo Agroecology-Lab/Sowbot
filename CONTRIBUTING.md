@@ -19,7 +19,7 @@ Please be respectful and constructive in all interactions.
 ## Background
 
 We welcome volunteers of all levels to contribute.
-If you're new to ROS, [this course](https://github.com/henki-robotics/robotics_essentials_ros2) may be useful.
+If you're new to ROS, [this course](https://github.com/henki-robotics/robotics_essentials_ros2) may be useful. If you want a deep dive check the [Principles of robotics](https://porabook.com/book/)
 
 ## Development Setup
 
