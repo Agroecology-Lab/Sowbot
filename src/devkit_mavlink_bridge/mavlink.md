@@ -1,5 +1,7 @@
 # LEVIA H7 wiring and architecture
 
+[Tool](https://github.com/heeplr/rover-wizard)
+
 ## Wiring
 
 LEVIA H7 all-in-one. All connectors are 1.0 mm SH.
