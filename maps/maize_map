@@ -45,7 +45,7 @@ definitions:
     {path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
     </root>\n"
 meta:
-  last_updated: 12-10-2026_11-38-59
+  last_updated: 25-10-2026_12-28-37
 metric_map: maize_map
 name: maize_map
 nodes:
@@ -58,7 +58,7 @@ nodes:
     pointset: maize_map
     row_id: 1
     row_role: entry
-    timestamp: 02-10-2026_15-09-42
+    timestamp: 25-10-2026_12-28-12
   node:
     edges:
     - action: row_traversal
@@ -77,18 +77,18 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 16.984
-        y: -16.557
+        x: 0.0
+        y: -2.006
         z: 0.0
     properties:
       dropped_by: webui_f2c
       gps_fix_type: 0
       gps_hdop: null
-      gps_lat: 48.0048208
-      gps_lon: 3.6656973
+      gps_lat: 48.0048037
+      gps_lon: 3.665115
       row_id: 1
       row_role: entry
-      timestamp: 02-10-2026_15-09-42
+      timestamp: 25-10-2026_12-28-12
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
     verts: []
@@ -101,7 +101,7 @@ nodes:
     pointset: maize_map
     row_id: 1
     row_role: exit
-    timestamp: 02-10-2026_15-09-42
+    timestamp: 25-10-2026_12-28-12
   node:
     edges:
     - action: navigate_to_pose
@@ -120,18 +120,18 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 20.054
-        y: -12.213
+        x: 2.942
+        y: -2.97
         z: 0.0
     properties:
       dropped_by: webui_f2c
       gps_fix_type: 0
       gps_hdop: null
-      gps_lat: 48.0048599
-      gps_lon: 3.6657385
+      gps_lat: 48.004795
+      gps_lon: 3.6651545
       row_id: 1
       row_role: exit
-      timestamp: 02-10-2026_15-09-42
+      timestamp: 25-10-2026_12-28-12
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
     verts: []
@@ -144,12 +144,12 @@ nodes:
     pointset: maize_map
     row_id: 2
     row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
+    timestamp: 25-10-2026_12-28-12
   node:
     edges:
     - action: row_traversal
-      edge_id: F2C_R2_W1_F2C_R2_W2
-      node: F2C_R2_W2
+      edge_id: F2C_R2_W1_F2C_R2_OUT
+      node: F2C_R2_OUT
     name: F2C_R2_W1
     nav_frame: map
     pointset: F2C_R2_W1
@@ -160,218 +160,18 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 17.702
-        y: -4.033
+        x: 2.883
+        y: -1.688
         z: 0.0
     properties:
       dropped_by: webui_f2c
       gps_fix_type: 0
       gps_hdop: null
-      gps_lat: 48.0049334
-      gps_lon: 3.665707
+      gps_lat: 48.0048065
+      gps_lon: 3.6651537
       row_id: 2
       row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R2_W2
-    pointset: maize_map
-    row_id: 2
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R2_W2_F2C_R2_W3
-      node: F2C_R2_W3
-    name: F2C_R2_W2
-    nav_frame: map
-    pointset: F2C_R2_W2
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 18.074
-        y: -6.353
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0049125
-      gps_lon: 3.665712
-      row_id: 2
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R2_W3
-    pointset: maize_map
-    row_id: 2
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R2_W3_F2C_R2_W4
-      node: F2C_R2_W4
-    name: F2C_R2_W3
-    nav_frame: map
-    pointset: F2C_R2_W3
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 16.631
-        y: -8.394
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0048942
-      gps_lon: 3.6656926
-      row_id: 2
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R2_W4
-    pointset: maize_map
-    row_id: 2
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R2_W4_F2C_R2_W5
-      node: F2C_R2_W5
-    name: F2C_R2_W4
-    nav_frame: map
-    pointset: F2C_R2_W4
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 15.188
-        y: -10.436
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0048758
-      gps_lon: 3.6656732
-      row_id: 2
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R2_W5
-    pointset: maize_map
-    row_id: 2
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R2_W5_F2C_R2_W6
-      node: F2C_R2_W6
-    name: F2C_R2_W5
-    nav_frame: map
-    pointset: F2C_R2_W5
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 13.745
-        y: -12.478
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0048575
-      gps_lon: 3.6656538
-      row_id: 2
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R2_W6
-    pointset: maize_map
-    row_id: 2
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R2_W6_F2C_R2_OUT
-      node: F2C_R2_OUT
-    name: F2C_R2_W6
-    nav_frame: map
-    pointset: F2C_R2_W6
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 12.302
-        y: -14.519
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0048392
-      gps_lon: 3.6656345
-      row_id: 2
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
+      timestamp: 25-10-2026_12-28-12
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
     verts: []
@@ -384,7 +184,7 @@ nodes:
     pointset: maize_map
     row_id: 2
     row_role: entry
-    timestamp: 02-10-2026_15-09-42
+    timestamp: 25-10-2026_12-28-12
   node:
     edges:
     - action: row_traversal
@@ -406,18 +206,18 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 16.939
-        y: -1.652
+        x: 5.258
+        y: -2.466
         z: 0.0
     properties:
       dropped_by: webui_f2c
       gps_fix_type: 0
       gps_hdop: null
-      gps_lat: 48.0049547
-      gps_lon: 3.6656967
+      gps_lat: 48.0047996
+      gps_lon: 3.6651856
       row_id: 2
       row_role: entry
-      timestamp: 02-10-2026_15-09-42
+      timestamp: 25-10-2026_12-28-12
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
     verts: []
@@ -430,7 +230,7 @@ nodes:
     pointset: maize_map
     row_id: 2
     row_role: exit
-    timestamp: 02-10-2026_15-09-42
+    timestamp: 25-10-2026_12-28-12
   node:
     edges:
     - action: navigate_to_pose
@@ -449,258 +249,18 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 10.441
-        y: -17.152
+        x: 0.0
+        y: -0.666
         z: 0.0
     properties:
       dropped_by: webui_f2c
       gps_fix_type: 0
       gps_hdop: null
-      gps_lat: 48.0048155
-      gps_lon: 3.6656095
+      gps_lat: 48.0048157
+      gps_lon: 3.665115
       row_id: 2
       row_role: exit
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R3_W1
-    pointset: maize_map
-    row_id: 3
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R3_W1_F2C_R3_W2
-      node: F2C_R3_W2
-    name: F2C_R3_W1
-    nav_frame: map
-    pointset: F2C_R3_W1
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 6.054
-        y: -13.024
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0048526
-      gps_lon: 3.6655506
-      row_id: 3
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R3_W2
-    pointset: maize_map
-    row_id: 3
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R3_W2_F2C_R3_W3
-      node: F2C_R3_W3
-    name: F2C_R3_W2
-    nav_frame: map
-    pointset: F2C_R3_W2
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 8.042
-        y: -11.883
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0048628
-      gps_lon: 3.6655773
-      row_id: 3
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R3_W3
-    pointset: maize_map
-    row_id: 3
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R3_W3_F2C_R3_W4
-      node: F2C_R3_W4
-    name: F2C_R3_W3
-    nav_frame: map
-    pointset: F2C_R3_W3
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 9.485
-        y: -9.841
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0048812
-      gps_lon: 3.6655966
-      row_id: 3
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R3_W4
-    pointset: maize_map
-    row_id: 3
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R3_W4_F2C_R3_W5
-      node: F2C_R3_W5
-    name: F2C_R3_W4
-    nav_frame: map
-    pointset: F2C_R3_W4
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 10.928
-        y: -7.799
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0048995
-      gps_lon: 3.665616
-      row_id: 3
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R3_W5
-    pointset: maize_map
-    row_id: 3
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R3_W5_F2C_R3_W6
-      node: F2C_R3_W6
-    name: F2C_R3_W5
-    nav_frame: map
-    pointset: F2C_R3_W5
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 12.371
-        y: -5.758
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0049179
-      gps_lon: 3.6656354
-      row_id: 3
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R3_W6
-    pointset: maize_map
-    row_id: 3
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R3_W6_F2C_R3_OUT
-      node: F2C_R3_OUT
-    name: F2C_R3_W6
-    nav_frame: map
-    pointset: F2C_R3_W6
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 12.274
-        y: -3.48
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0049383
-      gps_lon: 3.6656341
-      row_id: 3
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
+      timestamp: 25-10-2026_12-28-12
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
     verts: []
@@ -713,18 +273,15 @@ nodes:
     pointset: maize_map
     row_id: 3
     row_role: entry
-    timestamp: 02-10-2026_15-09-42
+    timestamp: 25-10-2026_12-28-12
   node:
     edges:
     - action: row_traversal
-      edge_id: F2C_R3_IN_F2C_R3_W1
-      node: F2C_R3_W1
+      edge_id: F2C_R3_IN_F2C_R3_OUT
+      node: F2C_R3_OUT
     - action: navigate_to_pose
       edge_id: F2C_R3_IN_F2C_R2_OUT
       node: F2C_R2_OUT
-    - action: navigate_to_pose
-      edge_id: F2C_R3_IN_F2C_R4_OUT
-      node: F2C_R4_OUT
     name: F2C_R3_IN
     nav_frame: map
     pointset: F2C_R3_IN
@@ -735,18 +292,18 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 3.576
-        y: -13.36
+        x: 0.985
+        y: 0.197
         z: 0.0
     properties:
       dropped_by: webui_f2c
       gps_fix_type: 0
       gps_hdop: null
-      gps_lat: 48.0048496
-      gps_lon: 3.6655173
+      gps_lat: 48.0048235
+      gps_lon: 3.6651282
       row_id: 3
       row_role: entry
-      timestamp: 02-10-2026_15-09-42
+      timestamp: 25-10-2026_12-28-12
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
     verts: []
@@ -759,7 +316,7 @@ nodes:
     pointset: maize_map
     row_id: 3
     row_role: exit
-    timestamp: 02-10-2026_15-09-42
+    timestamp: 25-10-2026_12-28-12
   node:
     edges:
     - action: navigate_to_pose
@@ -778,138 +335,18 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 11.622
-        y: -1.448
+        x: 5.495
+        y: -1.281
         z: 0.0
     properties:
       dropped_by: webui_f2c
       gps_fix_type: 0
       gps_hdop: null
-      gps_lat: 48.0049566
-      gps_lon: 3.6656253
+      gps_lat: 48.0048102
+      gps_lon: 3.6651888
       row_id: 3
       row_role: exit
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R4_W1
-    pointset: maize_map
-    row_id: 4
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R4_W1_F2C_R4_W2
-      node: F2C_R4_W2
-    name: F2C_R4_W1
-    nav_frame: map
-    pointset: F2C_R4_W1
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 7.069
-        y: -3.624
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.004937
-      gps_lon: 3.6655642
-      row_id: 4
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R4_W2
-    pointset: maize_map
-    row_id: 4
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R4_W2_F2C_R4_W3
-      node: F2C_R4_W3
-    name: F2C_R4_W2
-    nav_frame: map
-    pointset: F2C_R4_W2
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 6.247
-        y: -5.761
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0049178
-      gps_lon: 3.6655532
-      row_id: 4
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R4_W3
-    pointset: maize_map
-    row_id: 4
-    row_role: waypoint
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R4_W3_F2C_R4_OUT
-      node: F2C_R4_OUT
-    name: F2C_R4_W3
-    nav_frame: map
-    pointset: F2C_R4_W3
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 4.804
-        y: -7.802
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0048995
-      gps_lon: 3.6655338
-      row_id: 4
-      row_role: waypoint
-      timestamp: 02-10-2026_15-09-42
+      timestamp: 25-10-2026_12-28-12
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
     verts: []
@@ -922,18 +359,15 @@ nodes:
     pointset: maize_map
     row_id: 4
     row_role: entry
-    timestamp: 02-10-2026_15-09-42
+    timestamp: 25-10-2026_12-28-12
   node:
     edges:
     - action: row_traversal
-      edge_id: F2C_R4_IN_F2C_R4_W1
-      node: F2C_R4_W1
+      edge_id: F2C_R4_IN_F2C_R4_OUT
+      node: F2C_R4_OUT
     - action: navigate_to_pose
       edge_id: F2C_R4_IN_F2C_R3_OUT
       node: F2C_R3_OUT
-    - action: navigate_to_pose
-      edge_id: F2C_R4_IN_F2C_R5_OUT
-      node: F2C_R5_OUT
     name: F2C_R4_IN
     nav_frame: map
     pointset: F2C_R4_IN
@@ -944,18 +378,18 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 6.305
-        y: -1.243
+        x: 5.732
+        y: -0.096
         z: 0.0
     properties:
       dropped_by: webui_f2c
       gps_fix_type: 0
       gps_hdop: null
-      gps_lat: 48.0049584
-      gps_lon: 3.6655539
+      gps_lat: 48.0048208
+      gps_lon: 3.665192
       row_id: 4
       row_role: entry
-      timestamp: 02-10-2026_15-09-42
+      timestamp: 25-10-2026_12-28-12
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
     verts: []
@@ -968,15 +402,12 @@ nodes:
     pointset: maize_map
     row_id: 4
     row_role: exit
-    timestamp: 02-10-2026_15-09-42
+    timestamp: 25-10-2026_12-28-12
   node:
     edges:
     - action: navigate_to_pose
-      edge_id: F2C_R4_OUT_F2C_R5_IN
-      node: F2C_R5_IN
-    - action: navigate_to_pose
-      edge_id: F2C_R4_OUT_F2C_R3_IN
-      node: F2C_R3_IN
+      edge_id: F2C_R4_OUT_F2C_R4_IN
+      node: F2C_R4_IN
     name: F2C_R4_OUT
     nav_frame: map
     pointset: F2C_R4_OUT
@@ -987,104 +418,18 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 2.635
-        y: -8.442
+        x: 3.377
+        y: 0.676
         z: 0.0
     properties:
       dropped_by: webui_f2c
       gps_fix_type: 0
       gps_hdop: null
-      gps_lat: 48.0048937
-      gps_lon: 3.6655047
+      gps_lat: 48.0048278
+      gps_lon: 3.6651603
       row_id: 4
       row_role: exit
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R5_IN
-    pointset: maize_map
-    row_id: 5
-    row_role: entry
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: row_traversal
-      edge_id: F2C_R5_IN_F2C_R5_OUT
-      node: F2C_R5_OUT
-    - action: navigate_to_pose
-      edge_id: F2C_R5_IN_F2C_R4_OUT
-      node: F2C_R4_OUT
-    name: F2C_R5_IN
-    nav_frame: map
-    pointset: F2C_R5_IN
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 1.693
-        y: -3.524
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0049379
-      gps_lon: 3.665492
-      row_id: 5
-      row_role: entry
-      timestamp: 02-10-2026_15-09-42
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
-    verts: []
-- meta:
-    dropped_by: webui_f2c
-    gps_fix_type: 0
-    gps_hdop: null
-    map: maize_map
-    node: F2C_R5_OUT
-    pointset: maize_map
-    row_id: 5
-    row_role: exit
-    timestamp: 02-10-2026_15-09-42
-  node:
-    edges:
-    - action: navigate_to_pose
-      edge_id: F2C_R5_OUT_F2C_R5_IN
-      node: F2C_R5_IN
-    - action: navigate_to_pose
-      edge_id: F2C_R5_OUT_F2C_R4_IN
-      node: F2C_R4_IN
-    name: F2C_R5_OUT
-    nav_frame: map
-    pointset: F2C_R5_OUT
-    pose:
-      orientation:
-        w: 1.0
-        x: 0.0
-        y: 0.0
-        z: 0.0
-      position:
-        x: 1.555
-        y: -2.805
-        z: 0.0
-    properties:
-      dropped_by: webui_f2c
-      gps_fix_type: 0
-      gps_hdop: null
-      gps_lat: 48.0049444
-      gps_lon: 3.6654902
-      row_id: 5
-      row_role: exit
-      timestamp: 02-10-2026_15-09-42
+      timestamp: 25-10-2026_12-28-12
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
     verts: []
