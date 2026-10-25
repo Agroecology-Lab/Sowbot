@@ -93,6 +93,10 @@ RUN apt-get update && \
 #     kept installed alongside it, not replaced by it — ros2_medkit_diagnostic_bridge
 #     only sees STALE faults when pointed at the aggregator's /diagnostics_agg
 #     output, not raw /diagnostics, so the two are complementary.
+#     NOTE: ros2_pulse (LD_PRELOAD topic-rate / node-liveness probe, pulse_bridge,
+#     pulse-check) is rosdistro-released for Jazzy (0.7.0-1), so it is apt-installed
+#     here like ros2_medkit. Install only: nothing preloads it. Enable per process with
+#     LD_PRELOAD=$(ros2 pkg prefix ros2_pulse)/lib/libros2_pulse.so
 RUN for i in 1 2 3 4 5; do \
       apt-get update && \
       apt-get install -y --fix-missing --no-install-recommends \
@@ -123,6 +127,7 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-ros2-medkit-diagnostic-bridge \
         ros-jazzy-ros2-medkit-log-bridge \
         ros-jazzy-ros2-medkit-gateway \
+        ros-jazzy-ros2-pulse \
         ros-jazzy-rviz2 \
         python3-sympy \
         python3-fonttools \
