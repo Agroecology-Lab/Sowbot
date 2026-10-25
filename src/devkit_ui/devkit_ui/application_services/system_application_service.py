@@ -31,7 +31,19 @@ from devkit_ui.process_registry import (
 _EXPLORER_CMD = ['ros2', 'run', 'ros2graph_explorer', 'ros2graph_explorer']
 _GRAPHER_DIR = '/tmp/ros2grapher'
 _GRAPHER_CMD = ['ros2grapher', '/workspace', '-o', f'{_GRAPHER_DIR}/index.html', '--port', '8888']
-_MEDKIT_CMD = ['ros2', 'launch', 'ros2_medkit_gateway', 'bringup.launch.py', 'server_host:=127.0.0.1']
+# Loopback unless MEDKIT_SERVER_HOST says otherwise. manage.py sets it to 0.0.0.0 for its bridge-network
+# container: Docker forwards a published port to the container's own address, never to its loopback, so a
+# gateway bound to 127.0.0.1 is unreachable from the host. The host side of that mapping stays loopback
+# (see TOOLS_BIND), so this does not widen exposure. Do not default to 0.0.0.0: the compose `devkit`
+# service uses host networking, where it would expose the unauthenticated gateway to the LAN.
+
+
+def _medkit_cmd() -> list[str]:
+    """Return the gateway launch command, binding to MEDKIT_SERVER_HOST (default 127.0.0.1)."""
+    host = os.environ.get('MEDKIT_SERVER_HOST', '').strip() or '127.0.0.1'
+    return ['ros2', 'launch', 'ros2_medkit_gateway', 'bringup.launch.py', f'server_host:={host}']
+
+
 # Seconds to wait after SIGINT, after terminate and after kill; ROS launch needs time to stop its children.
 _MEDKIT_WAITS = (15, 5, 5)
 _RVIZ_DISPLAY = ':98'
@@ -194,12 +206,12 @@ class SystemApplicationService:
             pass
 
     def _launch_medkit(self) -> tuple[Any, str]:
-        """Start the Medkit gateway on loopback and return its process with no note.
+        """Start the Medkit gateway and return its process with no note.
 
         It gets its own session: it is registered for shutdown_tools, which signals the whole
         group, and a child in the UI's own group would make that signal the UI itself.
         """
-        return spawn_quiet(_MEDKIT_CMD), ''
+        return spawn_quiet(_medkit_cmd()), ''
 
     # ── stopping ──────────────────────────────────────────────────────────────
 

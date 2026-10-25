@@ -122,10 +122,18 @@ class TestStartTools(ServiceTestCase):
 
 class TestMedkit(ServiceTestCase):
     def test_start_launches_gateway_on_loopback_and_reports_pid(self):
-        self.assertEqual(self.service.start(TOOL_MEDKIT), ToolState('started', 137))
+        with patch.dict(os.environ, clear=False):
+            os.environ.pop('MEDKIT_SERVER_HOST', None)
+            self.assertEqual(self.service.start(TOOL_MEDKIT), ToolState('started', 137))
         self.quiet.assert_called_once_with(
             ['ros2', 'launch', 'ros2_medkit_gateway', 'bringup.launch.py', 'server_host:=127.0.0.1'])
         self.logged.assert_not_called()
+
+    def test_start_binds_gateway_to_medkit_server_host_when_set(self):
+        with patch.dict(os.environ, {'MEDKIT_SERVER_HOST': '0.0.0.0'}):
+            self.service.start(TOOL_MEDKIT)
+        self.quiet.assert_called_once_with(
+            ['ros2', 'launch', 'ros2_medkit_gateway', 'bringup.launch.py', 'server_host:=0.0.0.0'])
 
     def test_start_while_running_does_not_launch_again(self):
         self.service.start(TOOL_MEDKIT)
@@ -212,7 +220,7 @@ class TestMedkit(ServiceTestCase):
         """Use a real process: a child in the UI's own group would make kill_group signal the UI."""
         command = [sys.executable, '-c', 'import time; time.sleep(60)']
         with (patch.object(sas, 'spawn_quiet', process_registry.spawn_quiet),
-              patch.object(sas, '_MEDKIT_CMD', command)):
+              patch.object(sas, '_medkit_cmd', return_value=command)):
             state = self.service.start(TOOL_MEDKIT)
         proc = handle(TOOL_MEDKIT)[0]
         try:
