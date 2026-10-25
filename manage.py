@@ -320,6 +320,10 @@ class DevkitManager:
             '-p', f'{tools_host}:8734:8734',
             '-p', f'{tools_host}:8888:8888',
             '--privileged',
+            # The ports above are published on the host's loopback (or TOOLS_BIND), and Docker forwards
+            # them to the container's own address, not its loopback. The Medkit gateway therefore has to
+            # listen on all container interfaces; the host-side bind above is what limits exposure.
+            '--env', 'MEDKIT_SERVER_HOST=0.0.0.0',
             '--env', 'RMW_IMPLEMENTATION=rmw_cyclonedds_cpp',
             '--env', 'PYTHONPATH=/root/.lizard:/workspace/install/lib/python3.12/site-packages',
             '--env', f'DISPLAY={os.environ.get("DISPLAY", ":0")}',
