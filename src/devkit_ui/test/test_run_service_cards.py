@@ -22,6 +22,7 @@ class TestJoystickControlCard(unittest.TestCase):
         """Build the joystick card with fake UI elements and a mock drive service."""
         fake_ui.reset()
         self.enterContext(patch.object(joystick_control_card, 'ui', fake_ui))
+        self.enterContext(patch.object(joystick_control_card, 'request_host', return_value='robot.local'))
         self.app = Mock(soft_estop_active=False)
         self.global_vm = GlobalViewModel(self.app)
         self.run_vm = RunViewModel(self.app)
@@ -34,6 +35,19 @@ class TestJoystickControlCard(unittest.TestCase):
         joystick.kwargs['on_move'](SimpleNamespace(x='-0.25', y='0.75'))
 
         self.app.move_joystick.assert_called_once_with(0.75, -0.25)
+
+    def test_row_debug_stream_is_embedded_below_the_joystick_from_the_request_host(self):
+        """Verify the debug image points at web_video_server on the host the browser used."""
+        frame = fake_ui.find('img')
+
+        self.assertIn(
+            'src="http://robot.local:8081/stream?topic=/caatinga_vision/row_nav/debug_image'
+            '&width=260&height=195&type=mjpeg"',
+            frame.properties,
+        )
+        self.assertGreater(
+            fake_ui.elements.index(frame), fake_ui.elements.index(fake_ui.find('joystick'))
+        )
 
     def test_release_sends_zero_speed(self):
         """Verify releasing the joystick requests zero forward and turn speeds."""

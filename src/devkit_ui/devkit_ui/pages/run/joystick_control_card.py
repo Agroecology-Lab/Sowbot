@@ -1,7 +1,16 @@
 from nicegui import ui
 
+from devkit_ui.pages.widgets import request_host
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
+
+# web_video_server port (neo.launch.py: web_video_port, default 8081) and the row-navigation debug image.
+WEB_VIDEO_PORT = 8081
+ROW_DEBUG_TOPIC = '/caatinga_vision/row_nav/debug_image'
+# Size requested from web_video_server; the stream is embedded directly as an <img>, because the
+# stream_viewer page adds a topic heading and body margin that push the image out of a fixed frame.
+ROW_DEBUG_WIDTH = 260
+ROW_DEBUG_HEIGHT = 195
 
 
 class JoystickControlCard(ui.card):
@@ -64,3 +73,13 @@ class JoystickControlCard(ui.card):
                     ui.label().bind_text_from(run_vm.joystick, 'pose_lbl').classes(
                         'text-xs font-mono text-[#57606a] text-center max-w-[130px] whitespace-pre-line'
                     )
+
+            # Resolved from the browser's own request host, so it also works from another machine.
+            ui.element('img').props(
+                f'src="http://{request_host()}:{WEB_VIDEO_PORT}/stream?topic={ROW_DEBUG_TOPIC}'
+                f'&width={ROW_DEBUG_WIDTH}&height={ROW_DEBUG_HEIGHT}&type=mjpeg" '
+                'alt="Row navigation debug image"'
+            ).style(
+                f'width:{ROW_DEBUG_WIDTH}px;max-width:100%;aspect-ratio:4/3;object-fit:contain;'
+                'border-radius:4px;background:#000'
+            )
