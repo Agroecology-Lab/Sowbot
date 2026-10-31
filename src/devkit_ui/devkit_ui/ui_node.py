@@ -144,15 +144,15 @@ class NiceGuiNode:
         self._run_vm = RunViewModel(
             self._drive_app_service, self._row_discovery_app_service, self._nav_app_service)
         self._topo_vm = TopologyViewModel(self._topo_app_service)
-        self._plan_vm = PlanViewModel(
-            self._plan_app_service, MapContext(self._topo_vm, self._run_vm))
+        map_context = MapContext(self._topo_vm, self._run_vm)
+        self._plan_vm = PlanViewModel(self._plan_app_service, map_context)
         self._authoring_vm = MapAuthoringViewModel(
             self._run_vm, self._topo_vm, self._topo_app_service, self._topo_edit_service,
             self._telemetry_app_service, TrackApplicationService(self._ros.create_timer),
             is_sim=self._is_sim)
         self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
         self._robot_brain_vm = RobotBrainViewModel(self._robot_brain_app_service)
-        self._system_vm = SystemViewModel(SystemApplicationService())
+        self._system_vm = SystemViewModel(SystemApplicationService(), map_context)
         sim_assets = SimAssetService(SimAssetStore())
         self._sim_vm = SimViewModel(sim_assets, SimWorldService(sim_assets))
         self._sim_process_vm = SimProcessViewModel(SimProcessApplicationService())
