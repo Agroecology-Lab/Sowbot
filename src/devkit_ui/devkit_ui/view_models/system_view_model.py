@@ -49,7 +49,8 @@ class SystemViewModel:
     def export_row_plan(self) -> RowPlanDownload:
         """Return the loaded map's rows as a LiteFarm row plan file, or the reason there is none.
 
-        Pure computation on the loaded map, so it is quick enough to call on the UI loop.
+        A missing map or RowPlanError becomes an error status with no file. A successful status includes
+        up to three warnings. Pure computation on the loaded map, so it is quick enough to call on the UI loop.
         """
         doc = self._map_context.topo_doc if self._map_context else None
         if doc is None:

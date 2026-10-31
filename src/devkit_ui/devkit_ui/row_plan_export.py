@@ -41,10 +41,12 @@ class RowPlanExport:
 
     @property
     def map_id(self) -> str:
+        """Return the plan's map ID."""
         return self.geojson['properties']['map_id']
 
     @property
     def map_hash(self) -> str:
+        """Return the plan's row hash."""
         return self.geojson['properties']['map_hash']
 
     def json_text(self) -> str:
@@ -59,9 +61,11 @@ def export_row_plan(doc: TopoDoc, *, map_id: str | None = None, supersedes: str 
                     field_location_id: str | None = None) -> RowPlanExport:
     """Return the row plan in ``doc``, in mission order (ascending ``row_id``).
 
-    Without ``map_id`` the id is ``<map name>-<first 12 characters of the hash>``. The same rows always
-    give the same id, so importing twice is harmless, and changed rows get a new id that can supersede
-    the old one. Raise RowPlanError if a row is incomplete, has no GPS position, or LiteFarm would refuse it.
+    If ``map_id`` is empty or omitted, the ID combines the sanitized map name and the first 12 characters
+    of the hash computed from the original row positions. ``supersedes`` names a previous map ID, and
+    ``field_location_id`` identifies the field for an import. Raise RowPlanError for missing or invalid rows,
+    positions, or IDs. Non-finite coordinates can also raise decimal.InvalidOperation while hashing, before
+    row validation.
     """
     groups, ignored = _group_row_nodes(doc)
     if not groups:
@@ -107,7 +111,10 @@ def _row_id(value: object) -> int | None:
 
 
 def _ordered_row(row_id: int, nodes: list[TopoNode]) -> list[TopoNode]:
-    """Return a row's nodes in driving order, from entry to exit. Raise RowPlanError if it is incomplete."""
+    """Return a row's nodes in driving order, from entry to exit.
+
+    Raise RowPlanError unless there is one entry and exit, every node has GPS, and at least two positions differ.
+    """
     entries = [n for n in nodes if n.properties.row_role == 'entry']
     exits = [n for n in nodes if n.properties.row_role == 'exit']
     if len(entries) != 1 or len(exits) != 1:
@@ -149,12 +156,13 @@ def _driving_order(entry: TopoNode, exit_node: TopoNode, waypoints: list[TopoNod
 
 
 def _waypoint_number(name: NodeID) -> int:
+    """Return the trailing waypoint number, or zero when the name has no ``_W<number>`` suffix."""
     match = re.search(r'_W(\d+)$', name)
     return int(match.group(1)) if match else 0
 
 
 def _safe_name(name: str) -> str:
-    """Return ``name`` with anything LiteFarm does not allow in a map_id replaced by an underscore."""
+    """Replace disallowed map ID characters with underscores, truncate to 80 characters, or return 'map'."""
     return re.sub(r'[^A-Za-z0-9._:-]', '_', name)[:80] or 'map'
 
 
@@ -170,7 +178,7 @@ def _inputs_hash(groups: dict[int, list[TopoNode]]) -> str:
 
 
 def _length_warnings(ordered: dict[int, list[TopoNode]], rows: list[PlanRow]) -> list[str]:
-    """Warn about rows whose length on the map and from GPS disagree: the GPS positions or the map are off."""
+    """Return warnings when lengths differ by more than both 0.5 m and 5% of the map length."""
     warnings = []
     for plan_row in rows:
         nodes = ordered[plan_row.row]

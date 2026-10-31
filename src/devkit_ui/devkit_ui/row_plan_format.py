@@ -48,7 +48,7 @@ class PlanProperties:
 def format_coordinate(value: float) -> str:
     """Return ``value`` as text with exactly 7 decimals, rounding the exact binary value half away from zero.
 
-    LiteFarm does the same with JavaScript's toFixed(7).
+    LiteFarm does the same with JavaScript's toFixed(7). Rounded negative zero is written as positive zero.
     """
     text = format(Decimal(value).quantize(_COORDINATE_STEP, rounding=ROUND_HALF_UP), 'f')
     return '0.0000000' if text == '-0.0000000' else text
@@ -66,13 +66,13 @@ def canonical_rows_text(rows: list[PlanRow]) -> str:
 def map_hash(rows: list[PlanRow]) -> str:
     """Return the SHA-256 of the canonical text of ``rows`` as lower-case hex.
 
-    The hash covers geometry and order only. The rows must already be in mission order.
+    The hash covers row and fragment IDs, coordinates, and their order. The rows must already be in mission order.
     """
     return hashlib.sha256(canonical_rows_text(rows).encode('utf-8')).hexdigest()
 
 
 def distance_m(a: tuple[float, float], b: tuple[float, float]) -> float:
-    """Return the great-circle distance in metres between two (lat, lon) points, as LiteFarm measures it."""
+    """Return LiteFarm's great-circle distance in meters between (latitude, longitude) points in degrees."""
     lat_a, lat_b = math.radians(a[0]), math.radians(b[0])
     half_dlat, half_dlon = (lat_b - lat_a) / 2, math.radians(b[1] - a[1]) / 2
     h = math.sin(half_dlat) ** 2 + math.cos(lat_a) * math.cos(lat_b) * math.sin(half_dlon) ** 2
@@ -86,7 +86,11 @@ def row_length_m(plan_row: PlanRow) -> float:
 
 
 def check_rows(rows: list[PlanRow]) -> None:
-    """Raise RowPlanError for rows LiteFarm would refuse."""
+    """Validate row counts, IDs and coordinates, raising RowPlanError for invalid values.
+
+    Accept 1 to 2000 rows with unique, non-negative (row, fragment) IDs and 2 to 5000 points each.
+    Latitude and longitude must be finite and within [-90, 90] and [-180, 180] degrees respectively.
+    """
     if not rows:
         raise RowPlanError('no rows in plan')
     if len(rows) > MAX_ROWS:
@@ -109,7 +113,8 @@ def build_geojson(rows: list[PlanRow], props: PlanProperties) -> dict:
     """Return the plan as a GeoJSON FeatureCollection with the hash of ``rows`` filled in.
 
     Coordinates are rounded to 7 decimals (about 1 cm), so the file holds exactly what the hash covers.
-    Raise RowPlanError if LiteFarm would refuse the plan.
+    Raise RowPlanError for invalid map IDs or rows. This does not check the serialized file size;
+    RowPlanExport.json_text checks it when serializing an exported plan.
     """
     if not MAP_ID_PATTERN.match(props.map_id):
         raise RowPlanError('map_id may only use letters, digits and . _ : - (up to 100 characters)')

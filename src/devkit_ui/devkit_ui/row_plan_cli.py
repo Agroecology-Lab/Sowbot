@@ -17,7 +17,11 @@ PASSWORD_ENV = 'LITEFARM_PASSWORD'
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the command. Return the exit status: 0 on success, 1 for a refused or unreadable plan, 2 for bad use."""
+    """Export a map and optionally write the file and import it into LiteFarm.
+
+    Return 0 on success, 1 for a caught export or import error, or 2 for missing import options or password.
+    Argument parsing may raise SystemExit; errors writing the output file propagate as OSError.
+    """
     args = _parser().parse_args(argv)
     if args.import_to and not (args.email and args.farm_id and args.location_id):
         print('--import-to needs --email, --farm-id and --location-id', file=sys.stderr)
@@ -57,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Build the parser for the export and optional LiteFarm import arguments."""
     parser = argparse.ArgumentParser(description=__doc__.split('\n', maxsplit=1)[0])
     parser.add_argument('topo_map', help='topological map file (YAML), for example maps/maize_map')
     parser.add_argument('-o', '--output', help='write the row plan GeoJSON to this file')

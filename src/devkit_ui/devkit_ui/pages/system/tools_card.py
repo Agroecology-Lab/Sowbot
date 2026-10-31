@@ -22,10 +22,10 @@ class ToolsCard(ui.card):
     """Launch and stop the developer tools (Graph Explorer, ros2grapher, RViz, Medkit gateway) and export the map."""
 
     def __init__(self, system_vm: SystemViewModel) -> None:
-        """Build one control group per tool, separated by rules.
+        """Build tool control groups and a LiteFarm export button, separated by rules.
 
         Parameters:
-            system_vm (SystemViewModel): Starts, stops and reports on the tool processes.
+            system_vm (SystemViewModel): Controls tool processes and exports the loaded map.
         """
         super().__init__()
         with self:

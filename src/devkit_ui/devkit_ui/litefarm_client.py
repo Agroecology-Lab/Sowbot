@@ -15,6 +15,7 @@ class LiteFarmError(RuntimeError):
     """LiteFarm refused a request, or could not be reached. The message is safe to show to a person."""
 
     def __init__(self, message: str, status: int | None = None) -> None:
+        """Store the error message and HTTP status, if a response was received."""
         super().__init__(message)
         self.status = status
 
@@ -30,7 +31,11 @@ class ImportResult:
 
 
 def login(base_url: str, email: str, password: str, timeout: float = DEFAULT_TIMEOUT_S) -> tuple[str, str]:
-    """Log in with an email and password. Return (token, user_id). The token expires, so log in again later."""
+    """Log in with an email and password and return (token, user_id).
+
+    The token expires, so log in again later. ``timeout`` is in seconds. Raise LiteFarmError if
+    the server cannot be reached or login is refused; a response with a token but no user ID raises KeyError.
+    """
     body = {'user': {'email': email, 'password': password}, 'screenSize': {'screen_width': 1280, 'screen_height': 720}}
     status, data = _post(f'{base_url}/login', body, {}, timeout)
     if status != 200 or not data.get('id_token'):
@@ -42,8 +47,9 @@ def import_row_plan(base_url: str, token: str, user_id: str, farm_id: str, locat
                     timeout: float = DEFAULT_TIMEOUT_S) -> ImportResult:
     """Import a plan for a field. Importing the same plan again is not an error: ``created`` is False.
 
-    Raise LiteFarmError if LiteFarm refuses it, for example when the rows lie outside the field, the hash does
-    not match, or the map_id is already used for different rows.
+    ``timeout`` is in seconds. Raise LiteFarmError if the server cannot be reached or refuses the plan,
+    for example when the rows lie outside the field, the hash does not match, or the map_id is already
+    used for different rows. A successful response without a row plan ID raises KeyError.
     """
     headers = {'Authorization': f'Bearer {token}', 'user_id': user_id, 'farm_id': farm_id}
     status, data = _post(f'{base_url}/row_plan/import', {'location_id': location_id, 'geojson': geojson}, headers,
@@ -59,7 +65,11 @@ def import_row_plan(base_url: str, token: str, user_id: str, farm_id: str, locat
 
 
 def _post(url: str, body: dict, headers: dict[str, str], timeout: float) -> tuple[int, dict]:
-    """POST JSON and return (status, decoded JSON body). HTTP error statuses are returned, not raised."""
+    """POST JSON and return (status, decoded JSON body).
+
+    ``timeout`` is in seconds. HTTP error statuses are returned; connection failures raise LiteFarmError.
+    Invalid or non-object JSON responses become an empty dict.
+    """
     request = urllib.request.Request(
         url, data=json.dumps(body).encode('utf-8'), method='POST',
         headers={'Content-Type': 'application/json', **headers})
@@ -73,6 +83,7 @@ def _post(url: str, body: dict, headers: dict[str, str], timeout: float) -> tupl
 
 
 def _decode(raw: bytes) -> dict:
+    """Decode a JSON object, returning an empty dict for invalid or non-object JSON."""
     try:
         data = json.loads(raw.decode('utf-8'))
     except (UnicodeDecodeError, ValueError):
@@ -81,4 +92,5 @@ def _decode(raw: bytes) -> dict:
 
 
 def _explain(status: int, data: dict, fallback: str) -> str:
+    """Return the response error or message, or the fallback, with the HTTP status."""
     return f'{data.get("error") or data.get("message") or fallback} (HTTP {status})'
