@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from devkit_ui.constants import TOOL_EXPLORER, TOOL_GRAPHER, TOOL_MEDKIT, TOOL_RVIZ
-from devkit_ui.view_models.system_view_model import ToolStatusView
+from devkit_ui.view_models.system_view_model import RowPlanDownload, ToolStatusView
 from test_run_ui import fake_ui, nicegui
 
 with (
@@ -174,6 +174,42 @@ class TestToolsCardLinks(unittest.TestCase):
     def test_page_does_not_import_process_control(self):
         self.assertFalse(hasattr(tools_card, 'subprocess'))
         self.assertFalse(hasattr(tools_card, 'spawn_logged'))
+
+
+class TestLiteFarmExport(unittest.TestCase):
+    def setUp(self):
+        fake_ui.reset()
+        self.addCleanup(fake_ui.reset)
+        self.enterContext(patch.object(tools_card, 'ui', fake_ui))
+        self.download = Mock()
+        self.enterContext(patch.object(fake_ui, 'download', self.download, create=True))
+        self.vm = Mock()
+
+    def build(self):
+        tools_card._litefarm_export(self.vm)
+        return fake_ui.find('label'), fake_ui.find('button', 'LiteFarm GeoJSON export')
+
+    def test_label_starts_muted_and_empty_and_nothing_is_exported_yet(self):
+        label, _ = self.build()
+        self.assertEqual((label.text, label.styles), ('', ['color:#57606a']))
+        self.vm.export_row_plan.assert_not_called()
+        self.download.assert_not_called()
+
+    def test_click_downloads_the_file_and_shows_the_summary(self):
+        self.vm.export_row_plan.return_value = RowPlanDownload(
+            ToolStatusView('4 rows, 15.9 m, maize-1', 'ok'), 'maize-1.geojson', b'{}')
+        label, button = self.build()
+        button.on_click()
+        self.download.assert_called_once_with(b'{}', 'maize-1.geojson', 'application/geo+json')
+        self.assertEqual(label.text, '4 rows, 15.9 m, maize-1')
+        self.assertEqual(label.styles[-1], 'color:#1a7f37')
+
+    def test_a_failed_export_shows_the_reason_and_downloads_nothing(self):
+        self.vm.export_row_plan.return_value = RowPlanDownload(ToolStatusView('no map loaded', 'error'))
+        label, button = self.build()
+        button.on_click()
+        self.download.assert_not_called()
+        self.assertEqual((label.text, label.styles[-1]), ('no map loaded', 'color:#cf222e'))
 
 
 if __name__ == '__main__':

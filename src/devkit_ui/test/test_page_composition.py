@@ -177,9 +177,10 @@ class TestToolsCardLayout(unittest.TestCase):
         self.card = ToolsCard(system)
 
     def test_each_tool_has_start_and_stop_controls_separated_by_rules(self):
-        """Verify the four tool groups are separated by three rules and each has a stop control."""
+        """Verify the four tool groups and the export are separated by four rules; each tool has a stop control."""
         buttons = [e.text for e in fake_ui.elements if e.kind == 'button']
-        self.assertEqual(sum(e.kind == 'separator' for e in fake_ui.elements), 3)
+        self.assertEqual(sum(e.kind == 'separator' for e in fake_ui.elements), 4)
+        self.assertEqual(buttons.count('LiteFarm GeoJSON export'), 1)
         self.assertEqual(sum(text.startswith('Stop') for text in buttons), 4)
         self.assertEqual(sum(text.startswith(('Start', 'Launch')) for text in buttons), 4)
 
