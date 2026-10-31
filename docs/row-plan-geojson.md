@@ -73,3 +73,7 @@ LITEFARM_PASSWORD=... python -m devkit_ui.row_plan_cli maps/maize_map \
 ```
 
 Exit status: 0 success, 1 map or import refused, 2 bad arguments.
+
+## Web UI
+
+System tab, Tools card: **LiteFarm GeoJSON export** downloads the loaded map's plan as `<map_id>.geojson` and shows the row count, length and `map_id`, or the reason the map cannot be exported. The file has no `field_location_id`; LiteFarm takes the field from the import request.

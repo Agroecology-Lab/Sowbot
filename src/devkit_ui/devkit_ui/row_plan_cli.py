@@ -5,14 +5,13 @@
         --email me@example.org --farm-id <uuid> --location-id <field uuid>
 """
 import argparse
-import json
 import os
 import sys
 
 from devkit_ui.litefarm_client import LiteFarmError, import_row_plan, login
 from devkit_ui.parse import parse_topo_yaml
 from devkit_ui.row_plan_export import export_row_plan
-from devkit_ui.row_plan_format import MAX_BYTES, RowPlanError, row_length_m
+from devkit_ui.row_plan_format import row_length_m
 
 PASSWORD_ENV = 'LITEFARM_PASSWORD'
 
@@ -30,9 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         plan = export_row_plan(parse_topo_yaml(args.topo_map), map_id=args.map_id, supersedes=args.supersedes,
                                field_location_id=args.location_id)
-        text = json.dumps(plan.geojson, separators=(',', ':'))
-        if len(text) > MAX_BYTES:
-            raise RowPlanError('plan is larger than LiteFarm accepts')
+        text = plan.json_text()
     except (OSError, ValueError) as error:  # RowPlanError is a ValueError, so is a YAML or number error
         print(f'cannot export {args.topo_map}: {error}', file=sys.stderr)
         return 1

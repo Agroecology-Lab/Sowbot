@@ -1,14 +1,18 @@
-"""Presentation of the System page tools: status wording and its severity."""
+"""Presentation of the System page tools and the LiteFarm row plan export: wording and severity."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from devkit_ui.constants import TOOL_GRAPHER, TOOL_RVIZ
+from devkit_ui.row_plan_export import export_row_plan
+from devkit_ui.row_plan_format import RowPlanError, row_length_m
 
 if TYPE_CHECKING:
     from devkit_ui.application_services.system_application_service import SystemApplicationService
     from devkit_ui.application_services.tool_state import ToolState
+    from devkit_ui.view_models.map_context import MapContext
 
 Level = Literal['ok', 'error', 'muted']
 
@@ -21,6 +25,15 @@ class ToolStatusView:
     level: Level | None = None
 
 
+@dataclass(frozen=True)
+class RowPlanDownload:
+    """The result of an export: what to say, and the file to hand to the browser if there is one."""
+
+    status: ToolStatusView
+    filename: str | None = None
+    content: bytes | None = None
+
+
 class SystemViewModel:
     """UI-facing intents for the tools on the System page.
 
@@ -28,9 +41,30 @@ class SystemViewModel:
     to show, and the view then leaves its label alone.
     """
 
-    def __init__(self, service: SystemApplicationService) -> None:
-        """Bind to the system service."""
+    def __init__(self, service: SystemApplicationService, map_context: MapContext | None = None) -> None:
+        """Bind to the system service and, for the row plan export, to the loaded map."""
         self._service = service
+        self._map_context = map_context
+
+    def export_row_plan(self) -> RowPlanDownload:
+        """Return the loaded map's rows as a LiteFarm row plan file, or the reason there is none.
+
+        Pure computation on the loaded map, so it is quick enough to call on the UI loop.
+        """
+        doc = self._map_context.topo_doc if self._map_context else None
+        if doc is None:
+            return RowPlanDownload(ToolStatusView('no map loaded', 'error'))
+        try:
+            plan = export_row_plan(doc)
+            content = plan.json_text().encode('utf-8')
+        except RowPlanError as error:
+            return RowPlanDownload(ToolStatusView(f'ERROR: {error}', 'error'))
+        metres = sum(row_length_m(row) for row in plan.rows)
+        text = f'{len(plan.rows)} rows, {metres:.1f} m, {plan.map_id}'
+        if plan.warnings:
+            text += f' - warning: {"; ".join(plan.warnings[:3])}'
+        filename = f'{re.sub(r"[^A-Za-z0-9._-]", "_", plan.map_id)}.geojson'
+        return RowPlanDownload(ToolStatusView(text, 'ok'), filename, content)
 
     def start(self, tool: str, host: str) -> ToolStatusView | None:
         """Start a tool; host is the browser's hostname, used only in the wording of the status.

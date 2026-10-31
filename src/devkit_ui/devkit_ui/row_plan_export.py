@@ -13,6 +13,7 @@ from itertools import pairwise
 from devkit_ui.constants import NAV_ACTION
 from devkit_ui.models import NodeID, TopoDoc, TopoNode
 from devkit_ui.row_plan_format import (
+    MAX_BYTES,
     PlanProperties,
     PlanRow,
     RowPlanError,
@@ -45,6 +46,13 @@ class RowPlanExport:
     @property
     def map_hash(self) -> str:
         return self.geojson['properties']['map_hash']
+
+    def json_text(self) -> str:
+        """Return the plan as compact JSON. Raise RowPlanError if LiteFarm would refuse its size."""
+        text = json.dumps(self.geojson, separators=(',', ':'))
+        if len(text.encode('utf-8')) > MAX_BYTES:
+            raise RowPlanError('plan is larger than LiteFarm accepts')
+        return text
 
 
 def export_row_plan(doc: TopoDoc, *, map_id: str | None = None, supersedes: str | None = None,

@@ -1,4 +1,7 @@
-"""Buttons, links and status labels for the System page tools; process control is in SystemViewModel."""
+"""Buttons, links and status labels for the System page tools; process control is in SystemViewModel.
+
+Also the LiteFarm row plan export button, whose file is made by SystemViewModel.
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -16,7 +19,7 @@ _EXIT_CHECK_S = 2.0
 
 
 class ToolsCard(ui.card):
-    """Launch and stop the developer tools: Graph Explorer, ros2grapher, RViz and the Medkit gateway."""
+    """Launch and stop the developer tools (Graph Explorer, ros2grapher, RViz, Medkit gateway) and export the map."""
 
     def __init__(self, system_vm: SystemViewModel) -> None:
         """Build one control group per tool, separated by rules.
@@ -42,6 +45,8 @@ class ToolsCard(ui.card):
                 ui.separator().classes('w-full my-1')
                 _tool_controls(system_vm, TOOL_MEDKIT, 'Start Medkit Gateway', 'Stop Medkit Gateway', host)
                 _medkit_links(host)
+                ui.separator().classes('w-full my-1')
+                _litefarm_export(system_vm)
 
 
 def _tool_controls(vm: SystemViewModel, tool: str, start_text: str, stop_text: str, host: str) -> None:
@@ -75,6 +80,20 @@ def _tool_controls(vm: SystemViewModel, tool: str, start_text: str, stop_text: s
 
     ui.button(start_text, on_click=start).props('outline no-caps').classes('px-4')
     ui.button(stop_text, on_click=stop).props('outline no-caps').classes('px-4')
+
+
+def _litefarm_export(vm: SystemViewModel) -> None:
+    """Add a button that downloads the loaded map's rows as a LiteFarm row plan, and a label for the outcome."""
+    label = ui.label('').classes('text-xs font-mono').style(f'color:{STATUS_COLOURS["muted"]}')
+
+    def export() -> None:
+        """Send the file to the browser if there is one, and show the summary or the reason there is none."""
+        result = vm.export_row_plan()
+        if result.content is not None and result.filename:
+            ui.download(result.content, result.filename, 'application/geo+json')
+        show_status(label, result.status)
+
+    ui.button('LiteFarm GeoJSON export', on_click=export).props('outline no-caps').classes('px-4')
 
 
 def _medkit_links(host: str) -> None:
