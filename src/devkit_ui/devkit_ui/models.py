@@ -130,6 +130,10 @@ class TopoNode:
         return self._meta
 
     @property
+    def properties(self) -> TopoProperties:
+        return self._properties
+
+    @property
     def x(self) -> float:
         return self._pose.position.x
 
