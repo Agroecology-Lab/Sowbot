@@ -130,6 +130,11 @@ class TopoNode:
         return self._meta
 
     @property
+    def properties(self) -> TopoProperties:
+        """Return the node's topology properties, including row and GPS data."""
+        return self._properties
+
+    @property
     def x(self) -> float:
         return self._pose.position.x
 
