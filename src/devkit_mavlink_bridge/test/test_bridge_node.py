@@ -120,7 +120,8 @@ rclpy_node = ModuleType('rclpy.node')
 rclpy_node.Node = FakeNode
 with patch.dict(sys.modules, {
         'rclpy': rclpy, 'rclpy.node': rclpy_node,
-        **_fake_package('geometry_msgs', Twist=type('Twist', (), {})),
+        **_fake_package('geometry_msgs', Twist=type('Twist', (), {}), TransformStamped=FakeMsg),
+        'tf2_ros': SimpleNamespace(TransformBroadcaster=lambda _node: Mock()),
         **_fake_package('nav_msgs', Odometry=FakeMsg),
         **_fake_package('rtcm_msgs', Message=FakeMsg),
         **_fake_package('sensor_msgs', NavSatFix=FakeMsg),
@@ -421,6 +422,43 @@ class InboundTest(BridgeNodeTest):
         self.assertAlmostEqual(odometry.twist.twist.linear.y, 0.0)
         self.assertEqual((odometry.header.frame_id, odometry.child_frame_id), ('odom', 'base_link'))
         self.assertEqual(odometry.header.stamp, 'stamp')
+
+    def test_no_transform_is_broadcast_unless_requested(self):
+        """Verify the bridge leaves odom -> base_link alone by default, so it cannot compete with another owner."""
+        node = self.make()
+        self.good_state(node)
+        self.feed(node, _local_position())
+        self.assertIsNone(node._tf_broadcaster)
+
+    def test_the_odometry_pose_is_broadcast_as_a_transform(self):
+        """Verify publish_tf sends the published pose as odom -> base_link, with the same stamp."""
+        node = self.make(publish_tf=True)
+        self.good_state(node)
+        self.feed(node, _local_position(north=1.0, east=2.0, down=-3.0))
+        ((transform,), _) = node._tf_broadcaster.sendTransform.call_args
+        (odometry,) = self.published(node, 'fc/odom')
+        self.assertEqual((transform.header.frame_id, transform.child_frame_id), ('odom', 'base_link'))
+        self.assertEqual(transform.header.stamp, odometry.header.stamp)
+        translation = transform.transform.translation
+        self.assertEqual((translation.x, translation.y, translation.z), (2.0, 1.0, 3.0))
+        self.assertIs(transform.transform.rotation, odometry.pose.pose.orientation)
+
+    def test_no_transform_is_broadcast_while_odometry_is_withheld(self):
+        """Verify the transform goes stale with fc/odom: it is gated by the same EKF3 and attitude checks."""
+        node = self.make(publish_tf=True)
+        self.feed(node, _heartbeat(), _attitude(), _local_position())  # no EKF_STATUS_REPORT yet
+        self.assertEqual(self.published(node, 'fc/odom'), [])
+        node._tf_broadcaster.sendTransform.assert_not_called()
+        self.feed(node, _ekf_status(), _attitude(), _local_position())
+        node._tf_broadcaster.sendTransform.assert_called_once()
+
+    def test_transform_frames_follow_the_frame_parameters(self):
+        """Verify the transform uses the configured odom and base frame names."""
+        node = self.make(publish_tf=True, odom_frame_id='map', base_frame_id='base_footprint')
+        self.good_state(node)
+        self.feed(node, _local_position())
+        ((transform,), _) = node._tf_broadcaster.sendTransform.call_args
+        self.assertEqual((transform.header.frame_id, transform.child_frame_id), ('map', 'base_footprint'))
 
     def test_odometry_covariance_is_marked_unknown(self):
         """Verify no covariance is invented: the flight controller sends none."""

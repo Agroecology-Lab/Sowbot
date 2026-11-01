@@ -309,6 +309,27 @@ def _topo_nav_nodes(tmap2_file, sim, sim_condition, devkit_bringup_pkg):
     ]
 
 
+def _fusioncore_node(devkit_bringup_pkg):
+    """FusionCore UKF node, currently NOT wired into generate_launch_description().
+
+    The LEVIA-H7's EKF3 is the localiser: the MAVLink bridge publishes fc/odom and owns
+    odom -> base_link (see devkit_mavlink_bridge/mavlink.md). Kept so FusionCore can be
+    re-wired, for example as a shadow estimator, without recovering this block from history.
+
+    Launched directly, NOT wrapped in a lifecycle_manager: fusioncore does not implement the
+    bond heartbeat protocol nav2_lifecycle_manager requires, so wrapping it causes a
+    guaranteed bond timeout on every boot. autostart:true (default in fusioncore >= 0.3.1)
+    self-transitions configure -> activate ~200ms after on_configure() returns.
+    """
+    return Node(
+        package='fusioncore_ros',
+        executable='fusioncore_node',
+        name='fusioncore',
+        parameters=[os.path.join(devkit_bringup_pkg, 'config', 'fusioncore.yaml')],
+        output='screen',
+    )
+
+
 def generate_launch_description():
     ublox_pkg         = get_package_share_directory('ublox_dgnss')
     devkit_bringup_pkg = get_package_share_directory('devkit_bringup')
@@ -325,11 +346,16 @@ def generate_launch_description():
     mcu_port     = os.getenv('MCU_PORT',    'virtual')
     tmap2_file   = os.getenv('TMAP2_FILE',  '')
 
-    fusioncore_config = os.path.join(devkit_bringup_pkg, 'config', 'fusioncore.yaml')
+    # ArduPilot path: the LEVIA-H7 EKF3 is the localiser and the MAVLink bridge feeds it cmd_vel.
+    # Gated by MAVLINK_ENDPOINT (the bridge's own connection setting), so the bridge never
+    # starts without an endpoint. Run one controller path at a time: the ESP32/Lizard
+    # devkit_driver also consumes cmd_vel, so leave MCU_PORT virtual when this is set.
+    mavlink_enabled = bool(os.getenv('MAVLINK_ENDPOINT', '').strip())
 
     any_hw_present = (rover_port  != 'virtual' or
                       rover1_port != 'virtual' or
-                      mcu_port    != 'virtual')
+                      mcu_port    != 'virtual' or
+                      mavlink_enabled)
     is_sim_default = 'false' if any_hw_present else 'true'
 
     sim_arg = DeclareLaunchArgument(
@@ -474,28 +500,25 @@ def generate_launch_description():
             ],
         ),
 
-        # ── FusionCore UKF ───────────────────────────────────────────────────
-        # Launched directly — NOT wrapped in a lifecycle_manager.
-        #
-        # fusioncore does NOT implement the bond heartbeat protocol that
-        # nav2_lifecycle_manager requires, so wrapping it causes a guaranteed
-        # bond timeout on every boot regardless of the timeout value set.
-        #
-        # autostart:true (default in fusioncore >= 0.3.1) makes the node
-        # self-transition configure -> activate ~200ms after on_configure()
-        # returns. No external lifecycle management needed.
-        Node(
-            package='fusioncore_ros',
-            executable='fusioncore_node',
-            name='fusioncore',
-            parameters=[fusioncore_config],
-            output='screen',
-        ),
+        # ── ArduPilot EKF3 via MAVLink bridge (real hardware only) ───────────
+        # Publishes fc/odom and owns the odom -> base_link TF, replacing FusionCore
+        # (see _fusioncore_node(), not wired). Requires MAVLINK_ENDPOINT, and
+        # MAVLINK_BAUD if not 115200. Nav2 reads /fc/odom (nav2_params.yaml).
+        *([GroupAction(
+            condition=real_condition,
+            actions=[
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(
+                        os.path.join(devkit_bringup_pkg, 'launch', 'mavlink_bridge.launch.py')
+                    ),
+                ),
+            ],
+        )] if mavlink_enabled else []),
 
         # ── Static map -> odom TF (real hardware only) ───────────────────────
         # In sim, fake_nav2_server owns the full map->odom->base_link TF chain.
-        # In real mode, fusioncore publishes odom->base_link; this node closes
-        # the chain with an identity map->odom.
+        # In real mode, the MAVLink bridge publishes odom->base_link; this node
+        # closes the chain with an identity map->odom.
         # TODO: replace with GPS-anchored origin once tmap2 nodes are surveyed.
         Node(
             condition=real_condition,
@@ -507,18 +530,19 @@ def generate_launch_description():
         ),
 
         # ── Static odom -> base_link TF (no real MCU) ────────────────────────
-        # Needed whenever the MCU is virtual: odom_handler never runs (no MCU)
-        # and on the bench fusioncore has no RTK fix to fuse, so neither owns
+        # Needed whenever the MCU is virtual and nothing else localises: no
+        # odom_handler (no MCU) and no MAVLink bridge, so nothing owns
         # odom->base_link and the TF tree splits into two unconnected trees
         # (map->odom and a detached base_link->imu_link). That breaks
         # topological localisation (current node stays unknown) and Nav2.
         # This identity static TF closes the chain.
         #
-        # Gate = MCU virtual AND not sim: in true sim mode fake_nav2_server
-        # already owns the full map->odom->base_link chain, so publishing here
-        # too would be a duplicate broadcaster. In real mode WITH a real MCU,
-        # odom_handler / fusioncore own this TF — do not compete.
-        Node(
+        # Gate = MCU virtual AND not sim AND no MAVLink bridge: in true sim mode
+        # fake_nav2_server already owns the full map->odom->base_link chain, and
+        # with the bridge running it owns the edge from the EKF3 pose, so
+        # publishing here too would be a duplicate broadcaster. In real mode
+        # WITH a real MCU, odom_handler owns this TF — do not compete.
+        *([Node(
             condition=IfCondition(
                 PythonExpression(
                     ["'", mcu_port, "' == 'virtual' and '", sim, "' != 'true'"]
@@ -529,11 +553,11 @@ def generate_launch_description():
             name='odom_to_base_link_static',
             arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_link'],
             output='screen',
-        ),
+        )] if not mavlink_enabled else []),
 
         # ── Static base_link -> imu_link TF (no MCU only) ────────────────────
         # When MCU is virtual there is no IMU driver publishing this transform.
-        # Fusioncore requires it to exist before it will activate. An identity
+        # FusionCore (not currently wired) required it before it would activate. An identity
         # transform is correct for bench/dev — assumes IMU is at robot centre.
         # When a real MCU is present the IMU driver owns this TF; do not
         # compete with it.

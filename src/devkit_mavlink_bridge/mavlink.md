@@ -47,8 +47,8 @@ The hwdef already defines the pixartflow device (SPI3, EXT_CS1 = PD4), which mat
 |     | cmd_vel                    devkit_mavlink_bridge     |
 |     +----------------------------->  (inbound + outbound)  |
 |                                          ^   |             |
-|   FusionCore (OPTIONAL, shadow only)     |   |             |
-|     logs and compares, never feeds FC    |   |             |
+|   FusionCore: not wired                  |   |             |
+|     code kept, see devkit.launch.py      |   |             |
 +------------------------------------------|---|-------------+
                                            |   |
      MAVLink (UART: U20 / UART4 / SERIAL5) |   |
@@ -95,9 +95,18 @@ stale cmd_vel             --> bridge sends zero (built)
 fence breach              --> HOLD (not RTL)
 ```
 
+## Launch
+
+Set `MAVLINK_ENDPOINT` (and `MAVLINK_BAUD` if not 115200) in `.env`. `manage.py` then runs in hardware mode with `GPS_PORT_ROVER` and `MCU_PORT` virtual, and `devkit.launch.py` starts the bridge with `publish_tf:=true`. With no endpoint set the bridge does not start and nothing owns `odom -> base_link`.
+
+- EKF3 is the localiser. Nav2 reads `/fc/odom` (`nav2_params.yaml`).
+- FusionCore is not launched. `_fusioncore_node()` in `devkit.launch.py` and `fusioncore.yaml` are kept, unwired. The sim stack (`sowbot_sim.launch.py`) still runs it.
+- `manage.py` skips the `fusioncore.yaml` lever-arm check on this path. Set the antenna offsets on the flight controller.
+- The bridge and the ESP32/Lizard `devkit_driver` both consume `cmd_vel`. Leave `MCU_PORT` virtual.
+
 ## Bridge topics
 
-Inbound, from the LEVIA-H7. No TF is broadcast.
+Inbound, from the LEVIA-H7. `odom -> base_link` is broadcast only with `publish_tf` (launch default true), from the pose on `fc/odom` and under the same gating, so it stops when `fc/odom` stops.
 
 | Topic | Type | Source message | Notes |
 |---|---|---|---|

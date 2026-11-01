@@ -192,6 +192,19 @@ class DevkitManager:
             return None
         return all(value == 0.0 for value in values.values())
 
+    def _check_lever_arm(self, cfg: dict[str, str]) -> None:
+        """Refuse to start on the placeholder FusionCore lever arms unless ALLOW_UNMEASURED_LEVER_ARM=1."""
+        unmeasured = self._unmeasured_lever_arm()
+        if unmeasured is None:
+            self._log("Could not read gnss.lever_arm_x/y/z from fusioncore.yaml: lever arms not checked.", "WARN")
+        elif unmeasured and cfg.get('ALLOW_UNMEASURED_LEVER_ARM') != '1':
+            self._log("Hardware mode, but gnss.lever_arm_x/y/z in fusioncore.yaml are still zero. Measure the "
+                      "antenna offset from base_link and set them, or set ALLOW_UNMEASURED_LEVER_ARM=1 in .env "
+                      "for bench work. Do not quote positioning accuracy until they are measured.", "ERROR")
+            sys.exit(1)
+        elif unmeasured:
+            self._log("ALLOW_UNMEASURED_LEVER_ARM=1: running with zero antenna lever arms.", "WARN")
+
     def _unconfirmed_settings(self) -> list[str]:
         """Return config lines in sowbot_monitor.yaml still marked `TODO: CONFIRM`."""
         config = self.root_dir / 'src' / 'devkit_bringup' / 'config' / 'sowbot_monitor.yaml'
@@ -447,6 +460,9 @@ class DevkitManager:
         cfg = self._get_env_config()
         r_port = cfg.get('GPS_PORT_ROVER', 'virtual')
         mcu_port = cfg.get('MCU_PORT', 'virtual')
+        # ArduPilot path: the flight controller carries the GNSS receivers and EKF3, so the SBC
+        # sees no rover port or MCU. MAVLINK_ENDPOINT is what marks this as real hardware.
+        mavlink_endpoint = cfg.get('MAVLINK_ENDPOINT', '')
         # A detected GPS used to silently flip us out of sim, leaving a sim
         # field with a real-GPS-anchored base_link 27 km off the costmap and
         # no fake_nav2_server (so no virtual robot rendered). FORCE_SIM keeps
@@ -454,11 +470,13 @@ class DevkitManager:
         force_sim = any(a.startswith('--sim') for a in extra_args) \
             or cfg.get('FORCE_SIM') == '1' \
             or os.environ.get('FORCE_SIM') == '1'
-        is_sim = 'true' if (force_sim or (r_port == 'virtual' and mcu_port == 'virtual')) else 'false'
-        if force_sim and (r_port != 'virtual' or mcu_port != 'virtual'):
+        no_hardware = r_port == 'virtual' and mcu_port == 'virtual' and not mavlink_endpoint
+        is_sim = 'true' if (force_sim or no_hardware) else 'false'
+        if force_sim and not no_hardware:
             self._log(
                 f"FORCE_SIM/--sim is active: detected hardware (rover={r_port}, "
-                f"mcu={mcu_port}) will be IGNORED and the stack starts in sim. "
+                f"mcu={mcu_port}, mavlink={mavlink_endpoint or 'none'}) will be IGNORED "
+                "and the stack starts in sim. "
                 "Remove FORCE_SIM from .env to drive the real robot.", "WARN")
 
         # Survey origin for the topo map datum. In real-GPS runs this MUST match
@@ -486,16 +504,12 @@ class DevkitManager:
             sys.exit(1)
 
         if is_sim == 'false':
-            unmeasured = self._unmeasured_lever_arm()
-            if unmeasured is None:
-                self._log("Could not read gnss.lever_arm_x/y/z from fusioncore.yaml: lever arms not checked.", "WARN")
-            elif unmeasured and cfg.get('ALLOW_UNMEASURED_LEVER_ARM') != '1':
-                self._log("Hardware mode, but gnss.lever_arm_x/y/z in fusioncore.yaml are still zero. Measure the "
-                          "antenna offset from base_link and set them, or set ALLOW_UNMEASURED_LEVER_ARM=1 in .env "
-                          "for bench work. Do not quote positioning accuracy until they are measured.", "ERROR")
-                sys.exit(1)
-            elif unmeasured:
-                self._log("ALLOW_UNMEASURED_LEVER_ARM=1: running with zero antenna lever arms.", "WARN")
+            if mavlink_endpoint:
+                self._log("MAVLINK_ENDPOINT is set: the ArduPilot EKF3 localises and FusionCore is not launched, "
+                          "so the fusioncore.yaml lever-arm check is skipped. Set the antenna offsets on the "
+                          "flight controller (GPS_MB1_OFS_X/Y/Z) before quoting positioning accuracy.", "WARN")
+            else:
+                self._check_lever_arm(cfg)
             for line in self._unconfirmed_settings():
                 self._log(f"Unconfirmed setting in sowbot_monitor.yaml: {line}", "WARN")
 

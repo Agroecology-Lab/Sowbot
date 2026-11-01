@@ -8,8 +8,8 @@
     LEVIA-H7 (GUIDED mode). Outbound: cmd_vel -> SET_POSITION_TARGET_LOCAL_NED,
     RTCM3 -> GPS_RTCM_DATA.
     Inbound: EKF3 state and GPS status published as fc/odom, fc/ekf_fix,
-    fc/gps1/fix, fc/gps2/fix and fc/diagnostics. The LEVIA-H7 EKF3 is the sole
-    estimator; nothing is fed back to it. See mavlink.md.
+    fc/gps1/fix, fc/gps2/fix and fc/diagnostics, and optionally the odom -> base_link
+    transform. The LEVIA-H7 EKF3 is the sole estimator; nothing is fed back to it. See mavlink.md.
   </description>
   <maintainer email="ros@agroecologylab.org">Agroecology Lab Ltd</maintainer>
   <license>MIT</license>
@@ -27,6 +27,7 @@
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>rtcm_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
   <exec_depend>python3-pymavlink-pip</exec_depend>
 
   <export>

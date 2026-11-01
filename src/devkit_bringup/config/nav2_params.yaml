@@ -1,11 +1,12 @@
 # config/nav2_params.yaml
-# Minimal Nav2 config for a robot localised by FusionCore (no AMCL, no map server).
+# Minimal Nav2 config for a robot localised by the LEVIA-H7 ArduPilot EKF3 via devkit_mavlink_bridge
+# (no AMCL, no map server).
 # Differential-drive outdoor agricultural robot — no laser, no costmap obstacle layer.
 # Topo nav drives /navigate_to_pose; this Nav2 instance plans + executes between waypoints.
 #
 # Frames provided externally:
 #   map   — static identity TF from devkit.launch.py (placeholder)
-#   odom  — fusioncore publishes odom -> base_link
+#   odom  — devkit_mavlink_bridge publishes odom -> base_link and /fc/odom (EKF3 pose, covariance unknown)
 #
 # collision_monitor is absent because Nav2 Jazzy requires observation_sources
 # to be a non-empty declared parameter — it throws InvalidParameterValueException
@@ -26,7 +27,7 @@ bt_navigator:
   ros__parameters:
     global_frame: map
     robot_base_frame: base_link
-    odom_topic: /fusion/odom
+    odom_topic: /fc/odom
     bt_loop_duration: 10
     default_server_timeout: 20
     wait_for_service_timeout: 1000
@@ -190,7 +191,7 @@ velocity_smoother:
     velocity_timeout: 1.0
     max_accel: [2.5, 0.0, 3.2]
     max_decel: [-2.5, 0.0, -3.2]
-    odom_topic: /fusion/odom
+    odom_topic: /fc/odom
     odom_duration: 0.1
 
 docking_server:
