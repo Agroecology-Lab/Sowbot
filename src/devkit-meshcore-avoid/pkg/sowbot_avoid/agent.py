@@ -21,6 +21,11 @@ RETREAT_MAX = 10
 
 class Agent:
     def __init__(self, rid, route, graph, radio, driver, scale=1.0, rng=None, log=None, supersede=True):
+        """Configure an agent with a nonempty route of node IDs.
+
+        Scale multiplies protocol delays; supersede drops pending non-FINISHED
+        transmissions when a new frame is queued. An empty route raises IndexError.
+        """
         self.rid, self.route, self.g, self.radio, self.driver = rid, list(route), graph, radio, driver
         self.k, self.rng, self.supersede = scale, rng or random.Random(), supersede
         self.log = log or (lambda *a: None)
@@ -35,6 +40,11 @@ class Agent:
 
     # ---- receive -------------------------------------------------------------------------------
     def on_rx(self, payload):
+        """Record a valid, newer frame from another robot and wake the mission.
+
+        Invalid, own, duplicate, and older frames are ignored; sequence numbers
+        are compared modulo 256 using a forward window of 1 through 127.
+        """
         f = Frame.decode(payload)
         if f is None or f.rid == self.rid:
             return
@@ -46,7 +56,12 @@ class Agent:
 
     # ---- rules ---------------------------------------------------------------------------------
     def blocked_by(self, edge):
-        """Robots that stop us driving `edge`: any hold within clearance, or a lower id's claim."""
+        """Return IDs blocking an edge by a hold or a qualifying claim.
+
+        Claims from lower IDs block, or claims from any ID while retreating;
+        claims containing the current node and FINISHED frames are ignored.
+        Conflicts are determined by the graph.
+        """
         out = set()
         for rid, f in self.book.items():
             if f.kind == FINISHED:
@@ -65,12 +80,18 @@ class Agent:
         return out
 
     def mutual(self, j):
+        """Return whether robot j's first claim conflicts with our current node."""
         f = self.book.get(j)
         cl = f.claims() if f else ()
         return bool(cl) and self.g.conflict(cl[0], (self.cur, self.cur))
 
     # ---- send ----------------------------------------------------------------------------------
     def announce(self, kind, nodes, nclaims=0, repeats=()):
+        """Queue a new frame and optional retransmissions.
+
+        Repeats are delays in seconds before scaling and jitter. Pending
+        non-FINISHED frames are discarded first when supersede is enabled.
+        """
         self.seq = (self.seq + 1) & 255
         f = Frame(self.rid, self.seq, kind, 0, nclaims, self.retreating, tuple(nodes))
         now = time.monotonic()
@@ -109,7 +130,7 @@ class Agent:
 
     # ---- route helpers -------------------------------------------------------------------------
     def _claims_from(self, i):
-        """Up to two route edges starting at route index i (none while retreating)."""
+        """Return up to two destination node IDs after index i, or none while retreating."""
         if self.retreating:
             return []
         return [self.route[j + 1] for j in range(i, min(i + 2, len(self.route) - 1))]
@@ -123,6 +144,11 @@ class Agent:
 
     # ---- mission -------------------------------------------------------------------------------
     async def run(self):
+        """Follow the route and drain queued announcements, then mark the agent done.
+
+        Driver errors propagate; the sender task is cancelled on exit. Radio
+        send errors are caught by the sender and passed to the log callback.
+        """
         self.radio.set_handler(self.on_rx)
         sender = asyncio.create_task(self._sender())
         try:

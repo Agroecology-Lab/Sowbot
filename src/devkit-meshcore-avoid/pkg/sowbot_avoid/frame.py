@@ -18,11 +18,21 @@ class Frame:
     nodes: tuple = ()
 
     def encode(self):
+        """Encode this frame as header bytes followed by little-endian 16-bit nodes.
+
+        The sequence is reduced modulo 256. A robot ID or packed flags outside
+        the byte range raises ValueError; out-of-range nodes raise OverflowError.
+        """
         flags = self.kind | (self.resend << 3) | (self.nclaims << 5) | (int(self.retreat) << 7)
         return bytes([self.rid, self.seq & 255, flags]) + b"".join(n.to_bytes(2, "little") for n in self.nodes)
 
     @staticmethod
     def decode(b):
+        """Decode a frame, returning None for an invalid header or payload length.
+
+        Robot ID zero, unknown kinds, more than two claims, and claims on
+        HELLO or FINISHED frames are rejected.
+        """
         if len(b) < 3 or b[0] == 0:
             return None
         kind, resend, nclaims, retreat = b[2] & 7, (b[2] >> 3) & 3, (b[2] >> 5) & 3, bool(b[2] >> 7)

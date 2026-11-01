@@ -15,6 +15,7 @@ def _cross(o, a, b):
 
 
 def seg_dist(a, b, c, d):
+    """Return the minimum distance between 2D segments a-b and c-d, including points."""
     if a != b and c != d:
         if _cross(a, b, c) * _cross(a, b, d) < 0 and _cross(c, d, a) * _cross(c, d, b) < 0:
             return 0.0
@@ -23,6 +24,11 @@ def seg_dist(a, b, c, d):
 
 class Graph:
     def __init__(self, edges, xy=None, clearance=1.0, park=()):
+        """Build an undirected graph with optional node coordinates and parking nodes.
+
+        Clearance uses the same units as xy and is the exclusive conflict
+        distance threshold. Park nodes are excluded as retreat waypoints.
+        """
         self.xy = {int(k): tuple(v) for k, v in (xy or {}).items()}
         self.clearance, self.park = clearance, set(park)   # park: docks/chargers, never used as side-step points
         self.adj = {}
@@ -32,11 +38,20 @@ class Graph:
 
     @classmethod
     def load(cls, path, clearance=1.0):
+        """Load a graph from JSON with edges and optional nodes and park fields.
+
+        File and JSON errors propagate, as does KeyError if edges is absent.
+        """
         d = json.load(open(path))
         return cls([tuple(e) for e in d["edges"]], d.get("nodes"), clearance, d.get("park", ()))
 
     def conflict(self, e1, e2):
-        """True if two holds/edges are closer than the clearance. Unknown nodes count as a conflict."""
+        """Return whether two node pairs conflict.
+
+        With coordinates, distance strictly below clearance conflicts and a
+        missing node counts as a conflict. Without coordinates, pairs conflict
+        only when they share a node.
+        """
         if not self.xy:
             return bool(set(e1) & set(e2))
         try:

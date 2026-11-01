@@ -10,6 +10,11 @@ from .radio import MeshRadio
 
 
 async def run(a):
+    """Run the configured route with a dynamically loaded driver and MeshCore radio.
+
+    Errors propagate. The radio is stopped after the agent exits, including on
+    agent failure; failures before the agent run are not covered by that cleanup.
+    """
     graph = Graph.load(a.map, a.clearance)
     mod, cls = a.driver.split(":")
     driver = getattr(importlib.import_module(mod), cls)()
@@ -26,6 +31,7 @@ async def run(a):
 
 
 def main():
+    """Parse command-line options and run the configured mission."""
     ap = argparse.ArgumentParser(prog="sowbot_avoid", description=__doc__)
     ap.add_argument("--serial", required=True)
     ap.add_argument("--id", type=int, required=True)

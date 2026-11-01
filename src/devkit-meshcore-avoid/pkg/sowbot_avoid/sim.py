@@ -15,6 +15,7 @@ class World:
         self.pos, self.min_sep, self.pair = {}, float("inf"), None
 
     def set(self, rid, p):
+        """Update a robot's position and the smallest separation observed so far."""
         self.pos[rid] = p
         for o, q in self.pos.items():
             if o != rid:
@@ -28,9 +29,14 @@ class SimDriver(Driver):
         self.w, self.rid, self.g, self.speed, self.k = world, rid, graph, speed, scale
 
     def place(self, node):
+        """Place the robot at a graph node; a missing coordinate raises KeyError."""
         self.w.set(self.rid, self.g.xy[node])
 
     async def drive(self, a, b):
+        """Simulate travel between node coordinates, updating the world position.
+
+        Missing coordinates raise KeyError; zero speed raises ZeroDivisionError.
+        """
         p, q = self.g.xy[a], self.g.xy[b]
         dur = max(math.hypot(q[0] - p[0], q[1] - p[1]) / self.speed * self.k, 1e-3)
         t0 = time.monotonic()
@@ -44,6 +50,7 @@ class SimDriver(Driver):
 
 
 def grid(n=3, step=2.5):
+    """Build an n by n grid with spacing step and three fixed dock nodes."""
     xy = {r * n + c + 1: (c * step, r * step) for r in range(n) for c in range(n)}
     edges = [(i, i + 1) for i in xy if i % n] + [(i, i + n) for i in xy if i + n in xy]
     xy.update({10: (-2.5, 0.0), 11: (7.5, 0.0), 12: (-2.5, 5.0)})     # docks
@@ -52,6 +59,15 @@ def grid(n=3, step=2.5):
 
 
 async def simulate(routes, loss, seed, scale=0.1, timeout=300, supersede=True):
+    """Run routes keyed by robot ID on the simulated grid.
+
+    Loss is the random frame loss probability; scale multiplies simulated timing
+    and timeout is in unscaled seconds. On timeout, return partial results;
+    done indicates whether all agents finished. Other errors propagate.
+
+    Return completion, minimum observed separation, frame and loss counts,
+    retreat count, elapsed unscaled seconds, and send counts by robot ID.
+    """
     rng, g, world = random.Random(seed), grid(), World()
     bus, agents = LoopBus(rng, loss, scale), []
     for rid, route in routes.items():
