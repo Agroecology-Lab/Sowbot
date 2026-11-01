@@ -122,6 +122,6 @@ ignore = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-cache_dir = "../.pytest_cache"
+cache_dir = ".pytest_cache"
 testpaths = ["tests"]
 pythonpath = ["tools", "worldgen"]  # tests import the scripts in these directories as top-level modules
