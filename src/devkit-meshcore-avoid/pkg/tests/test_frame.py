@@ -1,4 +1,6 @@
-from sowbot_avoid import ARRIVED, ENTER, Frame
+import pytest
+
+from sowbot_avoid import ARRIVED, BEACON, ENTER, FINISHED, HELLO, Frame
 
 
 def test_enter_example_bytes():
@@ -20,3 +22,46 @@ def test_bad_frames_rejected():
     assert Frame.decode(b"\x01\x00") is None
     assert Frame.decode(f.encode()[:-1]) is None
     assert Frame.decode(b"\x00\x01\x00") is None       # robot id 0
+
+
+@pytest.mark.parametrize(('kind', 'nodes', 'hold', 'claims'), [
+    (HELLO, (), None, ()),
+    (FINISHED, (), None, ()),
+    (ENTER, (10, 11, 12, 13), (10, 11), ((11, 12), (12, 13))),
+    (BEACON, (10, 11, 12, 13), (10, 11), ((11, 12), (12, 13))),
+    (ARRIVED, (10, 11, 12), (10, 10), ((10, 11), (11, 12))),
+])
+def test_frame_kinds_encode_and_decode(kind, nodes, hold, claims):
+    nclaims = max(0, len(nodes) - (2 if kind in (ENTER, BEACON) else 1))
+    frame = Frame(255, 255, kind, 3, nclaims, True, nodes)
+    decoded = Frame.decode(frame.encode())
+    assert decoded == frame
+    assert decoded.hold() == hold
+    assert decoded.claims() == claims
+
+
+@pytest.mark.parametrize('payload', [
+    b'', b'\x01\x00', b'\x00\x00\x00',
+    b'\x01\x00\x05',  # unknown kind
+    b'\x01\x00\x60',  # three claims
+    b'\x01\x00\x20',  # HELLO with a claim
+    b'\x01\x00\x24',  # FINISHED with a claim
+    b'\x01\x00\x01\x01\x00',  # incomplete ENTER
+    b'\x01\x00\x00\x00\x00',  # extra node on HELLO
+    b'\x01\x00\x03\x01\x00\x02',  # partial extra node
+])
+def test_invalid_frame_headers_and_lengths(payload):
+    assert Frame.decode(payload) is None
+
+
+def test_sequence_wrap_and_little_endian_node_boundaries():
+    frame = Frame(1, 256, ENTER, nodes=(0, 65535))
+    assert frame.encode() == b'\x01\x00\x01\x00\x00\xff\xff'
+    assert Frame.decode(frame.encode()) == Frame(1, 0, ENTER, nodes=(0, 65535))
+
+
+@pytest.mark.parametrize(('rid', 'node', 'error'), [(256, 0, ValueError), (1, -1, OverflowError),
+                                                    (1, 65536, OverflowError)])
+def test_encoding_out_of_range_values_fails(rid, node, error):
+    with pytest.raises(error):
+        Frame(rid, 0, ARRIVED, nodes=(node,)).encode()
