@@ -1,0 +1,129 @@
+{
+ "nodes": {
+  "F2C_R1_IN": {
+   "xy": [
+    0.0,
+    -2.006
+   ],
+   "role": "entry",
+   "row": 1,
+   "id": 1
+  },
+  "F2C_R1_OUT": {
+   "xy": [
+    2.942,
+    -2.97
+   ],
+   "role": "exit",
+   "row": 1,
+   "id": 2
+  },
+  "F2C_R2_IN": {
+   "xy": [
+    5.258,
+    -2.466
+   ],
+   "role": "entry",
+   "row": 2,
+   "id": 3
+  },
+  "F2C_R2_OUT": {
+   "xy": [
+    0.0,
+    -0.666
+   ],
+   "role": "exit",
+   "row": 2,
+   "id": 4
+  },
+  "F2C_R2_W1": {
+   "xy": [
+    2.883,
+    -1.688
+   ],
+   "role": "waypoint",
+   "row": 2,
+   "id": 5
+  },
+  "F2C_R3_IN": {
+   "xy": [
+    0.985,
+    0.197
+   ],
+   "role": "entry",
+   "row": 3,
+   "id": 6
+  },
+  "F2C_R3_OUT": {
+   "xy": [
+    5.495,
+    -1.281
+   ],
+   "role": "exit",
+   "row": 3,
+   "id": 7
+  },
+  "F2C_R4_IN": {
+   "xy": [
+    5.732,
+    -0.096
+   ],
+   "role": "entry",
+   "row": 4,
+   "id": 8
+  },
+  "F2C_R4_OUT": {
+   "xy": [
+    3.377,
+    0.676
+   ],
+   "role": "exit",
+   "row": 4,
+   "id": 9
+  }
+ },
+ "n_directed": 17,
+ "n_two_way": 14,
+ "edges": [
+  [
+   "F2C_R1_IN",
+   "F2C_R1_OUT"
+  ],
+  [
+   "F2C_R1_IN",
+   "F2C_R2_OUT"
+  ],
+  [
+   "F2C_R1_OUT",
+   "F2C_R2_IN"
+  ],
+  [
+   "F2C_R2_IN",
+   "F2C_R2_W1"
+  ],
+  [
+   "F2C_R2_IN",
+   "F2C_R3_OUT"
+  ],
+  [
+   "F2C_R2_OUT",
+   "F2C_R2_W1"
+  ],
+  [
+   "F2C_R2_OUT",
+   "F2C_R3_IN"
+  ],
+  [
+   "F2C_R3_IN",
+   "F2C_R3_OUT"
+  ],
+  [
+   "F2C_R3_OUT",
+   "F2C_R4_IN"
+  ],
+  [
+   "F2C_R4_IN",
+   "F2C_R4_OUT"
+  ]
+ ]
+}
