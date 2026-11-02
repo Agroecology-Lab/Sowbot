@@ -191,7 +191,9 @@ class TestSavePersistence(unittest.TestCase):
                 node.save('crop', 1)
 
                 expected_edges = {expected: NAV_ACTION} if expected else {}
-                self.assertEqual(targets(node.doc.get_node('CROP_R1_OUT')), expected_edges)
+                self.assertEqual(targets(node.doc.get_node('CROP_R1_OUT')), {
+                    'CROP_R1_IN': node.row_action, **expected_edges,
+                })
                 self.assertEqual(targets(node.doc.get_node('CROP_R1_IN')), {
                     'CROP_R1_OUT': node.row_action, **expected_edges,
                 })
@@ -235,19 +237,25 @@ class TestRepairPersistence(unittest.TestCase):
                 node.row_action, connect_to='missing', on_status=node.page.set_save_status)
 
         self.assertEqual(targets(node.doc.get_node('IN')), {'W1': 'limbic_row_follow'})
-        self.assertEqual(targets(node.doc.get_node('W1')), {'OUT': 'limbic_row_follow'})
-        self.assertEqual(node.save_status, 'repair: adding 2 edges…')
+        self.assertEqual(targets(node.doc.get_node('W1')), {
+            'IN': 'limbic_row_follow', 'OUT': 'limbic_row_follow',
+        })
+        self.assertEqual(targets(node.doc.get_node('OUT')), {'W1': 'limbic_row_follow'})
+        self.assertEqual(node.save_status, 'repair: adding 4 edges…')
         self.assertEqual([r.getMessage() for r in logs.records],
                          ["repair: connect_to='missing' not in map, ignoring"])
         modify = node.captured_modify()
         node.topology.persist_and_reload.assert_called_once()
         self.assertEqual(
-            node.save_status, 'repair: wired 2 edges — NO SPLICE, chain still isolated')
+            node.save_status, 'repair: wired 4 edges — NO SPLICE, chain still isolated')
 
         modify(disk_doc)
 
         self.assertEqual(targets(disk_doc.get_node('IN')), {'W1': 'authored'})
-        self.assertEqual(targets(disk_doc.get_node('W1')), {'OUT': 'limbic_row_follow'})
+        self.assertEqual(targets(disk_doc.get_node('W1')), {
+            'IN': 'limbic_row_follow', 'OUT': 'limbic_row_follow',
+        })
+        self.assertEqual(targets(disk_doc.get_node('OUT')), {'W1': 'limbic_row_follow'})
         before = copy.deepcopy(disk_doc.to_dict())
         modify(disk_doc)
         self.assertEqual(disk_doc.to_dict(), before)

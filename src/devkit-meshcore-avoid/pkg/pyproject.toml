@@ -1,0 +1,23 @@
+[project]
+name = "sowbot-avoid"
+version = "0.1.0"
+description = "Robot-to-robot collision avoidance over MeshCore (Sowbot #202)"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+radio = ["meshcore>=2.3.15"]
+test = ["pytest"]
+
+[project.scripts]
+sowbot-avoid = "sowbot_avoid.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["sowbot_avoid"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

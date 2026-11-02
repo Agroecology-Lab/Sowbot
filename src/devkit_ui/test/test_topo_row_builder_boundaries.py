@@ -27,23 +27,30 @@ class TestBuildBoundaries(unittest.TestCase):
         self.assertEqual(targets(build.nodes['FIELD_R8_IN']), {
             'FIELD_R8_OUT': ROW_ACTION, 'DOCK': NAV_ACTION,
         })
-        self.assertEqual(targets(build.nodes['FIELD_R10_OUT']), {'DOCK': NAV_ACTION})
-        self.assertEqual(targets(build.nodes['FIELD_R8_OUT']), {'FIELD_R10_IN': NAV_ACTION})
+        self.assertEqual(targets(build.nodes['FIELD_R10_OUT']), {
+            'FIELD_R10_IN': ROW_ACTION, 'DOCK': NAV_ACTION,
+        })
+        self.assertEqual(targets(build.nodes['FIELD_R8_OUT']), {
+            'FIELD_R8_IN': ROW_ACTION, 'FIELD_R10_IN': NAV_ACTION,
+        })
 
     def test_break_indices_are_relative_to_nondefault_row_start(self) -> None:
         """Verify break indices remain relative to the swaths when row numbering starts later."""
         build = build_row_nodes(straight_rows(3), ANCHOR, settings(
             row_id_start=20, break_after=frozenset({0})))
 
-        self.assertEqual(targets(build.nodes['FIELD_R20_OUT']), {})
+        self.assertEqual(targets(build.nodes['FIELD_R20_OUT']), {'FIELD_R20_IN': ROW_ACTION})
         self.assertNotIn('FIELD_R20_OUT', targets(build.nodes['FIELD_R21_IN']))
-        self.assertEqual(targets(build.nodes['FIELD_R21_OUT']), {'FIELD_R22_IN': NAV_ACTION})
+        self.assertEqual(targets(build.nodes['FIELD_R21_OUT']), {
+            'FIELD_R21_IN': ROW_ACTION, 'FIELD_R22_IN': NAV_ACTION,
+        })
         self.assertEqual(targets(build.nodes['FIELD_R22_IN'])['FIELD_R21_OUT'], NAV_ACTION)
 
     def test_wide_field_keeps_every_consecutive_row_connected(self) -> None:
         """Verify wide fields retain bidirectional headland links between consecutive rows."""
         build = build_row_nodes(straight_rows(5, spacing=10, length=2), ANCHOR, settings())
         expected = {(f'FIELD_R{i}_IN', f'FIELD_R{i}_OUT', ROW_ACTION) for i in range(1, 6)}
+        expected |= {(f'FIELD_R{i}_OUT', f'FIELD_R{i}_IN', ROW_ACTION) for i in range(1, 6)}
         for i in range(1, 5):
             expected.add((f'FIELD_R{i}_OUT', f'FIELD_R{i + 1}_IN', NAV_ACTION))
             expected.add((f'FIELD_R{i + 1}_IN', f'FIELD_R{i}_OUT', NAV_ACTION))
@@ -61,7 +68,9 @@ class TestBuildBoundaries(unittest.TestCase):
                 self.assertEqual(targets(build.nodes['FIELD_R1_IN']), {
                     'FIELD_R1_OUT': ROW_ACTION,
                 })
-                self.assertEqual(targets(build.nodes['FIELD_R1_OUT']), {})
+                self.assertEqual(targets(build.nodes['FIELD_R1_OUT']), {
+                    'FIELD_R1_IN': ROW_ACTION,
+                })
 
     def test_waypoints_use_anchor_offset_and_serializable_survey_metadata(self) -> None:
         """Verify waypoint poses include the anchor offset and retain survey metadata."""
@@ -168,9 +177,13 @@ class TestRepairBoundaries(unittest.TestCase):
         self.assertEqual(plan.row_count, 1)
         self.assertEqual(plan.edges, (
             ('IN', 'SURVEYED', 'limbic_row_follow'),
+            ('SURVEYED', 'IN', 'limbic_row_follow'),
             ('SURVEYED', 'ROW_W2', 'limbic_row_follow'),
+            ('ROW_W2', 'SURVEYED', 'limbic_row_follow'),
             ('ROW_W2', 'ROW_W10', 'limbic_row_follow'),
+            ('ROW_W10', 'ROW_W2', 'limbic_row_follow'),
             ('ROW_W10', 'OUT', 'limbic_row_follow'),
+            ('OUT', 'ROW_W10', 'limbic_row_follow'),
         ))
 
     def test_incomplete_rows_do_not_create_partial_row_chains(self) -> None:
@@ -200,6 +213,9 @@ class TestRepairBoundaries(unittest.TestCase):
             ('FIELD_R1_IN', 'FIELD_R1_W1', ROW_ACTION),
             ('FIELD_R1_W1', 'FIELD_R1_OUT', ROW_ACTION),
             ('FIELD_R2_IN', 'FIELD_R2_OUT', ROW_ACTION),
+            ('FIELD_R1_W1', 'FIELD_R1_IN', ROW_ACTION),
+            ('FIELD_R1_OUT', 'FIELD_R1_W1', ROW_ACTION),
+            ('FIELD_R2_OUT', 'FIELD_R2_IN', ROW_ACTION),
             ('FIELD_R1_IN', 'FIELD_R2_OUT', NAV_ACTION),
             ('FIELD_R2_OUT', 'FIELD_R1_IN', NAV_ACTION),
             ('FIELD_R1_OUT', 'FIELD_R2_IN', NAV_ACTION),

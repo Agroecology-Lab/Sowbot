@@ -114,9 +114,9 @@ class TestRepairRegressions(unittest.TestCase):
             node.repair(connect_to='DOCK')
 
         node.topology.persist_and_reload.assert_called_once()
-        self.assertEqual(node.save_status, 'repair: wired 1 edges @ DOCK')
+        self.assertEqual(node.save_status, 'repair: wired 2 edges @ DOCK')
         self.assertEqual(targets(node.doc.get_node('IN')), {'OUT': node.row_action})
-        self.assertEqual(targets(node.doc.get_node('OUT')), {})
+        self.assertEqual(targets(node.doc.get_node('OUT')), {'IN': node.row_action})
         self.assertEqual(dock.to_dict(), before)
 
 

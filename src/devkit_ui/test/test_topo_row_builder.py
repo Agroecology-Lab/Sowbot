@@ -69,6 +69,19 @@ class TestBuildRowNodes(unittest.TestCase):
         build = build_row_nodes(straight_rows(1), ANCHOR, settings())
 
         self.assertEqual(targets(build.nodes['FIELD_R1_IN']), {'FIELD_R1_OUT': ROW_ACTION})
+        self.assertEqual(targets(build.nodes['FIELD_R1_OUT']), {'FIELD_R1_IN': ROW_ACTION})
+
+    def test_every_generated_edge_has_a_reverse_edge(self) -> None:
+        """Verify in-row and headland edges are all bidirectional, for straight and contour rows."""
+        curve = swath((0.0, 0.0), (0.0, 12.0), (5.0, 24.0))
+        for rows, contour in ((straight_rows(3), False), ([curve, curve, curve], True)):
+            with self.subTest(contour=contour):
+                build = build_row_nodes(rows, ANCHOR, settings(
+                    contour_used=contour, waypoint_interval_m=10.0))
+                pairs = {(n.name, e.node): e.action for n in build.nodes.values() for e in n.edges}
+                self.assertTrue(pairs)
+                for (src, dst), action in pairs.items():
+                    self.assertEqual(pairs.get((dst, src)), action, (src, dst))
 
     def test_contour_rows_chain_through_waypoints_in_order(self) -> None:
         """Verify a contour row is chained entry, W1, W2... exit using the row action."""
@@ -82,6 +95,7 @@ class TestBuildRowNodes(unittest.TestCase):
         chain = ['FIELD_R1_IN', *names, 'FIELD_R1_OUT']
         for a, b in pairwise(chain):
             self.assertEqual(targets(build.nodes[a]).get(b), 'limbic_row_follow')
+            self.assertEqual(targets(build.nodes[b]).get(a), 'limbic_row_follow')
 
     def test_headland_edges_join_row_exit_to_next_row_entry_both_ways(self) -> None:
         """Verify consecutive rows are linked OUT to next IN with navigation edges."""
@@ -181,8 +195,9 @@ class TestRowRepair(unittest.TestCase):
 
         self.assertEqual(plan.row_count, 2)
         self.assertFalse(plan.headlands_skipped)
-        self.assertEqual(add_missing_edges(doc, plan.edges), 6)
+        self.assertEqual(add_missing_edges(doc, plan.edges), 8)
         self.assertEqual(targets(doc.get_node('FIELD_R1_IN'))['FIELD_R1_OUT'], ROW_ACTION)
+        self.assertEqual(targets(doc.get_node('FIELD_R1_OUT'))['FIELD_R1_IN'], ROW_ACTION)
         # Rows are snaked, so R1_OUT (y=50) shares its end with R2_IN (y=50).
         self.assertEqual(targets(doc.get_node('FIELD_R1_OUT'))['FIELD_R2_IN'], NAV_ACTION)
         self.assertEqual(targets(doc.get_node('FIELD_R2_IN'))['FIELD_R1_OUT'], NAV_ACTION)
@@ -213,6 +228,7 @@ class TestRowRepair(unittest.TestCase):
         chain = ['FIELD_R1_IN', *waypoints, 'FIELD_R1_OUT']
         for a, b in pairwise(chain):
             self.assertEqual(targets(doc.get_node(a)).get(b), ROW_ACTION, (a, b))
+            self.assertEqual(targets(doc.get_node(b)).get(a), ROW_ACTION, (b, a))
 
     def test_existing_edge_actions_are_not_changed(self) -> None:
         """Verify an edge that already exists keeps its action when the row action differs."""
@@ -226,12 +242,15 @@ class TestRowRepair(unittest.TestCase):
             targets(doc.get_node('FIELD_R1_IN'))['FIELD_R1_OUT'], 'limbic_row_follow')
 
     def test_single_row_needs_no_headland_edges(self) -> None:
-        """Verify one row restores only its in-row edge, since it has no neighbours."""
+        """Verify one row restores only its in-row edges, both ways, since it has no neighbours."""
         doc = self.doc_without_edges(straight_rows(1))
         plan = plan_row_repair(doc, ROW_ACTION)
 
         self.assertFalse(plan.headlands_skipped)
-        self.assertEqual(plan.edges, (('FIELD_R1_IN', 'FIELD_R1_OUT', ROW_ACTION),))
+        self.assertEqual(plan.edges, (
+            ('FIELD_R1_IN', 'FIELD_R1_OUT', ROW_ACTION),
+            ('FIELD_R1_OUT', 'FIELD_R1_IN', ROW_ACTION),
+        ))
 
     def test_headlands_are_reported_skipped_with_fewer_than_two_row_ends(self) -> None:
         """Verify a lone row end cannot be classified and the plan says so."""

@@ -122,8 +122,8 @@ def _add_headland_edge(nodes: dict[NodeID, TopoNode], p: NodeID, q: NodeID) -> N
 def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings) -> RowBuild:
     """Turn planned swaths into entry, waypoint and exit nodes with their edges.
 
-    Each usable swath becomes an IN and an OUT node joined by directed edges using
-    ``settings.row_action``. With contour mode and more than two points, rows may
+    Each usable swath becomes an IN and an OUT node joined by edges in both directions
+    using ``settings.row_action``. With contour mode and more than two points, rows may
     also get intermediate waypoints; otherwise they keep a single entry-to-exit edge.
 
     Consecutive built rows are joined OUT to the next row's IN in both directions. The
@@ -202,6 +202,7 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
 
         for a_name, b_name in pairwise([in_name, *waypoint_names, out_name]):
             build.nodes[a_name].add_edge(b_name, action=row_action)
+            build.nodes[b_name].add_edge(a_name, action=row_action)
 
         build.added.append(rid)
         build.row_names[rid] = (in_name, out_name)
@@ -257,8 +258,8 @@ def plan_row_repair(doc: TopoDoc, row_action: str) -> RepairPlan | None:
     """Work out which in-row and headland edges the rows in ``doc`` should have.
 
     Rows are found from the ``row_id`` and ``row_role`` metadata. In-row edges chain
-    entry, waypoints (in ``_W<n>`` order) and exit, so a repair restores the curve
-    instead of collapsing it to one hop. Headland edges join same-end neighbours,
+    entry, waypoints (in ``_W<n>`` order) and exit in both directions, so a repair
+    restores the curve instead of collapsing it to one hop. Headland edges join same-end neighbours,
     classified by geometry rather than the IN/OUT label, because snake ordering
     flips the label against the physical end. Waypoints are left out of that
     classification, since they are not row ends.
@@ -307,7 +308,9 @@ def plan_row_repair(doc: TopoDoc, row_action: str) -> RepairPlan | None:
         entry, exit_ = rows[rid].get('entry'), rows[rid].get('exit')
         if entry and exit_ and entry != exit_:
             waypoints = sorted(rows[rid].get('waypoints', []), key=waypoint_order)
-            edges.extend((a, b, row_action) for a, b in pairwise([entry, *waypoints, exit_]))
+            for a, b in pairwise([entry, *waypoints, exit_]):
+                edges.append((a, b, row_action))
+                edges.append((b, a, row_action))
 
     headlands_skipped = len(coords) < 2
     if not headlands_skipped:

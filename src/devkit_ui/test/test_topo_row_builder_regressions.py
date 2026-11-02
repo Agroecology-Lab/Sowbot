@@ -24,12 +24,15 @@ class TestRowBatchRegressions(unittest.TestCase):
             row_id_start=10, break_after=frozenset({1})))
 
         self.assertEqual(build.added, [11, 13, 14])
-        self.assertEqual(targets(build.nodes['FIELD_R11_OUT']), {})
+        self.assertEqual(targets(build.nodes['FIELD_R11_OUT']), {'FIELD_R11_IN': ROW_ACTION})
         self.assertEqual(targets(build.nodes['FIELD_R13_IN']), {'FIELD_R13_OUT': ROW_ACTION})
-        self.assertEqual(targets(build.nodes['FIELD_R13_OUT']), {'FIELD_R14_IN': NAV_ACTION})
+        self.assertEqual(targets(build.nodes['FIELD_R13_OUT']), {
+            'FIELD_R13_IN': ROW_ACTION, 'FIELD_R14_IN': NAV_ACTION,
+        })
         self.assertEqual(targets(build.nodes['FIELD_R14_IN']), {
             'FIELD_R14_OUT': ROW_ACTION, 'FIELD_R13_OUT': NAV_ACTION,
         })
+        self.assertEqual(targets(build.nodes['FIELD_R14_OUT']), {'FIELD_R14_IN': ROW_ACTION})
 
     def test_disabled_contour_ignores_interior_points_and_waypoint_interval(self) -> None:
         """A multi-point swath still produces a direct edge when contour mode is off."""
@@ -39,7 +42,7 @@ class TestRowBatchRegressions(unittest.TestCase):
 
         self.assertEqual(set(build.nodes), {'FIELD_R1_IN', 'FIELD_R1_OUT'})
         self.assertEqual(targets(build.nodes['FIELD_R1_IN']), {'FIELD_R1_OUT': ROW_ACTION})
-        self.assertEqual(targets(build.nodes['FIELD_R1_OUT']), {})
+        self.assertEqual(targets(build.nodes['FIELD_R1_OUT']), {'FIELD_R1_IN': ROW_ACTION})
 
     def test_endpoint_coordinates_round_after_adding_anchor_offset(self) -> None:
         """Preserve millimetre rounding for fractional and negative map coordinates."""
@@ -111,7 +114,10 @@ class TestRepairPlanRegressions(unittest.TestCase):
 
         self.assertEqual(plan.row_count, 2)
         self.assertFalse(plan.headlands_skipped)
-        self.assertEqual(plan.edges, (('IN', 'OUT', ROW_ACTION),))
+        self.assertEqual(plan.edges, (
+            ('IN', 'OUT', ROW_ACTION),
+            ('OUT', 'IN', ROW_ACTION),
+        ))
         self.assertEqual(doc.to_dict(), before)
 
     def test_infinite_row_id_raises_before_mutating_existing_edges(self) -> None:
