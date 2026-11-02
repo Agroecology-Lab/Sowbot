@@ -51,3 +51,16 @@ def test_load_requires_edges(tmp_path):
     map_file.write_text('{}')
     with pytest.raises(KeyError):
         Graph.load(map_file)
+
+
+def test_path_prefers_fewer_hops_and_handles_cycles():
+    graph = Graph([(1, 2), (2, 3), (3, 4), (1, 5), (5, 4), (2, 5)])
+    assert graph.path(1, 4) == [1, 5, 4]
+    assert graph.path(1, 4, lambda u, v: (u, v) != (5, 4)) == [1, 2, 3, 4]
+
+
+def test_load_propagates_invalid_json(tmp_path):
+    map_file = tmp_path / 'invalid.json'
+    map_file.write_text('{invalid')
+    with pytest.raises(json.JSONDecodeError):
+        Graph.load(map_file)

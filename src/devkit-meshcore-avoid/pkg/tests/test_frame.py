@@ -65,3 +65,22 @@ def test_sequence_wrap_and_little_endian_node_boundaries():
 def test_encoding_out_of_range_values_fails(rid, node, error):
     with pytest.raises(error):
         Frame(rid, 0, ARRIVED, nodes=(node,)).encode()
+
+
+def test_flags_and_node_order_match_wire_format():
+    frame = Frame(7, 9, ARRIVED, resend=3, nclaims=2, retreat=True, nodes=(1, 256, 65535))
+    payload = b'\x07\x09\xdb\x01\x00\x00\x01\xff\xff'
+    assert frame.encode() == payload
+    assert Frame.decode(payload) == frame
+    assert frame.claims() == ((1, 256), (256, 65535))
+
+
+@pytest.mark.parametrize('kind', [ENTER, BEACON, ARRIVED])
+@pytest.mark.parametrize('nclaims', [0, 1, 2])
+def test_decode_requires_exact_node_count(kind, nclaims):
+    base_nodes = 2 if kind in (ENTER, BEACON) else 1
+    frame = Frame(1, 42, kind, nclaims=nclaims, nodes=tuple(range(base_nodes + nclaims)))
+    payload = frame.encode()
+    assert Frame.decode(payload) == frame
+    assert Frame.decode(payload[:-2]) is None
+    assert Frame.decode(payload + b'\x00\x00') is None

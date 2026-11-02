@@ -118,3 +118,53 @@ def test_mesh_radio_without_secret_preserves_existing_channel(monkeypatch):
         assert radio.last_rx > 0
 
     asyncio.run(scenario())
+
+
+def test_mesh_radio_rejects_invalid_secret_before_channel_setup(monkeypatch):
+    async def scenario():
+        commands = SimpleNamespace(set_channel=AsyncMock())
+        mc = SimpleNamespace(commands=commands, subscribe=Mock(), start_auto_message_fetching=AsyncMock())
+        monkeypatch.setitem(sys.modules, 'meshcore', SimpleNamespace(
+            MeshCore=SimpleNamespace(create_serial=AsyncMock(return_value=mc)),
+            EventType=SimpleNamespace(CHANNEL_DATA_RECV='received')))
+        radio = MeshRadio('port', secret='not hex')
+        with pytest.raises(ValueError):
+            await radio.start()
+        commands.set_channel.assert_not_awaited()
+        mc.subscribe.assert_not_called()
+        mc.start_auto_message_fetching.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_mesh_radio_send_propagates_command_exception():
+    async def scenario():
+        radio = MeshRadio('port')
+        radio.mc = SimpleNamespace(commands=SimpleNamespace(
+            send_channel_data=AsyncMock(side_effect=RuntimeError('serial disconnected'))))
+        with pytest.raises(RuntimeError, match='serial disconnected'):
+            await radio.send(b'data')
+
+    asyncio.run(scenario())
+
+
+def test_loop_bus_transmissions_at_airtime_boundary_do_not_collide(monkeypatch):
+    async def scenario():
+        bus = LoopBus(RandomValues(), scale=1, toa=1)
+        first, second, receiver = bus.radio(), bus.radio(), bus.radio()
+        received = []
+        receiver.set_handler(received.append)
+        now = [10.0]
+        monkeypatch.setattr(radio_module, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+        scheduled = []
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, 'call_later', lambda delay, callback, *args: scheduled.append((callback, args)))
+        await first.send(b'first')
+        now[0] = 11.0
+        await second.send(b'second')
+        for callback, args in scheduled:
+            callback(*args)
+        assert received == [b'first', b'second']
+        assert (bus.frames, bus.lost) == (2, 0)
+
+    asyncio.run(scenario())

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from sowbot_avoid import ARRIVED, ENTER, FINISHED, HELLO, Agent, Frame, Graph
+from sowbot_avoid import ARRIVED, BEACON, ENTER, FINISHED, HELLO, Agent, Frame, Graph
 from sowbot_avoid import agent as agent_module
 from sowbot_avoid.radio import Radio
 
@@ -162,3 +162,102 @@ def test_forced_retreat_and_retreat_limit(monkeypatch):
     asyncio.run(agent._blocked({1}))
     agent._start_retreat.assert_called_once_with()
     agent._wait.assert_awaited_once_with(0.1)
+
+
+@pytest.mark.parametrize(('delta', 'accepted'), [(1, True), (127, True), (128, False), (255, False)])
+def test_receive_sequence_window_boundaries(delta, accepted):
+    agent = make_agent()
+    original = Frame(1, 200, HELLO)
+    agent.on_rx(original.encode())
+    agent.wake.clear()
+    incoming = Frame(1, (200 + delta) % 256, FINISHED)
+    agent.on_rx(incoming.encode())
+    assert agent.book[1] == (incoming if accepted else original)
+    assert agent.wake.is_set() is accepted
+
+
+def test_sender_continues_after_radio_error_and_logs_it():
+    async def scenario():
+        agent = make_agent(supersede=False)
+        error = RuntimeError('radio unavailable')
+        sent = asyncio.Event()
+
+        async def send(payload):
+            if not sent.is_set():
+                sent.set()
+                raise error
+            received.append(Frame.decode(payload))
+            delivered.set()
+
+        received = []
+        delivered = asyncio.Event()
+        agent.radio.send = send
+        agent.log = Mock()
+        agent.announce(HELLO, ())
+        agent.announce(FINISHED, ())
+        sender = asyncio.create_task(agent._sender())
+        try:
+            await asyncio.wait_for(delivered.wait(), timeout=1)
+        finally:
+            sender.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await sender
+        assert [frame.kind for frame in received] == [FINISHED]
+        agent.log.assert_called_once_with('send failed', error)
+        assert agent.sent == 2
+
+    asyncio.run(scenario())
+
+
+def test_mission_waits_for_initial_node_to_clear():
+    agent = make_agent(route=(1,), scale=0)
+    agent.blocked_by = Mock(side_effect=[{3}, set()])
+
+    async def wait(_delay):
+        assert [frame.kind for _, frame in agent.q] == [HELLO]
+
+    agent._wait = AsyncMock(side_effect=wait)
+    agent.announce = Mock(wraps=agent.announce)
+    asyncio.run(agent._mission())
+    assert [call.args for call in agent.blocked_by.call_args_list] == [((1, 1),), ((1, 1),)]
+    agent._wait.assert_awaited_once_with(0.1)
+    assert [call.args[0] for call in agent.announce.call_args_list] == [HELLO, ARRIVED, FINISHED]
+
+
+def test_mission_completes_retreat_and_resumes_route():
+    graph = Graph([(1, 2), (1, 3), (3, 2), (2, 4)])
+    agent = make_agent(graph=graph, scale=0)
+    agent.driver.drive = AsyncMock()
+    agent.log = Mock()
+    assert agent._start_retreat()
+    asyncio.run(agent._mission())
+    assert agent.driver.drive.await_args_list == [((1, 3),), ((3, 2),), ((2, 4),)]
+    assert (agent.cur, agent.idx, agent.retreating, agent.resume) == (4, 2, False, None)
+    agent.log.assert_any_call('retreat done, resuming')
+
+
+def test_drive_sends_beacon_while_motion_is_in_progress(monkeypatch):
+    async def scenario():
+        agent = make_agent(scale=0.001)
+        release = asyncio.Event()
+
+        async def drive(_a, _b):
+            await release.wait()
+
+        announce = agent.announce
+
+        def record(kind, *args, **kwargs):
+            announce(kind, *args, **kwargs)
+            if kind == BEACON:
+                release.set()
+
+        agent.driver.drive = drive
+        agent.announce = Mock(side_effect=record)
+        await asyncio.wait_for(agent._drive((1, 2)), timeout=1)
+        calls = agent.announce.call_args_list
+        assert [call.args[0] for call in calls] == [ENTER, BEACON, ARRIVED]
+        assert calls[1].args[1:3] == ([1, 2, 4], 1)
+        assert (agent.cur, agent.idx) == (2, 1)
+
+    monkeypatch.setattr(agent_module, 'BEACON_EVERY', 0)
+    asyncio.run(scenario())

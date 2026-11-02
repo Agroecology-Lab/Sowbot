@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from sowbot_avoid.sim import SimDriver, World, grid
+from sowbot_avoid import sim as sim_module
 
 
 def test_world_tracks_minimum_separation_over_time():
@@ -32,3 +33,38 @@ def test_driver_places_and_reaches_destination():
     assert world.pos[1] == graph.xy[2]
     with pytest.raises(KeyError):
         driver.place(999)
+
+
+def test_driver_rejects_missing_coordinates_and_zero_speed():
+    driver = SimDriver(World(), 1, grid(), speed=0)
+    with pytest.raises(KeyError):
+        asyncio.run(driver.drive(1, 999))
+    with pytest.raises(ZeroDivisionError):
+        asyncio.run(driver.drive(1, 2))
+
+
+def test_simulate_timeout_returns_partial_results_and_cancels_unfinished_agent(monkeypatch):
+    agents = []
+
+    class FakeAgent:
+        def __init__(self, rid, route, graph, radio, driver, scale, rng, supersede):
+            self.rid, self.done, self.retreats, self.sent = rid, False, rid, rid + 1
+            self.cancelled = False
+            agents.append(self)
+
+        async def run(self):
+            if self.rid == 1:
+                self.done = True
+                return
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.cancelled = True
+
+    monkeypatch.setattr(sim_module, 'Agent', FakeAgent)
+    result = asyncio.run(sim_module.simulate({1: [1], 2: [2]}, loss=0, seed=0, scale=0.01, timeout=2))
+    assert result['done'] is False
+    assert result['sep'] == 2.5
+    assert result['retreats'] == 3 and result['sent'] == {1: 2, 2: 3}
+    assert result['frames'] == result['lost'] == 0
+    assert agents[0].done and agents[1].cancelled
