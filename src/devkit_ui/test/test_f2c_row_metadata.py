@@ -200,7 +200,7 @@ class TestF2CRowMetadata(unittest.TestCase):
 
         self.assertEqual(list(node.doc.get_node('IN').edges), [existing])
         self.assertEqual([edge.action for edge in node.doc.get_node('WP').edges],
-                         ['limbic_row_follow'])
+                         ['limbic_row_follow', 'limbic_row_follow'])
         node.topology.persist_and_reload.assert_called_once()
         node.topology.persist_and_reload.reset_mock()
         node.row_action = 'row_traversal'
@@ -209,7 +209,7 @@ class TestF2CRowMetadata(unittest.TestCase):
 
         self.assertEqual(list(node.doc.get_node('IN').edges), [existing])
         self.assertEqual([edge.action for edge in node.doc.get_node('WP').edges],
-                         ['limbic_row_follow'])
+                         ['limbic_row_follow', 'limbic_row_follow'])
         self.assertIn('already wired', node.save_status)
         node.topology.persist_and_reload.assert_not_called()
 
@@ -233,7 +233,7 @@ class TestF2CRowMetadata(unittest.TestCase):
                                 row_edges.append(edge)
                             else:
                                 headland_edges.append(edge)
-                    self.assertEqual(len(row_edges), 4 if contour else 2)
+                    self.assertEqual(len(row_edges), 8 if contour else 4)
                     self.assertEqual({edge.action for edge in row_edges}, {action})
                     self.assertTrue(headland_edges)
                     self.assertEqual({edge.action for edge in headland_edges}, {NAV_ACTION})
@@ -258,7 +258,8 @@ class TestF2CRowMetadata(unittest.TestCase):
                           for source in node.doc.nodes for edge in source.edges}
                 self.assertEqual(actual, {
                     ('R1_IN', 'R1_W1'): action, ('R1_W1', 'R1_OUT'): action,
-                    ('R2_IN', 'R2_OUT'): action,
+                    ('R1_W1', 'R1_IN'): action, ('R1_OUT', 'R1_W1'): action,
+                    ('R2_IN', 'R2_OUT'): action, ('R2_OUT', 'R2_IN'): action,
                     ('R1_IN', 'R2_IN'): NAV_ACTION, ('R2_IN', 'R1_IN'): NAV_ACTION,
                     ('R1_OUT', 'R2_OUT'): NAV_ACTION, ('R2_OUT', 'R1_OUT'): NAV_ACTION,
                 })
