@@ -1,6 +1,5 @@
 """Radios: MeshRadio (meshcore_py, companion firmware 1.15.0+) and a simulated shared channel."""
 import asyncio
-import sys
 import time
 
 from .frame import DATA_TYPE
@@ -41,13 +40,25 @@ class MeshRadio(Radio):
     async def start(self):
         """Connect, optionally configure the channel, and begin fetching messages.
 
-        Import, connection, channel setup, and invalid hex secret errors propagate.
+        Import, connection, and invalid hex secret errors propagate. RuntimeError is
+        raised if the radio rejects the channel setup or has no channel at the
+        configured index, because the robot would otherwise move without being heard.
         """
         from meshcore import MeshCore, EventType
         self._EventType = EventType
+        key = bytes.fromhex(self.secret) if self.secret else None      # fail on a bad key before opening the port
         self.mc = await MeshCore.create_serial(self.port, self.baud)
-        if self.secret:
-            await self.mc.commands.set_channel(self.idx, self.name, bytes.fromhex(self.secret))
+        try:
+            if key:
+                res = await self.mc.commands.set_channel(self.idx, self.name, key)
+                if res.type == EventType.ERROR:
+                    raise RuntimeError(f"set_channel {self.idx} failed: {res.payload}")
+            res = await self.mc.commands.get_channel(self.idx)
+            if res.type == EventType.ERROR:
+                raise RuntimeError(f"channel {self.idx} is not available on the radio: {res.payload}")
+        except BaseException:
+            await self.mc.disconnect()
+            raise
         self.mc.subscribe(EventType.CHANNEL_DATA_RECV, self._on_event,
                           attribute_filters={"channel_idx": self.idx, "data_type": DATA_TYPE})
         await self.mc.start_auto_message_fetching()
@@ -62,15 +73,16 @@ class MeshRadio(Radio):
             self.cb(bytes.fromhex(ev.payload["payload"]))
 
     async def send(self, payload):
-        """Send channel data, reporting an error response to stderr.
+        """Send channel data.
 
-        Exceptions from the radio command propagate to the caller.
+        An error response from the radio raises RuntimeError, so the caller sees that
+        the frame was not sent. Exceptions from the radio command propagate as well.
         """
         # path=b"" is zero-hop (direct range only); None floods through repeaters.
         res = await self.mc.commands.send_channel_data(self.idx, DATA_TYPE, payload,
                                                        path=b"" if self.zero_hop else None)
         if res.type == self._EventType.ERROR:
-            print("send_channel_data error:", res.payload, file=sys.stderr)
+            raise RuntimeError(f"send_channel_data error: {res.payload}")
 
 
 class LoopBus:

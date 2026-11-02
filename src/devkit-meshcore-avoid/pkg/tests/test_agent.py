@@ -27,7 +27,7 @@ def test_receive_rejects_invalid_own_duplicate_and_old_frames():
     assert agent.book[1].seq == 255 and agent.wake.is_set()
     agent.wake.clear()
     for seq in (255, 254, 127):  # duplicate, backwards, half-range ambiguity
-        agent.on_rx(Frame(1, seq, HELLO).encode())
+        agent.on_rx(Frame(1, seq, FINISHED).encode())
     assert agent.book[1].seq == 255 and not agent.wake.is_set()
     agent.on_rx(Frame(1, 0, FINISHED).encode())
     assert agent.book[1].kind == FINISHED and agent.book[1].seq == 0
@@ -89,10 +89,10 @@ def test_retreat_avoids_park_and_resumes_original_route():
 
 def test_retreat_fails_when_all_side_paths_are_occupied_or_parked():
     graph = Graph([(1, 2), (1, 3), (1, 5)], park=(5,))
-    agent = make_agent(graph=graph)
+    agent = make_agent(route=(1, 2), graph=graph)
     agent.book[1] = Frame(1, 0, ARRIVED, nodes=(3,))
     assert not agent._start_retreat()
-    assert agent.route == [1, 2, 4] and not agent.retreating
+    assert agent.route == [1, 2] and not agent.retreating
 
 
 def test_blocked_waits_until_threshold_then_starts_retreat(monkeypatch):
@@ -156,12 +156,34 @@ def test_forced_retreat_and_retreat_limit(monkeypatch):
     agent._start_retreat = Mock(return_value=True)
     agent._wait = AsyncMock()
     monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 25)
-    asyncio.run(agent._blocked({1}))
+    asyncio.run(agent._blocked({3}))
     agent._start_retreat.assert_called_once_with()
     agent.retreats = agent_module.RETREAT_MAX
-    asyncio.run(agent._blocked({1}))
+    asyncio.run(agent._blocked({3}))
     agent._start_retreat.assert_called_once_with()
     agent._wait.assert_awaited_once_with(0.1)
+
+
+def test_only_the_lower_id_retreats(monkeypatch):
+    agent = make_agent()                         # id 2
+    agent.blocked_since, agent.forced_after = 10, 15
+    agent._start_retreat, agent._wait = Mock(return_value=True), AsyncMock()
+    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 100)
+    asyncio.run(agent._blocked({1}))             # a lower id blocks us: wait for it
+    asyncio.run(agent._blocked({1, 3}))          # any lower id among the blockers is enough to wait
+    agent._start_retreat.assert_not_called()
+    assert agent._wait.await_count == 2
+
+
+def test_only_the_lowest_id_retreats(monkeypatch):
+    agent = make_agent()                      # robot 2
+    agent.blocked_since, agent.forced_after = 10, 15
+    agent._start_retreat, agent._wait = Mock(return_value=True), AsyncMock()
+    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 25)
+    asyncio.run(agent._blocked({1}))          # blocked by a lower id: wait for it
+    asyncio.run(agent._blocked({1, 3}))       # one blocker is lower: still wait
+    agent._start_retreat.assert_not_called()
+    assert agent._wait.await_count == 2
 
 
 @pytest.mark.parametrize(('delta', 'accepted'), [(1, True), (127, True), (128, False), (255, False)])
@@ -200,8 +222,7 @@ def test_sender_continues_after_radio_error_and_logs_it():
             await asyncio.wait_for(delivered.wait(), timeout=1)
         finally:
             sender.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await sender
+            await asyncio.gather(sender, return_exceptions=True)    # collect the cancellation
         assert [frame.kind for frame in received] == [FINISHED]
         agent.log.assert_called_once_with('send failed', error)
         assert agent.sent == 2

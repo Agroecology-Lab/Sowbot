@@ -50,12 +50,18 @@ class SimDriver(Driver):
 
 
 def grid(n=3, step=2.5):
-    """Build an n by n grid with spacing step and three fixed dock nodes."""
+    """Build an n by n grid with spacing step and three dock nodes numbered above n * n.
+
+    Docks hang off the first node of row 0 (west), the last node of row 0 (east)
+    and the first node of the last row (west). For n=3 they are 10, 11 and 12.
+    """
     xy = {r * n + c + 1: (c * step, r * step) for r in range(n) for c in range(n)}
     edges = [(i, i + 1) for i in xy if i % n] + [(i, i + n) for i in xy if i + n in xy]
-    xy.update({10: (-2.5, 0.0), 11: (7.5, 0.0), 12: (-2.5, 5.0)})     # docks
-    edges += [(1, 10), (3, 11), (7, 12)]
-    return Graph(edges, xy, park=(10, 11, 12))
+    top_left, top_right, bottom_left = 1, n, (n - 1) * n + 1
+    d1, d2, d3 = n * n + 1, n * n + 2, n * n + 3
+    xy.update({d1: (-step, 0.0), d2: ((n - 1) * step + step, 0.0), d3: (-step, (n - 1) * step)})
+    edges += [(top_left, d1), (top_right, d2), (bottom_left, d3)]
+    return Graph(edges, xy, park=(d1, d2, d3))
 
 
 async def simulate(routes, loss, seed, scale=0.1, timeout=300, supersede=True):

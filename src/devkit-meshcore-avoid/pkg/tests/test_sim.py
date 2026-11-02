@@ -13,7 +13,6 @@ def test_no_loss_all_finish_and_keep_clear(seed):
     assert r["done"] and r["sep"] >= 1.0
 
 
-@pytest.mark.xfail(reason="seed 2 at 20% loss: two retreats pick the same waypoint, one robot livelocks")
 def test_loss_20_seed_2():
     r = asyncio.run(simulate(ROUTES, 0.2, 2))
     assert r["done"] and r["sep"] >= 1.0

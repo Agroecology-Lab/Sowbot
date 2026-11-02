@@ -20,14 +20,20 @@ Status: untested on hardware. Not a safety function; onboard obstacle detection 
 
     pip install -e .[radio]
     python -m sowbot_avoid --serial /dev/ttyUSB0 --id 2 --map map.json --route 4,5,6,11 \
-        --channel-secret <32 hex chars> --driver mypkg.mymod:MyDriver
+        --channel-secret-file /etc/sowbot/channel.key --driver mypkg.mymod:MyDriver
 
 `map.json`:
 
-    {"nodes": {"4": [0, 0], "5": [2.5, 0]}, "edges": [[4, 5], [5, 6]], "park": [11]}
+    {"nodes": {"4": [0, 0], "5": [2.5, 0], "6": [5, 0], "11": [7.5, 0]},
+     "edges": [[4, 5], [5, 6], [6, 11]], "park": [11]}
 
-Edges work both ways. `park` lists docks: routes end there and retreats never use them,
+Edges work both ways.
+Every node on a route needs coordinates, and every hop must be an edge of the map.
+`park` lists docks: a route must end at one, and retreats never use them,
 because a robot that has sent FINISHED is ignored by the others.
+`--id` is 1 to 255 and node IDs are 0 to 65535.
+`--channel-secret-file` reads 32 hex chars from a file (`-` reads standard input), so the key stays out of the process list and shell history.
+Omit it if the channel is already set up on the radio.
 
 ## Tests
 

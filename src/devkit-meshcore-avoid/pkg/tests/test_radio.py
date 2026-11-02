@@ -68,11 +68,13 @@ def test_loop_bus_drops_overlapping_frames_and_random_loss(monkeypatch):
 
 
 @pytest.mark.parametrize('zero_hop', [True, False])
-def test_mesh_radio_configures_channel_sends_and_disconnects(monkeypatch, zero_hop, capsys):
+def test_mesh_radio_configures_channel_sends_and_disconnects(monkeypatch, zero_hop):
     async def scenario():
         event_type = SimpleNamespace(CHANNEL_DATA_RECV='received', ERROR='error')
-        commands = SimpleNamespace(set_channel=AsyncMock(), send_channel_data=AsyncMock(
-            return_value=SimpleNamespace(type='error', payload='failed')))
+        ok = SimpleNamespace(type='ok', payload=None)
+        commands = SimpleNamespace(set_channel=AsyncMock(return_value=ok), get_channel=AsyncMock(return_value=ok),
+                                   send_channel_data=AsyncMock(
+                                       return_value=SimpleNamespace(type='error', payload='failed')))
         mc = SimpleNamespace(commands=commands, subscribe=Mock(), start_auto_message_fetching=AsyncMock(),
                              disconnect=AsyncMock())
         create = AsyncMock(return_value=mc)
@@ -84,19 +86,20 @@ def test_mesh_radio_configures_channel_sends_and_disconnects(monkeypatch, zero_h
         await radio.start()
         create.assert_awaited_once_with('/dev/radio', 9600)
         commands.set_channel.assert_awaited_once_with(3, 'test', b'\x01\x02')
+        commands.get_channel.assert_awaited_once_with(3)
         mc.subscribe.assert_called_once_with('received', radio._on_event,
                                              attribute_filters={'channel_idx': 3, 'data_type': DATA_TYPE})
         mc.start_auto_message_fetching.assert_awaited_once()
         await radio._on_event(SimpleNamespace(payload={'payload': '00ff'}))
         assert received == [b'\x00\xff'] and radio.last_rx > 0
-        await radio.send(b'data')
+        with pytest.raises(RuntimeError, match='send_channel_data error: failed'):
+            await radio.send(b'data')
         commands.send_channel_data.assert_awaited_once_with(3, DATA_TYPE, b'data',
                                                             path=b'' if zero_hop else None)
         await radio.stop()
         mc.disconnect.assert_awaited_once()
 
     asyncio.run(scenario())
-    assert 'send_channel_data error: failed' in capsys.readouterr().err
 
 
 def test_base_radio_send_is_not_implemented():
@@ -106,11 +109,12 @@ def test_base_radio_send_is_not_implemented():
 
 def test_mesh_radio_without_secret_preserves_existing_channel(monkeypatch):
     async def scenario():
-        commands = SimpleNamespace(set_channel=AsyncMock())
+        commands = SimpleNamespace(set_channel=AsyncMock(),
+                                   get_channel=AsyncMock(return_value=SimpleNamespace(type='ok')))
         mc = SimpleNamespace(commands=commands, subscribe=Mock(), start_auto_message_fetching=AsyncMock())
         monkeypatch.setitem(sys.modules, 'meshcore', SimpleNamespace(
             MeshCore=SimpleNamespace(create_serial=AsyncMock(return_value=mc)),
-            EventType=SimpleNamespace(CHANNEL_DATA_RECV='received')))
+            EventType=SimpleNamespace(CHANNEL_DATA_RECV='received', ERROR='error')))
         radio = MeshRadio('port')
         await radio.start()
         commands.set_channel.assert_not_awaited()
@@ -166,5 +170,26 @@ def test_loop_bus_transmissions_at_airtime_boundary_do_not_collide(monkeypatch):
             callback(*args)
         assert received == [b'first', b'second']
         assert (bus.frames, bus.lost) == (2, 0)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('failing', ['set_channel', 'get_channel'])
+def test_mesh_radio_start_fails_and_disconnects_when_channel_is_unusable(monkeypatch, failing):
+    async def scenario():
+        ok, bad = SimpleNamespace(type='ok'), SimpleNamespace(type='error', payload='no such channel')
+        commands = SimpleNamespace(set_channel=AsyncMock(return_value=bad if failing == 'set_channel' else ok),
+                                   get_channel=AsyncMock(return_value=bad if failing == 'get_channel' else ok))
+        mc = SimpleNamespace(commands=commands, subscribe=Mock(), start_auto_message_fetching=AsyncMock(),
+                             disconnect=AsyncMock())
+        monkeypatch.setitem(sys.modules, 'meshcore', SimpleNamespace(
+            MeshCore=SimpleNamespace(create_serial=AsyncMock(return_value=mc)),
+            EventType=SimpleNamespace(CHANNEL_DATA_RECV='received', ERROR='error')))
+        radio = MeshRadio('port', secret='0102')
+        with pytest.raises(RuntimeError, match=failing if failing == 'set_channel' else 'not available'):
+            await radio.start()
+        mc.disconnect.assert_awaited_once()
+        mc.subscribe.assert_not_called()
+        mc.start_auto_message_fetching.assert_not_awaited()
 
     asyncio.run(scenario())

@@ -1,6 +1,8 @@
 # Legacy packet format (MeshCore GRP_DATA)
 
-Proposal. Not run on hardware or in the sim. Source: meshcore-dev/meshcore @ 81dbae5.
+Proposal.
+Not run on hardware or in the sim.
+Source: meshcore-dev/meshcore @ 81dbae5.
 
 ## MeshCore constraints
 

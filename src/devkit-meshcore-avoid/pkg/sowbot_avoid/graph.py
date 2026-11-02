@@ -42,7 +42,8 @@ class Graph:
 
         File and JSON errors propagate, as does KeyError if edges is absent.
         """
-        d = json.load(open(path))
+        with open(path) as fh:
+            d = json.load(fh)
         return cls([tuple(e) for e in d["edges"]], d.get("nodes"), clearance, d.get("park", ()))
 
     def conflict(self, e1, e2):

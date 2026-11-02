@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-radio = ["meshcore"]
+radio = ["meshcore>=2.3.15"]
 test = ["pytest"]
 
 [project.scripts]
