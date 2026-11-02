@@ -4,6 +4,15 @@ Proposal.
 Not run on hardware or in the sim.
 Source: meshcore-dev/meshcore @ 81dbae5.
 
+
+
+cd ~/feldfreund_devkit_ros/src/devkit-meshcore-avoid/pkg
+pipx install pytest pyyaml
+python3 -m venv .venv
+.venv/bin/pip install -e ".[test]"
+.venv/bin/python -m pytest -q tests/test_topo.py tests/test_sweep_setup.py
+.venv/bin/python sweeps/maize_sweep.py --seeds 5
+
 ## MeshCore constraints
 
 | Item | Value |
