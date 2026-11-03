@@ -165,6 +165,30 @@ def test_drive_does_not_move_when_enter_is_not_sent():
     asyncio.run(scenario())
 
 
+def test_drive_does_not_move_when_a_peer_claims_the_edge_while_enter_is_queued():
+    async def scenario():
+        radio = RecordingRadio()
+        agent = make_agent(scale=0, radio=radio)
+        announce = agent.announce
+
+        def announce_then_peer_holds_edge(kind, *args, **kwargs):
+            delivery = announce(kind, *args, **kwargs)
+            if kind == ENTER:
+                agent.on_rx(Frame(3, 1, ENTER, nodes=(2, 5)).encode())      # arrives before our ENTER is sent
+            return delivery
+
+        agent.announce = announce_then_peer_holds_edge
+        sender = asyncio.create_task(agent._sender())
+        assert not await agent._drive((1, 2))
+        await asyncio.sleep(0.01)
+        sender.cancel()
+        agent.driver.drive.assert_not_awaited()
+        assert (agent.cur, agent.idx) == (1, 0)
+        assert [f.kind for f in radio.frames if f.resend == 0] == [ENTER, ARRIVED]     # hold withdrawn
+
+    asyncio.run(scenario())
+
+
 def test_superseded_frame_settles_delivery_as_not_sent():
     agent = make_agent()
     enter = agent.announce(ENTER, (1, 2))

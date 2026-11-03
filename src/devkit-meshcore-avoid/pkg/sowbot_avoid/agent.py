@@ -251,6 +251,10 @@ class Agent:
         if not delivery.ok:
             self.log(f'ENTER {a}->{b} not sent, not driving')
             return False
+        if not self.retreating and self.blocked_by(edge):       # NOTE: retreat hops are settled by the tie-break below
+            self.log(f'edge {a}->{b} blocked while ENTER was queued, not driving')
+            self.announce(ARRIVED, [a], 0, ARRIVED_REPEATS)     # NOTE: withdraw the hold we just announced
+            return False
         if self.retreating:
             # NOTE: Two robots can pick the same side-step point at once and neither has heard the other yet.
             # NOTE: Hold the hop for a moment; if a rival retreat conflicts, the lower id keeps it, the other backs off.
