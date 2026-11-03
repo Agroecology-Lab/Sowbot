@@ -44,10 +44,9 @@ From `pkg/`:
 
     MAP=../../../maps/maize_map
     N=3
-    python sweeps/maize_sweep.py --map $MAP --scenario random --robots $N --loss 0 --resends default --seeds 5
+    python sweeps/maize_sweep.py --map $MAP --scenario random --robots $N --loss 0 --seeds 5
 
 Change `--robots` to `2 3 4 5 6` for the whole range, add `--loss 0.1` for lost messages, `--jsonl out.jsonl` for per-run data.
-`--resends default` gives one result row per robot count. Without it every run is done twice (see below).
 A robot count the map cannot hold at the clearance is skipped, with a message on stderr.
 A deadlocked run stops at the 600 s (unscaled) timeout, about 60 s of real time.
 Run it on an idle machine, one job at a time. The default grid is 720 runs, so narrow it.
@@ -56,7 +55,6 @@ Run it on an idle machine, one job at a time. The default grid is 720 runs, so n
 |---|---|
 | `--scenario` | `follow` (same direction), `opposed` (alternating), `random`, `local` (within `--local-radius` of an anchor) |
 | `--park` | `docks` (own dock off each goal, default), `none` (routes end on map nodes), `both` |
-| `--resends` | `default` (drop old resends), `keep`, `both` (default for the script) |
 | `--scale`, `--timeout`, `--clearance`, `--stagger` | Timer scale, unscaled timeout, clearance, random late starts |
 
 #### Reading the output
@@ -67,9 +65,8 @@ The sweep ends with a plain summary above the detailed table. Example: 3 robots 
       53 nodes, 53 with coordinates, 13 rows, 14.1 x 9.9 m, ...
 
     Summary
-      PASS  random, 3 robots, loss 0.00, docks, resends default: 1/1 runs finished, closest moving pair 1.20 m
-      PASS  random, 3 robots, loss 0.00, docks, resends keep: 1/1 runs finished, closest moving pair 1.20 m
-      Overall: 2 PASS, 0 WARN, 0 FAIL of 2 cases.
+      PASS  random, 3 robots, loss 0.00, docks: 1/1 runs finished, closest moving pair 1.20 m
+      Overall: 1 PASS, 0 WARN, 0 FAIL of 1 cases.
       PASS: all finished and kept clear. WARN: also passed a finished robot too close. FAIL: a run did not finish, or moving robots came too close.
       Fewer than 5 seeds in some cases: one pass proves little. Use --seeds 5 or more.
 
@@ -79,10 +76,9 @@ The sweep ends with a plain summary above the detailed table. Example: 3 robots 
 | WARN | As PASS, but a robot passed a finished robot closer than the clearance. The others cannot see a finished robot, so this is luck, not protection |
 | FAIL | A run did not finish, or two moving robots came closer than the clearance |
 
-Each line is one case: scenario, robot count, loss, park mode and resend mode, across all its seeds. A case fails if any one seed fails.
+Each line is one case: scenario, robot count, loss, and park mode, across all its seeds. A case fails if any one seed fails.
 
 - **Map line.** Check the node count and size match your farm. If not, you are on the wrong map.
-- **Two lines per robot count.** The script runs each case twice, once dropping old resends (`default`) and once keeping them (`keep`). `--resends default` skips the second.
 
 The `Details` table underneath has the numbers behind each verdict:
 
@@ -92,8 +88,8 @@ The `Details` table underneath has the numbers behind each verdict:
 | `live<clr`, `min live` | Runs where two moving robots came closer than the clearance, and the closest they got, in metres |
 | `parked<clr`, `min park` | The same, against a robot that had already finished |
 | `secs` | Median mission time at real speed (the sim runs ten times faster) |
-| `frames` | Median radio messages sent in total. Keeping resends sent 177 against 93 in the example |
-| `retr` | Mean number of times a robot backed out of the way to break a standoff |
+| `frames` | Median radio messages sent in total |
+| `side` | Mean number of times a robot side-stepped to break a standoff |
 
 Tight maps fail. On a 9-node test map, 4 or more robots deadlocked.
 Runs are not deterministic: the agents use wall-clock time, so the same seed can give different results.
@@ -123,7 +119,6 @@ Edges work both ways. Every route node needs coordinates and every hop must be a
 | `--channel-idx`, `--channel-name` | Radio channel slot (default 1) and name (default `sowbot`) |
 | `--channel-secret-file` | File with 32 hex characters, or `-` for stdin. Omit if the radio already has the channel |
 | `--flood` | Flood through repeaters. Default is zero-hop |
-| `--keep-resends` | Keep old resends when a newer frame is sent, as in the issue |
 
 Options, map and route are checked before the radio opens. Needs companion firmware 1.15.0 or later.
 

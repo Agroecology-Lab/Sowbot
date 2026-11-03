@@ -15,7 +15,6 @@ of an anchor). Every robot stands at its own start node from t=0.
 --park docks   each route ends on its own dock node, hung 1.5 m off the goal (what the CLI demands today)
 --park none    routes end on the map's own nodes, as in a field with no docks; a finished robot is
                ignored by its peers, so sep_parked shows what that costs
---resends      default drops older resends when a newer frame is queued; keep keeps them (--keep-resends)
 """
 import argparse
 import asyncio
@@ -156,8 +155,8 @@ def add_docks(topo, routes):
 
 
 # ---- one run -----------------------------------------------------------------------------------
-def run_one(topo, sc, n, loss, seed, park, keep, a):
-    rng = random.Random(f"{sc}/{n}/{seed}")             # same routes for every loss, park and resend setting
+def run_one(topo, sc, n, loss, seed, park, a):
+    rng = random.Random(f"{sc}/{n}/{seed}")             # same routes for every loss and park setting
     routes = scenario(topo, sc, n, rng, a.local_radius)
     g = topo.graph
     if park == "docks":
@@ -165,9 +164,8 @@ def run_one(topo, sc, n, loss, seed, park, keep, a):
     delays = {i: rng.uniform(0, a.stagger) for i in range(1, n + 1)} if a.stagger else None
     t0 = time.monotonic()
     r = asyncio.run(simulate({i: rt for i, rt in enumerate(routes, 1)}, loss, seed, a.scale, a.timeout,
-                             supersede=not keep, graph=g, delays=delays))
-    r.pop("sent")
-    r.update(scenario=sc, n=n, loss=loss, seed=seed, park=park, resends="keep" if keep else "default",
+                             graph=g, delays=delays))
+    r.update(scenario=sc, n=n, loss=loss, seed=seed, park=park,
              wall=time.monotonic() - t0, hops=sum(len(x) - 1 for x in routes))
     return r
 
@@ -216,7 +214,7 @@ def summary(groups, clr):
     for k in sorted(groups):
         status, detail = verdict(groups[k], clr)
         counts[status] += 1
-        print(f"  {status:4s}  {k[0]}, {k[1]} robots, loss {k[2]:.2f}, {k[3]}, resends {k[4]}: {detail}")
+        print(f"  {status:4s}  {k[0]}, {k[1]} robots, loss {k[2]:.2f}, {k[3]}: {detail}")
     print(f"  Overall: {counts['PASS']} PASS, {counts['WARN']} WARN, {counts['FAIL']} FAIL of {len(groups)} cases.")
     print("  PASS: all finished and kept clear. WARN: also passed a finished robot too close. FAIL: a run did not finish, or moving robots came too close.")
     if min(len(g) for g in groups.values()) < 5:
@@ -230,20 +228,20 @@ def report(rows, clr):
     """
     groups = defaultdict(list)
     for r in rows:
-        groups[(r["scenario"], r["n"], r["loss"], r["park"], r["resends"])].append(r)
+        groups[(r["scenario"], r["n"], r["loss"], r["park"])].append(r)
     summary(groups, clr)
     print("\nDetails")
-    print(f"\n{'scenario':8s} {'n':>2s} {'loss':>4s} {'park':5s} {'resends':7s} | {'runs':>4s} {'done%':>5s} "
-          f"{'live<clr':>8s} {'min live':>8s} {'parked<clr':>10s} {'min park':>8s} | {'secs':>5s} {'frames':>6s} {'retr':>4s}")
+    print(f"\n{'scenario':8s} {'n':>2s} {'loss':>4s} {'park':5s} | {'runs':>4s} {'done%':>5s} "
+          f"{'live<clr':>8s} {'min live':>8s} {'parked<clr':>10s} {'min park':>8s} | {'secs':>5s} {'frames':>6s} {'side':>4s}")
     for k in sorted(groups):
         g = groups[k]
         live = [r["sep_live"] for r in g]
         park = [r["sep_parked"] for r in g]
-        print(f"{k[0]:8s} {k[1]:2d} {k[2]:4.2f} {k[3]:5s} {k[4]:7s} | {len(g):4d} "
+        print(f"{k[0]:8s} {k[1]:2d} {k[2]:4.2f} {k[3]:5s} | {len(g):4d} "
               f"{100 * sum(r['done'] for r in g) / len(g):5.0f} {sum(x < clr - EPS for x in live):8d} {fmt(min(live)):>8s} "
               f"{sum(x < clr - EPS for x in park):10d} {fmt(min(park)):>8s} | "
               f"{statistics.median(r['secs'] for r in g):5.0f} {statistics.median(r['frames'] for r in g):6.0f} "
-              f"{statistics.fmean(r['retreats'] for r in g):4.1f}")
+              f"{statistics.fmean(r['sidesteps'] for r in g):4.1f}")
     print("\nlive<clr: runs where two running robots came closer than the clearance. "
           "parked<clr: runs where a robot passed a finished one that close (peers cannot see it). "
           "secs: median unscaled seconds.")
@@ -257,7 +255,6 @@ def main():
     ap.add_argument("--robots", nargs="+", type=int, default=[2, 4, 6])
     ap.add_argument("--loss", nargs="+", type=float, default=[0.0, 0.1, 0.2])
     ap.add_argument("--park", choices=["docks", "none", "both"], default="docks")
-    ap.add_argument("--resends", choices=["default", "keep", "both"], default="both")
     ap.add_argument("--seeds", type=int, default=10)
     ap.add_argument("--seed0", type=int, default=0)
     ap.add_argument("--scale", type=float, default=0.1, help="timer scale; 0.1 runs ten times faster than real time")
@@ -277,16 +274,15 @@ def main():
           f"({topo.n_two_way} two-way), {len(topo.zero_length)} zero-length, ids {topo.digest} "
           f"({'stored in map' if topo.ids_stored else 'assigned by sorted name'})")
     parks = ["docks", "none"] if a.park == "both" else [a.park]
-    keeps = [False, True] if a.resends == "both" else [a.resends == "keep"]
     out = open(a.jsonl, "w") if a.jsonl else None
     rows, skipped = [], set()
-    jobs = [(sc, n, lo, s, pk, kp) for sc in a.scenario for n in a.robots for lo in a.loss
-            for pk in parks for kp in keeps for s in range(a.seed0, a.seed0 + a.seeds)]
-    for i, (sc, n, lo, s, pk, kp) in enumerate(jobs, 1):
+    jobs = [(sc, n, lo, s, pk) for sc in a.scenario for n in a.robots for lo in a.loss
+            for pk in parks for s in range(a.seed0, a.seed0 + a.seeds)]
+    for i, (sc, n, lo, s, pk) in enumerate(jobs, 1):
         if (sc, n) in skipped:
             continue
         try:
-            r = run_one(topo, sc, n, lo, s, pk, kp, a)
+            r = run_one(topo, sc, n, lo, s, pk, a)
         except Infeasible as e:
             skipped.add((sc, n))
             print(f"skip {sc} n={n}: {e}", file=sys.stderr)

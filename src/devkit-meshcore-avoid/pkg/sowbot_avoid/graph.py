@@ -23,18 +23,26 @@ def seg_dist(a, b, c, d):
 
 
 class Graph:
-    def __init__(self, edges, xy=None, clearance=1.0, park=()):
+    def __init__(self, edges, xy=None, clearance=1.0, park=(), rows=None):
         """Build an undirected graph with optional node coordinates and parking nodes.
 
         Clearance uses the same units as xy and is the exclusive conflict
-        distance threshold. Park nodes are excluded as retreat waypoints.
+        distance threshold. Park nodes are excluded as side-step waypoints.
+        Rows are the nodes a robot may stop on to let another pass; when not
+        given, every node except the park nodes counts.
         """
         self.xy = {int(k): tuple(v) for k, v in (xy or {}).items()}
         self.clearance, self.park = clearance, set(park)   # park: docks/chargers, never used as side-step points
+        self._rows = None if rows is None else set(rows)
         self.adj = {}
         for a, b in edges:
             self.adj.setdefault(a, set()).add(b)
             self.adj.setdefault(b, set()).add(a)
+
+    @property
+    def rows(self):
+        """Nodes a robot may stop on while side-stepping (the Agent reads this)."""
+        return set(self.adj) - self.park if self._rows is None else self._rows
 
     @classmethod
     def load(cls, path, clearance=1.0):

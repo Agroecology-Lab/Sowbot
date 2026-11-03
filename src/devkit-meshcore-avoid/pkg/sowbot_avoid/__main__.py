@@ -76,7 +76,7 @@ async def run(a):
     t0 = time.monotonic()
     log = lambda *x: print(f"{time.monotonic() - t0:7.1f}s robot {a.id}:", *x, flush=True)
     try:
-        agent = Agent(a.id, route, graph, radio, driver, log=log, supersede=not a.keep_resends)
+        agent = Agent(a.id, route, graph, radio, driver, log=log)
     except ValueError as e:
         raise MissionError(str(e)) from e
     await radio.start()
@@ -102,8 +102,6 @@ def main():
                          "omit if the channel is already set up (kept off the command line so it "
                          "stays out of the process list and shell history)")
     ap.add_argument("--flood", action="store_true", help="flood through repeaters instead of zero-hop")
-    ap.add_argument("--keep-resends", action="store_true",
-                    help="keep older resends queued when a newer frame is sent (as in the issue text)")
     a = ap.parse_args()
     try:
         asyncio.run(run(a))
