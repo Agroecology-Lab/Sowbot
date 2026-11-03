@@ -15,6 +15,7 @@ ARRIVED_REPEATS = (1.0, 3.0, 7.0)
 BEACON_EVERY = 5.0
 TAIL = 2.0
 BACKOFF = (0.12, 0.48)
+LBT_MAX = 2.0           # NOTE: longest listen-before-talk wait; a busy channel must not hold a frame back forever
 STUCK_RETREAT = 3.0
 FORCED_RETREAT = (10.0, 20.0)
 RETREAT_MAX = 10
@@ -63,7 +64,7 @@ class Agent:
         # NOTE: Random start: a rebooted robot must not look like an old, repeated frame to its peers.
         self.seq, self.idx, self.cur = int(self.rng.uniform(0, 256)) & 255, 0, route[0]
         self.q, self.last_tx, self.sent, self.sending = [], 0.0, 0, False
-        self.deliveries = {}               # NOTE: seq -> Delivery of the queued original frame
+        self.deliveries = {}               # NOTE: seq -> (original frame, its Delivery)
         self.wake, self.tx_wake = asyncio.Event(), asyncio.Event()
         self.retreating, self.retreats, self.resume = False, 0, None
         self.blocked_since = None
@@ -137,8 +138,10 @@ class Agent:
                 if x.kind != FINISHED:
                     self._settle(x, False)
             self.q = [x for x in self.q if x[1].kind == FINISHED]
-        self._settle(f, False)
-        delivery = self.deliveries[f.seq] = Delivery()
+        if old := self.deliveries.pop(f.seq, None):         # NOTE: sequence number reused while the old frame is pending
+            old[1].settle(False)
+        delivery = Delivery()
+        self.deliveries[f.seq] = (f, delivery)
         self.q.append((now, f))
         for i, d in enumerate(repeats, 1):
             self.q.append((now + d * self.k * self.rng.uniform(0.7, 1.3), replace(f, resend=i)))
@@ -148,8 +151,10 @@ class Agent:
         return delivery
 
     def _settle(self, f, ok):
-        if f.resend == 0 and (delivery := self.deliveries.pop(f.seq, None)):
-            delivery.settle(ok)
+        entry = self.deliveries.get(f.seq)
+        if f.resend == 0 and entry and entry[0] is f:       # NOTE: only the frame the Delivery was made for may settle it
+            del self.deliveries[f.seq]
+            entry[1].settle(ok)
 
     async def _sender(self):
         while True:
@@ -166,7 +171,8 @@ class Agent:
             _, f = self.q.pop(0)
             self.sending = True             # NOTE: run() must not stop while this frame is still in flight
             try:
-                while time.monotonic() - self.radio.last_rx < 0.1 * self.k:     # NOTE: crude listen-before-talk
+                deadline = time.monotonic() + LBT_MAX * self.k
+                while time.monotonic() - self.radio.last_rx < 0.1 * self.k and time.monotonic() < deadline:     # NOTE: crude listen-before-talk, bounded
                     await asyncio.sleep(self.rng.uniform(*BACKOFF) * self.k)
                 try:
                     await self.radio.send(f.encode())

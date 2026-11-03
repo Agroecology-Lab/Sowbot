@@ -1,4 +1,5 @@
 import asyncio
+import time
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -185,6 +186,38 @@ def test_drive_does_not_move_when_a_peer_claims_the_edge_while_enter_is_queued()
         agent.driver.drive.assert_not_awaited()
         assert (agent.cur, agent.idx) == (1, 0)
         assert [f.kind for f in radio.frames if f.resend == 0] == [ENTER, ARRIVED]     # hold withdrawn
+
+    asyncio.run(scenario())
+
+
+def test_old_frame_with_a_reused_sequence_number_cannot_settle_the_new_delivery():
+    agent = make_agent(supersede=False)
+    first = agent.announce(ENTER, (1, 2))
+    old_frame = agent.q[0][1]
+    agent.seq = old_frame.seq - 1               # NOTE: the sequence number comes round again while the old frame is pending
+    second = agent.announce(ENTER, (1, 2))
+    new_frame = agent.q[-1][1]
+    assert new_frame.seq == old_frame.seq and first.event.is_set() and not first.ok
+    agent._settle(old_frame, True)
+    assert not second.event.is_set()
+    agent._settle(new_frame, True)
+    assert second.event.is_set() and second.ok
+
+
+def test_sender_transmits_even_if_the_channel_never_goes_quiet():
+    class BusyRadio(RecordingRadio):
+        @property
+        def last_rx(self):
+            return time.monotonic()
+
+    async def scenario():
+        radio = BusyRadio()
+        agent = make_agent(scale=0.01, radio=radio)
+        sender = asyncio.create_task(agent._sender())
+        delivery = agent.announce(HELLO, ())
+        await asyncio.wait_for(delivery.event.wait(), timeout=2)
+        sender.cancel()
+        assert delivery.ok and [f.kind for f in radio.frames] == [HELLO]
 
     asyncio.run(scenario())
 
