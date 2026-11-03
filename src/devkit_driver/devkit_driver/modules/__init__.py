@@ -5,7 +5,7 @@ from .imu_handler import ImuHandler
 from .odom_handler import OdomHandler
 from .recon_dem_logger import ReconDEMLogger
 from .robot_brain_handler import RobotBrainHandler
-from .twist_handler import TwistHandler
+from .twist_handler import TwistHandler, create_twist_handler
 
 __all__ = [
     'BMSHandler',
@@ -16,4 +16,5 @@ __all__ = [
     'ReconDEMLogger',
     'RobotBrainHandler',
     'TwistHandler',
+    'create_twist_handler',
 ]

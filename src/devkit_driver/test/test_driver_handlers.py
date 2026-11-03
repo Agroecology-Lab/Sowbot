@@ -111,6 +111,28 @@ class TestTwistHandler(unittest.TestCase):
         self.assertEqual(self.node.create_subscription.call_args.args[1], 'cmd_vel')
 
 
+class TestCreateTwistHandler(unittest.TestCase):
+    def _node(self, handle_cmd_vel):
+        node = _node()
+        node.get_parameter.side_effect = lambda name: Mock(value=handle_cmd_vel if name == 'handle_cmd_vel' else 0.5)
+        return node
+
+    def test_handler_is_created_when_enabled(self):
+        """Verify handle_cmd_vel true creates the handler and subscribes to cmd_vel."""
+        node = self._node(True)
+        handler = twist_handler.create_twist_handler(node, Mock())
+        self.assertIsInstance(handler, twist_handler.TwistHandler)
+        node.create_subscription.assert_called_once()
+        node.declare_parameter.assert_any_call('handle_cmd_vel', True)
+
+    def test_no_handler_when_the_bridge_owns_cmd_vel(self):
+        """Verify handle_cmd_vel false creates no handler and no subscription."""
+        node = self._node(False)
+        self.assertIsNone(twist_handler.create_twist_handler(node, Mock()))
+        node.create_subscription.assert_not_called()
+        node.get_logger().info.assert_called_once()
+
+
 class TestSoftEStopAcknowledgement(unittest.TestCase):
     def setUp(self):
         """Create a handler over a fake e-stop and recording publishers."""

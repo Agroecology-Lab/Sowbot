@@ -101,6 +101,46 @@ class TestLeverArmGuard(unittest.TestCase):
         self.assertNotIn('lever', out)
 
 
+class TestArduPilotPath(unittest.TestCase):
+    """With MAVLINK_ENDPOINT set the flight controller localises: hardware mode, no FusionCore checks."""
+
+    MAVLINK = 'GPS_PORT_ROVER=virtual\nMCU_PORT=virtual\nMAVLINK_ENDPOINT=/dev/ttyACM2\nSOWBOT_UI_PASSWORD=secret\n'
+
+    def setUp(self):
+        """Keep a caller's FORCE_SIM setting from altering the test scenarios."""
+        environment = patch.dict(os.environ, {'FORCE_SIM': ''})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def test_an_endpoint_alone_is_hardware_mode(self):
+        """Verify a MAVLink endpoint with no rover port or MCU does not fall back to simulation."""
+        self.assertIn('Sim: FALSE', _run_output(self.MAVLINK))
+
+    def test_zero_fusioncore_lever_arms_do_not_block_startup(self):
+        """Verify the unwired FusionCore's placeholder lever arms are not checked, with a warning pointing at ArduPilot."""
+        out = _run_output(self.MAVLINK, _lever_arms('0', '0', '0'))
+        self.assertIn('Sim: FALSE', out)
+        self.assertIn('GPS_MB1_OFS_X/Y/Z', out)
+        self.assertNotIn('still zero', out)
+
+    def test_force_sim_warning_names_the_endpoint(self):
+        """Verify FORCE_SIM reports that it is ignoring a MAVLink endpoint."""
+        out = _run_output(self.MAVLINK + 'FORCE_SIM=1\n')
+        self.assertIn('Sim: TRUE', out)
+        self.assertIn('mavlink=/dev/ttyACM2', out)
+
+    def test_the_placeholder_endpoint_is_refused(self):
+        """Verify the TODO placeholder stops startup instead of counting as a configured endpoint."""
+        for value in ('TODO_SERIAL_DEVICE_HERE', ' todo_serial_device_here '):
+            with self.subTest(value=value), self.assertRaises(SystemExit) as raised:
+                _run_output(f'GPS_PORT_ROVER=virtual\nMCU_PORT=virtual\nMAVLINK_ENDPOINT={value}\nSOWBOT_UI_PASSWORD=secret\n')
+            self.assertEqual(raised.exception.code, 1)
+
+    def test_an_empty_endpoint_is_simulation(self):
+        """Verify a blank MAVLINK_ENDPOINT line does not count as hardware."""
+        self.assertIn('Sim: TRUE', _run_output('GPS_PORT_ROVER=virtual\nMCU_PORT=virtual\nMAVLINK_ENDPOINT=\n'))
+
+
 class TestUnconfirmedSettings(unittest.TestCase):
     def setUp(self):
         """Keep a caller's FORCE_SIM setting from altering the test scenarios."""

@@ -24,14 +24,18 @@ from devkit_driver.modules import (
     OdomHandler,
     ReconDEMLogger,
     RobotBrainHandler,
-    TwistHandler,
+    create_twist_handler,
 )
 
 
 class DevkitDriver(Node):
 
     def __init__(self, system: System):
-        """Wire up hardware/simulation handlers, skipping any attribute the system lacks."""
+        """Wire up hardware or simulation handlers for the system.
+
+        The handle_cmd_vel parameter defaults to true; when false, the wheel
+        command handler is not created. Raise TypeError for an unknown feldfreund type.
+        """
         super().__init__('devkit_driver_node')
         self.system = system
 
@@ -61,7 +65,7 @@ class DevkitDriver(Node):
         if getattr(self.system.feldfreund, 'bumper', None) is not None:
             self._bumper_handler = BumperHandler(
                 self, self.system.feldfreund.bumper, self.system.feldfreund.estop)
-        self._twist_handler = TwistHandler(self, self.system.feldfreund.wheels)
+        self._twist_handler = create_twist_handler(self, self.system.feldfreund.wheels)
         self._estop_handler = EStopHandler(self, self.system.feldfreund.estop)
 
         # BNO085 IMU — publishes sensor_msgs/Imu on /imu/data when present.

@@ -1,7 +1,7 @@
 """devkit_mavlink_bridge -- cmd_vel <-> ArduPilot Rover on LEVIA-H7.
 
-The LEVIA-H7 EKF3 is the sole estimator (see mavlink.md). FusionCore, if run, is shadow
-only and nothing here feeds the flight controller a position.
+The LEVIA-H7 EKF3 is the sole estimator (see mavlink.md). FusionCore is not wired into the
+launch files and nothing here feeds the flight controller a position.
 
 Outbound: cmd_vel -> SET_POSITION_TARGET_LOCAL_NED, RTCM3 corrections (rtcm topic) ->
 GPS_RTCM_DATA, and a ground-station HEARTBEAT.
@@ -15,7 +15,8 @@ Inbound: EKF3 state and GPS status, published as:
   fc/diagnostics  diagnostic_msgs/DiagnosticArray  link, EKF3 flags and variance ratios, GPS
 
 Nothing is published from stale or invalid data, so a consumer sees a gap rather than a
-confident old value. No TF is broadcast: FusionCore may still own odom -> base_link.
+confident old value. With publish_tf set, odom -> base_link is broadcast from the same
+pose as fc/odom, under the same gating. It is off by default: only one node may own that edge.
 
 Open item (tracked in safety_roadmap.md, not duplicated here): which LEVIA-H7 UART carries
 MAVLink (O31). MAVLINK_ENDPOINT and MAVLINK_BAUD depend on it.
@@ -27,12 +28,13 @@ import time
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TransformStamped, Twist
 from nav_msgs.msg import Odometry
 from pymavlink import mavutil
 from rclpy.node import Node
 from rtcm_msgs.msg import Message as RtcmMessage
 from sensor_msgs.msg import NavSatFix
+from tf2_ros import TransformBroadcaster
 
 from devkit_mavlink_bridge.modules import gps_status_handler as gps
 from devkit_mavlink_bridge.modules.ekf_state_handler import (
@@ -116,7 +118,8 @@ class MavlinkBridgeNode(Node):
         gps_rate_hz [2], ekf_status_rate_hz [2] (rates requested from the flight controller),
         attitude_timeout_s [0.3], ekf_status_timeout_s [2.0], gps_timeout_s [3.0],
         diagnostics_period_s [1.0], odom_frame_id ['odom'], base_frame_id ['base_link'],
-        gps_frame_id ['gps_link'].
+        gps_frame_id ['gps_link'], publish_tf [false] (broadcast odom_frame_id -> base_frame_id
+        from the pose published on fc/odom).
         Corrections: rtcm_topic ['rtcm'], an rtcm_msgs/Message per RTCM3 frame (as published by
         ntrip_client), forwarded as GPS_RTCM_DATA.
         With require_fc_heartbeat the bridge forwards zero velocity, and no RTCM, unless the flight
@@ -147,6 +150,7 @@ class MavlinkBridgeNode(Node):
         self.declare_parameter('odom_frame_id', 'odom')
         self.declare_parameter('base_frame_id', 'base_link')
         self.declare_parameter('gps_frame_id', 'gps_link')
+        self.declare_parameter('publish_tf', False)
         self.declare_parameter('rtcm_topic', 'rtcm')
         republish_period_s = float(self.get_parameter('republish_period_s').value)
         cmd_vel_timeout_s = float(self.get_parameter('cmd_vel_timeout_s').value)
@@ -199,6 +203,7 @@ class MavlinkBridgeNode(Node):
         self.create_subscription(
             RtcmMessage, str(self.get_parameter('rtcm_topic').value), self._on_rtcm, _RTCM_QUEUE_DEPTH)
         self._odom_pub = self.create_publisher(Odometry, 'fc/odom', 10)
+        self._tf_broadcaster = TransformBroadcaster(self) if self.get_parameter('publish_tf').value else None
         self._ekf_fix_pub = self.create_publisher(NavSatFix, 'fc/ekf_fix', 10)
         self._gps_pubs = {
             'GPS_RAW_INT': self.create_publisher(NavSatFix, 'fc/gps1/fix', 10),
@@ -411,6 +416,8 @@ class MavlinkBridgeNode(Node):
 
         Nothing is published unless EKF3 reports a valid pose (see ekf_pose_valid), the
         EKF_STATUS_REPORT is recent and the attitude is recent. The reason is logged on change.
+        When publish_tf is enabled, broadcast the same pose as a transform with the
+        odometry timestamp and frame IDs; it is withheld whenever odometry is withheld.
         """
         attitude = self._latest.fresh('attitude', self._attitude_timeout_s)
         ekf_status = self._latest.fresh('ekf_status', self._ekf_status_timeout_s)
@@ -442,6 +449,20 @@ class MavlinkBridgeNode(Node):
         msg.pose.covariance = list(_UNKNOWN_COVARIANCE)
         msg.twist.covariance = list(_UNKNOWN_COVARIANCE)
         self._odom_pub.publish(msg)
+        if self._tf_broadcaster is not None:
+            self._broadcast_odom_tf(msg)
+
+    def _broadcast_odom_tf(self, odometry: Odometry) -> None:
+        """Broadcast the pose in an Odometry message as the transform from its frame to its child frame."""
+        transform = TransformStamped()
+        transform.header = odometry.header
+        transform.child_frame_id = odometry.child_frame_id
+        position, orientation = odometry.pose.pose.position, odometry.pose.pose.orientation
+        transform.transform.translation.x = position.x
+        transform.transform.translation.y = position.y
+        transform.transform.translation.z = position.z
+        transform.transform.rotation = orientation
+        self._tf_broadcaster.sendTransform(transform)
 
     def _note_odom_state(self, blocked: str | None) -> None:
         """Log once when fc/odom stops being published, with the reason, and once when it resumes."""

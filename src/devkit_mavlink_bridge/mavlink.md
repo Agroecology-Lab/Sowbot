@@ -47,8 +47,8 @@ The hwdef already defines the pixartflow device (SPI3, EXT_CS1 = PD4), which mat
 |     | cmd_vel                    devkit_mavlink_bridge     |
 |     +----------------------------->  (inbound + outbound)  |
 |                                          ^   |             |
-|   FusionCore (OPTIONAL, shadow only)     |   |             |
-|     logs and compares, never feeds FC    |   |             |
+|   FusionCore: off when bridge runs       |   |             |
+|     (runs when no endpoint is set)       |   |             |
 +------------------------------------------|---|-------------+
                                            |   |
      MAVLink (UART: U20 / UART4 / SERIAL5) |   |
@@ -95,9 +95,42 @@ stale cmd_vel             --> bridge sends zero (built)
 fence breach              --> HOLD (not RTL)
 ```
 
+## Launch
+
+Set `MAVLINK_ENDPOINT` (and `MAVLINK_BAUD` if not 115200) in `.env`. `manage.py` then runs in hardware mode with `GPS_PORT_ROVER` and `MCU_PORT` virtual, and `devkit.launch.py` starts the bridge with `publish_tf:=true`. A placeholder value (`TODO_SERIAL_DEVICE_HERE`) is refused by `manage.py` and `devkit.launch.py`.
+
+With no endpoint set the bridge does not start and FusionCore runs. FusionCore publishes `/fusion/odom`, and a `topic_tools` relay in `devkit.launch.py` republishes it on `/fc/odom`, so Nav2 reads the same topic on both paths. `odom -> base_link` is owned by the identity static transform when `MCU_PORT` is virtual and sim is off, and by FusionCore otherwise.
+
+- EKF3 is the localiser. Nav2 reads `/fc/odom` (`nav2_params.yaml`).
+- With the bridge running, FusionCore is not launched. `_fusioncore_node()` in `devkit.launch.py` and `fusioncore.yaml` are only used when no endpoint is set. The sim stack (`sowbot_sim.launch.py`) still runs it.
+- With the bridge running, nothing publishes `/fusion/odom`, so the UI loses fused odometry on that path. A relay the other way needs the bridge's unknown covariance handled first.
+- `manage.py` skips the `fusioncore.yaml` lever-arm check on this path. Set the antenna offsets on the flight controller.
+- The bridge and the ESP32/Lizard `devkit_driver` both subscribe to `cmd_vel`. When the bridge runs, `devkit.launch.py` passes `handle_cmd_vel:=false` to the driver, so only the bridge acts on it.
+
+## Map origin
+
+`map -> odom` ties the topological map to the ground.
+In real mode `devkit.launch.py` publishes it one of two ways:
+
+- **`MAP_ORIGIN_LAT` and `MAP_ORIGIN_LON` set in `.env`** (degrees, the surveyed position of the map's (0, 0)): the `map_odom_anchor` node publishes it.
+  `MAP_YAW_DEG` (default 0) is the direction of the map x axis, counter-clockwise from east.
+  The node pairs `fc/ekf_fix` (or `gnss/fix` without the bridge) with the odom position on `fc/odom`.
+  It publishes once, when the last 10 estimates agree within 0.5 m.
+  Until then there is no `map -> odom`, so Nav2 waits.
+  While it waits it logs a warning every 10 s that names the topic with nothing on it.
+  Without the bridge, `gnss/fix` needs a GNSS receiver on `GPS_PORT_ROVER` or an external publisher.
+  It does not re-anchor while running, so restart it if the EKF origin is reset.
+  Setting only one of the two coordinates, or a latitude outside 90 degrees, stops the launch.
+- **Not set:** an identity transform, so map waypoints are offset from the robot by wherever the localiser started.
+  That is fine on the bench and wrong in a field.
+
+The anchor assumes the odom frame is east-north-up.
+`fc/odom` is (see the topics table).
+On the FusionCore path this is untested.
+
 ## Bridge topics
 
-Inbound, from the LEVIA-H7. No TF is broadcast.
+Inbound, from the LEVIA-H7. `odom -> base_link` is broadcast only with `publish_tf` (launch default true), from the pose on `fc/odom` and under the same gating, so it stops when `fc/odom` stops.
 
 | Topic | Type | Source message | Notes |
 |---|---|---|---|

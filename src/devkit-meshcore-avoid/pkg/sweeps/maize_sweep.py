@@ -37,6 +37,7 @@ from sowbot_avoid.sim import simulate         # noqa: E402
 from sowbot_avoid.topo import load_topo       # noqa: E402
 
 DOCK_OFFSET = 1.5
+EPS = 1e-6      # NOTE: metres, floating-point noise when judging "closer than the clearance", not a safety margin
 
 
 class Infeasible(Exception):
@@ -176,10 +177,62 @@ def fmt(x):
     return "inf" if x == math.inf else f"{x:.2f}"
 
 
+def verdict(g, clr):
+    """Return (status, detail) for one group of runs: PASS, WARN or FAIL.
+
+    FAIL: a run did not finish, or two running robots came closer than the clearance.
+    WARN: everything finished and running robots stayed clear, but a robot passed a
+    finished one closer than the clearance (peers cannot see a finished robot).
+    Otherwise the status is PASS. clr is in meters; a separation counts as too
+    close only when it is strictly below clr minus 1e-6 meters. An empty group
+    raises ValueError.
+    """
+    n = len(g)
+    unfinished = sum(not r["done"] for r in g)
+    live_bad = sum(r["sep_live"] < clr - EPS for r in g)
+    park_bad = sum(r["sep_parked"] < clr - EPS for r in g)
+    closest = fmt(min(r["sep_live"] for r in g))
+    if unfinished or live_bad:
+        why = []
+        if unfinished:
+            why.append(f"{unfinished} of {n} runs did not finish")
+        if live_bad:
+            why.append(f"{live_bad} of {n} runs had two moving robots under {clr:g} m (closest {closest} m)")
+        return "FAIL", "; ".join(why)
+    if park_bad:
+        closest_park = fmt(min(r["sep_parked"] for r in g))
+        return "WARN", (f"{n}/{n} runs finished, but {park_bad} passed a finished robot "
+                        f"under {clr:g} m (closest {closest_park} m)")
+    return "PASS", f"{n}/{n} runs finished, closest moving pair {closest} m"
+
+
+def summary(groups, clr):
+    """Print one verdict per case, totals and a legend, using clearance clr in meters.
+
+    Raise ValueError if groups or any group of runs is empty.
+    """
+    print("\nSummary")
+    counts = defaultdict(int)
+    for k in sorted(groups):
+        status, detail = verdict(groups[k], clr)
+        counts[status] += 1
+        print(f"  {status:4s}  {k[0]}, {k[1]} robots, loss {k[2]:.2f}, {k[3]}, resends {k[4]}: {detail}")
+    print(f"  Overall: {counts['PASS']} PASS, {counts['WARN']} WARN, {counts['FAIL']} FAIL of {len(groups)} cases.")
+    print("  PASS: all finished and kept clear. WARN: also passed a finished robot too close. FAIL: a run did not finish, or moving robots came too close.")
+    if min(len(g) for g in groups.values()) < 5:
+        print("  Fewer than 5 seeds in some cases: one pass proves little. Use --seeds 5 or more.")
+
+
 def report(rows, clr):
+    """Print the verdict summary and detailed table for runs, using clearance clr in meters.
+
+    Raise ValueError if rows is empty.
+    """
     groups = defaultdict(list)
     for r in rows:
         groups[(r["scenario"], r["n"], r["loss"], r["park"], r["resends"])].append(r)
+    summary(groups, clr)
+    print("\nDetails")
     print(f"\n{'scenario':8s} {'n':>2s} {'loss':>4s} {'park':5s} {'resends':7s} | {'runs':>4s} {'done%':>5s} "
           f"{'live<clr':>8s} {'min live':>8s} {'parked<clr':>10s} {'min park':>8s} | {'secs':>5s} {'frames':>6s} {'retr':>4s}")
     for k in sorted(groups):
@@ -187,8 +240,8 @@ def report(rows, clr):
         live = [r["sep_live"] for r in g]
         park = [r["sep_parked"] for r in g]
         print(f"{k[0]:8s} {k[1]:2d} {k[2]:4.2f} {k[3]:5s} {k[4]:7s} | {len(g):4d} "
-              f"{100 * sum(r['done'] for r in g) / len(g):5.0f} {sum(x < clr - 1e-6 for x in live):8d} {fmt(min(live)):>8s} "
-              f"{sum(x < clr - 1e-6 for x in park):10d} {fmt(min(park)):>8s} | "
+              f"{100 * sum(r['done'] for r in g) / len(g):5.0f} {sum(x < clr - EPS for x in live):8d} {fmt(min(live)):>8s} "
+              f"{sum(x < clr - EPS for x in park):10d} {fmt(min(park)):>8s} | "
               f"{statistics.median(r['secs'] for r in g):5.0f} {statistics.median(r['frames'] for r in g):6.0f} "
               f"{statistics.fmean(r['retreats'] for r in g):4.1f}")
     print("\nlive<clr: runs where two running robots came closer than the clearance. "
@@ -214,6 +267,8 @@ def main():
     ap.add_argument("--stagger", type=float, default=0.0, help="agents start up to this many unscaled seconds late")
     ap.add_argument("--jsonl", help="write one JSON line per run")
     a = ap.parse_args()
+    if a.clearance <= EPS:
+        ap.error(f"--clearance must be greater than {EPS:g} m")
 
     topo = load_topo(a.map, a.clearance)
     xs, ys = [p[0] for p in topo.graph.xy.values()], [p[1] for p in topo.graph.xy.values()]

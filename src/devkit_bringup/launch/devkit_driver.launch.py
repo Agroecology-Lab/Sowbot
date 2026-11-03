@@ -5,6 +5,11 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    """Build the driver launch description with port, simulation and cmd_vel options.
+
+    handle_cmd_vel defaults to true; set it to false when another node drives
+    the wheels from cmd_vel. simulation also sets FELDFREUND_SIMULATION.
+    """
     port_arg = DeclareLaunchArgument(
         'port',
         default_value='virtual',
@@ -15,6 +20,12 @@ def generate_launch_description():
         'simulation',
         default_value='false',
         description='Run in simulation mode (true/false)',
+    )
+
+    handle_cmd_vel_arg = DeclareLaunchArgument(
+        'handle_cmd_vel',
+        default_value='true',
+        description='true = drive the wheels from cmd_vel; false when another node (the MAVLink bridge) owns it',
     )
 
     simulation = LaunchConfiguration('simulation')
@@ -31,12 +42,14 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'port': LaunchConfiguration('port'),
+            'handle_cmd_vel': LaunchConfiguration('handle_cmd_vel'),
             'use_sim_time': simulation,
         }],
     )
 
     return LaunchDescription([
         port_arg,
+        handle_cmd_vel_arg,
         simulation_arg,
         set_simulation_env,
         devkit_driver_node,
