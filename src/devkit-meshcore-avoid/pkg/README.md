@@ -22,10 +22,17 @@ One agent per robot, each with its own companion radio. No central controller.
 ## Install and test
 
 Python 3.10 or later. The core package has no dependencies.
+Debian and Ubuntu block system-wide `pip install` (PEP 668), so use a virtual environment. If `venv` is missing, run `sudo apt install python3-venv`.
 
-    pip install -e ".[test]"    # pytest and pyyaml: tests, sim, sweep
-    pip install -e ".[radio]"   # adds meshcore>=2.3.15, for a real radio
-    pytest                      # about 30 s: the simulated runs use real timing
+From `pkg/`:
+
+    python3 -m venv .venv
+    source .venv/bin/activate     # run this in every new shell
+    pip install -e ".[test]"      # pytest and pyyaml: tests, sim, sweep
+    pip install -e ".[radio]"     # only for a real radio: adds meshcore>=2.3.15
+    pytest                        # about 30 s: the simulated runs use real timing
+
+`.venv/` is gitignored. Every command below assumes the environment is active. Without activating it, call `.venv/bin/python` and `.venv/bin/pytest` instead.
 
 ## Simulate
 
