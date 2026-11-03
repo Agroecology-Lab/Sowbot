@@ -462,7 +462,11 @@ class DevkitManager:
         mcu_port = cfg.get('MCU_PORT', 'virtual')
         # ArduPilot path: the flight controller carries the GNSS receivers and EKF3, so the SBC
         # sees no rover port or MCU. MAVLINK_ENDPOINT is what marks this as real hardware.
-        mavlink_endpoint = cfg.get('MAVLINK_ENDPOINT', '')
+        mavlink_endpoint = cfg.get('MAVLINK_ENDPOINT', '').strip()
+        if mavlink_endpoint.upper() == 'TODO_SERIAL_DEVICE_HERE':
+            self._log("MAVLINK_ENDPOINT is still the placeholder TODO_SERIAL_DEVICE_HERE. Set it to the flight "
+                      "controller's serial device or connection string, or leave it empty.", "ERROR")
+            sys.exit(1)
         # A detected GPS used to silently flip us out of sim, leaving a sim
         # field with a real-GPS-anchored base_link 27 km off the costmap and
         # no fake_nav2_server (so no virtual robot rendered). FORCE_SIM keeps

@@ -97,12 +97,14 @@ fence breach              --> HOLD (not RTL)
 
 ## Launch
 
-Set `MAVLINK_ENDPOINT` (and `MAVLINK_BAUD` if not 115200) in `.env`. `manage.py` then runs in hardware mode with `GPS_PORT_ROVER` and `MCU_PORT` virtual, and `devkit.launch.py` starts the bridge with `publish_tf:=true`. With no endpoint set the bridge does not start and nothing owns `odom -> base_link`.
+Set `MAVLINK_ENDPOINT` (and `MAVLINK_BAUD` if not 115200) in `.env`. `manage.py` then runs in hardware mode with `GPS_PORT_ROVER` and `MCU_PORT` virtual, and `devkit.launch.py` starts the bridge with `publish_tf:=true`. A placeholder value (`TODO_SERIAL_DEVICE_HERE`) is refused by `manage.py` and `devkit.launch.py`.
+
+With no endpoint set the bridge does not start. `odom -> base_link` is then owned by the identity static transform when `MCU_PORT` is virtual and sim is off. With a real `MCU_PORT` nothing in this launch file publishes it (`odom_handler` has `publish_tf` false and FusionCore is not launched), and Nav2 reads `/fc/odom`, which only the bridge publishes. That path needs a localiser wired in.
 
 - EKF3 is the localiser. Nav2 reads `/fc/odom` (`nav2_params.yaml`).
 - FusionCore is not launched. `_fusioncore_node()` in `devkit.launch.py` and `fusioncore.yaml` are kept, unwired. The sim stack (`sowbot_sim.launch.py`) still runs it.
 - `manage.py` skips the `fusioncore.yaml` lever-arm check on this path. Set the antenna offsets on the flight controller.
-- The bridge and the ESP32/Lizard `devkit_driver` both consume `cmd_vel`. Leave `MCU_PORT` virtual.
+- The bridge and the ESP32/Lizard `devkit_driver` both subscribe to `cmd_vel`. When the bridge runs, `devkit.launch.py` passes `handle_cmd_vel:=false` to the driver, so only the bridge acts on it.
 
 ## Bridge topics
 

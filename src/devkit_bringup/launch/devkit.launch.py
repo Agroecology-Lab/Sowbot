@@ -309,6 +309,23 @@ def _topo_nav_nodes(tmap2_file, sim, sim_condition, devkit_bringup_pkg):
     ]
 
 
+_MAVLINK_PLACEHOLDER = 'TODO_SERIAL_DEVICE_HERE'
+
+
+def _mavlink_endpoint():
+    """Return MAVLINK_ENDPOINT stripped, or '' if unset; raise if it is still the placeholder.
+
+    A placeholder would start the stack in hardware mode with a bridge that cannot connect,
+    so stop with a clear message instead (manage.py applies the same check).
+    """
+    endpoint = os.getenv('MAVLINK_ENDPOINT', '').strip()
+    if endpoint.upper() == _MAVLINK_PLACEHOLDER:
+        raise RuntimeError(f'MAVLINK_ENDPOINT is still the placeholder {_MAVLINK_PLACEHOLDER}. '
+                           "Set it to the flight controller's serial device or connection string, "
+                           'or leave it empty.')
+    return endpoint
+
+
 def _fusioncore_node(devkit_bringup_pkg):
     """FusionCore UKF node, currently NOT wired into generate_launch_description().
 
@@ -348,9 +365,13 @@ def generate_launch_description():
 
     # ArduPilot path: the LEVIA-H7 EKF3 is the localiser and the MAVLink bridge feeds it cmd_vel.
     # Gated by MAVLINK_ENDPOINT (the bridge's own connection setting), so the bridge never
-    # starts without an endpoint. Run one controller path at a time: the ESP32/Lizard
-    # devkit_driver also consumes cmd_vel, so leave MCU_PORT virtual when this is set.
-    mavlink_enabled = bool(os.getenv('MAVLINK_ENDPOINT', '').strip())
+    # starts without an endpoint. The ESP32/Lizard devkit_driver also consumes cmd_vel, so it is
+    # told not to (handle_cmd_vel:=false) whenever the bridge runs, that is with an endpoint and
+    # sim not true.
+    mavlink_enabled = bool(_mavlink_endpoint())
+    driver_handles_cmd_vel = PythonExpression(
+        ["'true' if '", LaunchConfiguration('sim'), "' == 'true' or not ", str(mavlink_enabled), " else 'false'"]
+    )
 
     any_hw_present = (rover_port  != 'virtual' or
                       rover1_port != 'virtual' or
@@ -577,7 +598,7 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(
                 os.path.join(devkit_bringup_pkg, 'launch', 'devkit_driver.launch.py')
             ),
-            launch_arguments={'port': mcu_port}.items(),
+            launch_arguments={'port': mcu_port, 'handle_cmd_vel': driver_handles_cmd_vel}.items(),
         ),
 
         # ── Devkit UI ────────────────────────────────────────────────────────

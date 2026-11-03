@@ -61,7 +61,12 @@ class DevkitDriver(Node):
         if getattr(self.system.feldfreund, 'bumper', None) is not None:
             self._bumper_handler = BumperHandler(
                 self, self.system.feldfreund.bumper, self.system.feldfreund.estop)
-        self._twist_handler = TwistHandler(self, self.system.feldfreund.wheels)
+        # The MAVLink bridge also subscribes to cmd_vel; the launch file turns this off when it runs.
+        self.declare_parameter('handle_cmd_vel', True)
+        if self.get_parameter('handle_cmd_vel').value:
+            self._twist_handler = TwistHandler(self, self.system.feldfreund.wheels)
+        else:
+            self.get_logger().info('cmd_vel is owned by the MAVLink bridge: wheels are not driven from this node')
         self._estop_handler = EStopHandler(self, self.system.feldfreund.estop)
 
         # BNO085 IMU — publishes sensor_msgs/Imu on /imu/data when present.

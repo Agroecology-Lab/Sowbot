@@ -129,6 +129,13 @@ class TestArduPilotPath(unittest.TestCase):
         self.assertIn('Sim: TRUE', out)
         self.assertIn('mavlink=/dev/ttyACM2', out)
 
+    def test_the_placeholder_endpoint_is_refused(self):
+        """Verify the TODO placeholder stops startup instead of counting as a configured endpoint."""
+        for value in ('TODO_SERIAL_DEVICE_HERE', ' todo_serial_device_here '):
+            with self.subTest(value=value), self.assertRaises(SystemExit) as raised:
+                _run_output(f'GPS_PORT_ROVER=virtual\nMCU_PORT=virtual\nMAVLINK_ENDPOINT={value}\nSOWBOT_UI_PASSWORD=secret\n')
+            self.assertEqual(raised.exception.code, 1)
+
     def test_an_empty_endpoint_is_simulation(self):
         """Verify a blank MAVLINK_ENDPOINT line does not count as hardware."""
         self.assertIn('Sim: TRUE', _run_output('GPS_PORT_ROVER=virtual\nMCU_PORT=virtual\nMAVLINK_ENDPOINT=\n'))

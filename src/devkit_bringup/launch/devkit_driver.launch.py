@@ -17,6 +17,12 @@ def generate_launch_description():
         description='Run in simulation mode (true/false)',
     )
 
+    handle_cmd_vel_arg = DeclareLaunchArgument(
+        'handle_cmd_vel',
+        default_value='true',
+        description='true = drive the wheels from cmd_vel; false when another node (the MAVLink bridge) owns it',
+    )
+
     simulation = LaunchConfiguration('simulation')
 
     set_simulation_env = SetEnvironmentVariable(
@@ -31,12 +37,14 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'port': LaunchConfiguration('port'),
+            'handle_cmd_vel': LaunchConfiguration('handle_cmd_vel'),
             'use_sim_time': simulation,
         }],
     )
 
     return LaunchDescription([
         port_arg,
+        handle_cmd_vel_arg,
         simulation_arg,
         set_simulation_env,
         devkit_driver_node,
