@@ -3,7 +3,8 @@
 Robot-to-robot collision avoidance over MeshCore, legacy scheme from [Sowbot #202](https://github.com/Agroecology-Lab/Sowbot/issues/202).
 Runs on the robot's SBC next to [meshcore_py](https://github.com/meshcore-dev/meshcore_py), talking to one companion radio.
 
-Status: untested on hardware. Not a safety function; onboard obstacle detection stays in charge.
+Status: untested on hardware.
+Not a safety function; onboard obstacle detection stays in charge.
 
 ## Layout
 
@@ -40,4 +41,5 @@ Omit it if the channel is already set up on the radio.
     pip install -e .[test]
     pytest
 
-Needs companion firmware 1.15.0 or later. Zero-hop by default; `--flood` goes through repeaters.
+Needs companion firmware 1.15.0 or later.
+Zero-hop by default; `--flood` goes through repeaters.

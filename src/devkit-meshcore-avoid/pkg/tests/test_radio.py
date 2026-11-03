@@ -193,3 +193,20 @@ def test_mesh_radio_start_fails_and_disconnects_when_channel_is_unusable(monkeyp
         mc.start_auto_message_fetching.assert_not_awaited()
 
     asyncio.run(scenario())
+
+
+def test_mesh_radio_start_disconnects_when_message_fetching_fails(monkeypatch):
+    async def scenario():
+        ok = SimpleNamespace(type='ok')
+        commands = SimpleNamespace(get_channel=AsyncMock(return_value=ok))
+        mc = SimpleNamespace(commands=commands, subscribe=Mock(),
+                             start_auto_message_fetching=AsyncMock(side_effect=OSError('serial lost')),
+                             disconnect=AsyncMock())
+        monkeypatch.setitem(sys.modules, 'meshcore', SimpleNamespace(
+            MeshCore=SimpleNamespace(create_serial=AsyncMock(return_value=mc)),
+            EventType=SimpleNamespace(CHANNEL_DATA_RECV='received', ERROR='error')))
+        with pytest.raises(OSError, match='serial lost'):
+            await MeshRadio('port').start()
+        mc.disconnect.assert_awaited_once()
+
+    asyncio.run(scenario())

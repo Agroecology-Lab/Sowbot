@@ -7,7 +7,8 @@ dependencies = []
 
 [project.optional-dependencies]
 radio = ["meshcore>=2.3.15"]
-test = ["pytest"]
+test = ["pytest", "pyyaml"]
+topo = ["pyyaml"]
 
 [project.scripts]
 sowbot-avoid = "sowbot_avoid.__main__:main"
