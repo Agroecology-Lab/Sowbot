@@ -79,6 +79,17 @@ def _includes_bridge(description):
                and str(item.args[0]).endswith('mavlink_bridge.launch.py') for item in _walk(description))
 
 
+def _flags(description):
+    """Return the literal true/false values found in PythonExpression objects."""
+    return [
+        p
+        for item in _walk(description)
+        if type(item).__name__ == 'PythonExpression'
+        for p in item.args[0]
+        if p in ('True', 'False')
+    ]
+
+
 class TestMavlinkBridgeInclude(unittest.TestCase):
     def test_bridge_is_included_with_an_endpoint(self):
         """Verify MAVLINK_ENDPOINT includes mavlink_bridge.launch.py."""
@@ -97,10 +108,8 @@ class TestMavlinkBridgeInclude(unittest.TestCase):
         """Verify the endpoint is baked into the handle_cmd_vel expression for the driver."""
         with_bridge = _description(MAVLINK_ENDPOINT='/dev/ttyACM2')
         without = _description()
-        flags = lambda d: [p for item in _walk(d) if type(item).__name__ == 'PythonExpression'
-                           for p in item.args[0] if p in ('True', 'False')]
-        self.assertIn('True', flags(with_bridge))
-        self.assertNotIn('True', flags(without))
+        self.assertIn('True', _flags(with_bridge))
+        self.assertNotIn('True', _flags(without))
 
 
 class TestFusionCorePath(unittest.TestCase):
