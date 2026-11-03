@@ -5,6 +5,11 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    """Build the driver launch description with port, simulation and cmd_vel options.
+
+    handle_cmd_vel defaults to true; set it to false when another node drives
+    the wheels from cmd_vel. simulation also sets FELDFREUND_SIMULATION.
+    """
     port_arg = DeclareLaunchArgument(
         'port',
         default_value='virtual',

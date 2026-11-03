@@ -350,6 +350,12 @@ def _fusioncore_node(devkit_bringup_pkg):
 
 
 def generate_launch_description():
+    """Build the devkit launch description using hardware settings from the environment.
+
+    A MAVLINK_ENDPOINT selects the bridge in hardware mode and suppresses
+    FusionCore; without one, FusionCore and an odometry relay are included.
+    A placeholder endpoint raises RuntimeError, including in simulation.
+    """
     ublox_pkg         = get_package_share_directory('ublox_dgnss')
     devkit_bringup_pkg = get_package_share_directory('devkit_bringup')
     ui_pkg            = get_package_share_directory('devkit_ui')

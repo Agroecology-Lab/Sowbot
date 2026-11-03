@@ -23,6 +23,11 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
+    """Build the bridge launch description with configurable limits, timeouts and TF publishing.
+
+    publish_tf defaults to true here and can be disabled if another node owns
+    the odom to base_link transform.
+    """
     arguments = {
         'cmd_vel_timeout_s': ('0.5', float),
         'max_linear_x_mps': ('1.6', float),

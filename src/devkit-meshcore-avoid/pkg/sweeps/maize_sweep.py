@@ -183,6 +183,9 @@ def verdict(g, clr):
     FAIL: a run did not finish, or two running robots came closer than the clearance.
     WARN: everything finished and running robots stayed clear, but a robot passed a
     finished one closer than the clearance (peers cannot see a finished robot).
+    Otherwise the status is PASS. clr is in meters; a separation counts as too
+    close only when it is strictly below clr minus 1e-6 meters. An empty group
+    raises ValueError.
     """
     n = len(g)
     unfinished = sum(not r["done"] for r in g)
@@ -204,7 +207,10 @@ def verdict(g, clr):
 
 
 def summary(groups, clr):
-    """Print one PASS, WARN or FAIL line per case, then the totals and the legend."""
+    """Print one verdict per case, totals and a legend, using clearance clr in meters.
+
+    Raise ValueError if groups or any group of runs is empty.
+    """
     print("\nSummary")
     counts = defaultdict(int)
     for k in sorted(groups):
@@ -218,7 +224,10 @@ def summary(groups, clr):
 
 
 def report(rows, clr):
-    """Print the verdict summary, then the detailed table, for all runs."""
+    """Print the verdict summary and detailed table for runs, using clearance clr in meters.
+
+    Raise ValueError if rows is empty.
+    """
     groups = defaultdict(list)
     for r in rows:
         groups[(r["scenario"], r["n"], r["loss"], r["park"], r["resends"])].append(r)

@@ -193,7 +193,11 @@ class DevkitManager:
         return all(value == 0.0 for value in values.values())
 
     def _check_lever_arm(self, cfg: dict[str, str]) -> None:
-        """Refuse to start on the placeholder FusionCore lever arms unless ALLOW_UNMEASURED_LEVER_ARM=1."""
+        """Check FusionCore lever arms, exiting with status 1 if all are zero without the cfg override.
+
+        Unreadable values only produce a warning. Set ALLOW_UNMEASURED_LEVER_ARM=1
+        in cfg to allow the zero placeholder values.
+        """
         unmeasured = self._unmeasured_lever_arm()
         if unmeasured is None:
             self._log("Could not read gnss.lever_arm_x/y/z from fusioncore.yaml: lever arms not checked.", "WARN")
@@ -403,16 +407,19 @@ class DevkitManager:
 
         Arguments beginning with --sim, or FORCE_SIM=1 in .env or the process
         environment, select simulation even with detected hardware. Otherwise,
-        simulation is selected only when both rover and MCU ports are 'virtual'.
+        simulation is selected only when both rover and MCU ports are 'virtual'
+        and MAVLINK_ENDPOINT is empty.
         Forward extra_args to ros2 launch after removing --sim-prefixed entries.
 
         Hardware detection may regenerate .env and rebind USB interfaces even
         when simulation is forced. Simulation prepares the world and topology;
         hardware mode attempts to reset the receiver and wake an available MCU.
 
-        In hardware mode, raise SystemExit(1) if the dashboard has no password
-        or all configured antenna lever arms are zero, unless the corresponding
-        .env override allows it. Unreadable lever arms do not block startup.
+        Raise SystemExit(1) for a placeholder MAVLINK_ENDPOINT, even in simulation.
+        In hardware mode, also exit if the dashboard has no password or, without
+        a MAVLink endpoint, all FusionCore antenna lever arms are zero, unless the
+        corresponding .env override allows it. Unreadable lever arms do not block
+        startup; a MAVLink endpoint skips the FusionCore lever-arm check.
 
         Errors reading .env or starting Docker propagate. A failed fixusb.py
         invocation raises CalledProcessError. A nonzero Docker exit status does

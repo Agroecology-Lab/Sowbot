@@ -31,7 +31,11 @@ from devkit_driver.modules import (
 class DevkitDriver(Node):
 
     def __init__(self, system: System):
-        """Wire up hardware/simulation handlers, skipping any attribute the system lacks."""
+        """Wire up hardware or simulation handlers for the system.
+
+        The handle_cmd_vel parameter defaults to true; when false, the wheel
+        command handler is not created. Raise TypeError for an unknown feldfreund type.
+        """
         super().__init__('devkit_driver_node')
         self.system = system
 

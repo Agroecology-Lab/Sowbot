@@ -416,6 +416,8 @@ class MavlinkBridgeNode(Node):
 
         Nothing is published unless EKF3 reports a valid pose (see ekf_pose_valid), the
         EKF_STATUS_REPORT is recent and the attitude is recent. The reason is logged on change.
+        When publish_tf is enabled, broadcast the same pose as a transform with the
+        odometry timestamp and frame IDs; it is withheld whenever odometry is withheld.
         """
         attitude = self._latest.fresh('attitude', self._attitude_timeout_s)
         ekf_status = self._latest.fresh('ekf_status', self._ekf_status_timeout_s)
