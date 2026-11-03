@@ -71,6 +71,23 @@ class TestBuildRowNodes(unittest.TestCase):
         self.assertEqual(targets(build.nodes['FIELD_R1_IN']), {'FIELD_R1_OUT': ROW_ACTION})
         self.assertEqual(targets(build.nodes['FIELD_R1_OUT']), {'FIELD_R1_IN': ROW_ACTION})
 
+    def test_default_interval_places_waypoints_every_three_metres(self) -> None:
+        """Verify the default spacing is 3 m of arc length, for two-point swaths too."""
+        build = build_row_nodes(
+            [swath((0.0, 0.0), (0.0, 10.0))], ANCHOR, settings(contour_used=True))
+
+        waypoints = [build.nodes[f'FIELD_R1_W{k}'] for k in (1, 2, 3)]
+        self.assertNotIn('FIELD_R1_W4', build.nodes)
+        self.assertEqual([round(w.y - ANCHOR.y, 3) for w in waypoints], [3.0, 6.0, 9.0])
+
+    def test_two_point_contour_row_longer_than_one_interval_gets_a_waypoint(self) -> None:
+        """Verify a 3.96 m two-point row keeps one waypoint instead of a single edge."""
+        build = build_row_nodes(
+            [swath((0.0, 0.0), (0.0, 3.96))], ANCHOR, settings(contour_used=True))
+
+        self.assertEqual(
+            targets(build.nodes['FIELD_R1_IN']), {'FIELD_R1_W1': ROW_ACTION})
+
     def test_every_generated_edge_has_a_reverse_edge(self) -> None:
         """Verify in-row and headland edges are all bidirectional, for straight and contour rows."""
         curve = swath((0.0, 0.0), (0.0, 12.0), (5.0, 24.0))

@@ -123,8 +123,10 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
     """Turn planned swaths into entry, waypoint and exit nodes with their edges.
 
     Each usable swath becomes an IN and an OUT node joined by edges in both directions
-    using ``settings.row_action``. With contour mode and more than two points, rows may
-    also get intermediate waypoints; otherwise they keep a single entry-to-exit edge.
+    using ``settings.row_action``. With contour mode, rows also get intermediate
+    waypoints every ``settings.waypoint_interval_m`` meters of arc length, including
+    two-point swaths; rows shorter than one interval, and all rows without contour
+    mode, keep a single entry-to-exit edge.
 
     Consecutive built rows are joined OUT to the next row's IN in both directions. The
     swaths arrive in snake order, so that pairing is known by construction and no
@@ -145,7 +147,7 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
         anchor: Projection origin in degrees and its map position in meters.
             Generated map coordinates are rounded to three decimal places.
         settings: Naming, metadata and edge options. Row IDs are ``row_id_start``
-            plus the swath index; ``prefix`` is used verbatim. Contour waypoint
+            plus the swath index; ``prefix`` is used verbatim. Waypoint
             spacing is ``waypoint_interval_m`` meters along the swath.
 
     Returns:
@@ -157,7 +159,7 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
         TypeError: A consumed coordinate is nonnumeric or a point is not iterable.
         ValueError: A consumed point does not unpack into two coordinates, or
             projection or resampling encounters invalid numeric input.
-        ZeroDivisionError: Contour resampling uses a zero waypoint interval.
+        ZeroDivisionError: Row resampling uses a zero waypoint interval.
         OverflowError: A resampling count cannot be converted to an integer.
     """
     build = RowBuild()
@@ -182,7 +184,7 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
             continue
 
         waypoint_names: list[NodeID] = []
-        if settings.contour_used and len(swath) > 2:
+        if settings.contour_used:
             waypoints = resample_row_xy(
                 swath, anchor.lat, anchor.lon, settings.waypoint_interval_m)
             for k, (wx, wy) in enumerate(waypoints, start=1):
