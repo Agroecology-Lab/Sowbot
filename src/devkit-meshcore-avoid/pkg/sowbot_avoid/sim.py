@@ -78,11 +78,14 @@ async def simulate(routes, loss, seed, scale=0.1, timeout=300, graph=None, delay
     seconds (unscaled) before its agent starts; until then peers cannot see it.
 
     Loss is the random frame loss probability; scale multiplies simulated timing
-    and timeout is in unscaled seconds. On timeout, return partial results;
-    done indicates whether all agents finished. Other errors propagate.
+    and timeout is in unscaled seconds. A TimeoutError, including one raised by
+    an agent, yields partial results; other errors propagate.
 
-    Return completion, minimum observed separation, frame and loss counts,
-    side-step count and elapsed unscaled seconds.
+    The result includes done (whether all agents finished), sep (minimum observed
+    separation), sep_live (between running robots), sep_parked (involving a
+    finished robot), and pair (IDs at the minimum sep, or None). Separations use
+    graph coordinate units and are infinite if no pair was observed. It also
+    includes frames, lost, sidesteps, and secs (elapsed unscaled seconds).
     """
     rng, g, world = random.Random(seed), graph or grid(), World()
     bus, agents, delays = LoopBus(rng, loss, scale), [], delays or {}

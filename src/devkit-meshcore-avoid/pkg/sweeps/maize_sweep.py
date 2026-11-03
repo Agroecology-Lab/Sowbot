@@ -156,6 +156,14 @@ def add_docks(topo, routes):
 
 # ---- one run -----------------------------------------------------------------------------------
 def run_one(topo, sc, n, loss, seed, park, a):
+    """Run one scenario and return simulation results with sweep metadata.
+
+    Park mode "docks" adds a dock to each route. Options in a supply local
+    radius in meters, start stagger and timeout in unscaled seconds, and scale.
+    The result includes wall-clock time in seconds and the total route hops.
+    Infeasible propagates if routes cannot be constructed. Simulation timeouts
+    return partial results; other simulation and event-loop errors propagate.
+    """
     rng = random.Random(f"{sc}/{n}/{seed}")             # same routes for every loss and park setting
     routes = scenario(topo, sc, n, rng, a.local_radius)
     g = topo.graph
@@ -248,6 +256,10 @@ def report(rows, clr):
 
 
 def main():
+    """Run the requested sweep, print results and optionally write JSONL.
+
+    Infeasible scenario and robot-count combinations are skipped.
+    """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", default=default_map(), help="topological map YAML, or a JSON fixture")
     ap.add_argument("--scenario", nargs="+", default=["follow", "opposed", "random", "local"],

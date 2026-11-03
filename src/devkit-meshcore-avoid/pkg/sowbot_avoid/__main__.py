@@ -59,9 +59,10 @@ def check_mission(a, graph, route):
 async def run(a):
     """Run the configured route with a dynamically loaded driver and MeshCore radio.
 
-    Everything that can be checked offline (options, map, route, driver, key) is
-    checked before the radio is opened; MissionError is raised for bad input.
-    The radio is stopped after the agent exits, including on agent failure.
+    Route, mission and key validation happens before the radio is opened and
+    raises MissionError for invalid values. Map file, JSON and driver loading
+    errors propagate, as do radio and driver errors. The radio is stopped after
+    the agent exits, including on agent failure, if it started successfully.
     """
     try:
         route = [int(x) for x in a.route.split(",")]

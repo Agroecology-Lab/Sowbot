@@ -27,9 +27,10 @@ class Graph:
         """Build an undirected graph with optional node coordinates and parking nodes.
 
         Clearance uses the same units as xy and is the exclusive conflict
-        distance threshold. Park nodes are excluded as side-step waypoints.
-        Rows are the nodes a robot may stop on to let another pass; when not
-        given, every node except the park nodes counts.
+        distance threshold. The agent excludes park nodes as side-step stops.
+        Rows identifies possible stopping nodes for side-stepping. If omitted,
+        it defaults to nodes in edges excluding park nodes. An explicit rows
+        set may include park nodes, which the agent still excludes.
         """
         self.xy = {int(k): tuple(v) for k, v in (xy or {}).items()}
         self.clearance, self.park = clearance, set(park)   # park: docks/chargers, never used as side-step points
@@ -41,7 +42,11 @@ class Graph:
 
     @property
     def rows(self):
-        """Nodes a robot may stop on while side-stepping (the Agent reads this)."""
+        """Return the stopping-node candidates used by the agent.
+
+        Explicit rows are returned as the stored mutable set; the default is a
+        new set of nodes in edges excluding park nodes on each access.
+        """
         return set(self.adj) - self.park if self._rows is None else self._rows
 
     @classmethod

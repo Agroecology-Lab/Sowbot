@@ -103,7 +103,11 @@ class Agent:
 
     # ---- mission -------------------------------------------------------------------------------
     async def run(self):
-        """Follow the route, then mark the agent done. Driver errors propagate."""
+        """Follow the route, then mark the agent done. Driver errors propagate.
+
+        If blocked long enough, the agent may add a side-step to its route,
+        announce the revised claims and wait for arbitration before retrying.
+        """
         self.radio.set_handler(self.on_rx)
         await asyncio.sleep(self.rng.uniform(0, 1.0) * self.k)      # boot jitter
         while True:
