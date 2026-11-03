@@ -10,8 +10,8 @@ from .frame import ARRIVED, BEACON, ENTER, FINISHED, HELLO, Frame
 
 # NOTE: Timers from issue #202, in seconds. Everything is multiplied by --timescale (tests only).
 LISTEN = 1.5
-ENTER_REPEATS = (0.7)
-ARRIVED_REPEATS = (1.0)
+ENTER_REPEATS = ()
+ARRIVED_REPEATS = ()
 BEACON_EVERY = 5.0
 TAIL = 2.0
 BACKOFF = (0.12, 0.48)
