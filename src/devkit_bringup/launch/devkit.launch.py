@@ -327,11 +327,13 @@ def _mavlink_endpoint():
 
 
 def _fusioncore_node(devkit_bringup_pkg):
-    """FusionCore UKF node, currently NOT wired into generate_launch_description().
+    """FusionCore UKF node, launched when no MAVLink endpoint is set.
 
-    The LEVIA-H7's EKF3 is the localiser: the MAVLink bridge publishes fc/odom and owns
-    odom -> base_link (see devkit_mavlink_bridge/mavlink.md). Kept so FusionCore can be
-    re-wired, for example as a shadow estimator, without recovering this block from history.
+    With MAVLINK_ENDPOINT set, the LEVIA-H7's EKF3 is the localiser: the MAVLink bridge
+    publishes fc/odom and owns odom -> base_link (see devkit_mavlink_bridge/mavlink.md) and
+    this node is not launched. Without an endpoint FusionCore is the localiser, and a relay
+    in generate_launch_description() republishes /fusion/odom on /fc/odom so Nav2 reads one
+    odometry topic on both paths.
 
     Launched directly, NOT wrapped in a lifecycle_manager: fusioncore does not implement the
     bond heartbeat protocol nav2_lifecycle_manager requires, so wrapping it causes a
@@ -521,9 +523,26 @@ def generate_launch_description():
             ],
         ),
 
+        # ── FusionCore UKF (no MAVLink endpoint) ─────────────────────────────
+        # The localiser when the MAVLink bridge is not running. It publishes
+        # /fusion/odom (read by the UI); the relay below republishes it on /fc/odom,
+        # the topic Nav2 reads (nav2_params.yaml), so Nav2 is path-independent.
+        # Check QoS against Nav2's odom subscription on the rover:
+        #   ros2 topic info -v /fc/odom
+        *([
+            _fusioncore_node(devkit_bringup_pkg),
+            Node(
+                package='topic_tools',
+                executable='relay',
+                name='fusion_odom_to_fc_relay',
+                arguments=['/fusion/odom', '/fc/odom'],
+                output='screen',
+            ),
+        ] if not mavlink_enabled else []),
+
         # ── ArduPilot EKF3 via MAVLink bridge (real hardware only) ───────────
         # Publishes fc/odom and owns the odom -> base_link TF, replacing FusionCore
-        # (see _fusioncore_node(), not wired). Requires MAVLINK_ENDPOINT, and
+        # (not launched when the bridge runs). Requires MAVLINK_ENDPOINT, and
         # MAVLINK_BAUD if not 115200. Nav2 reads /fc/odom (nav2_params.yaml).
         *([GroupAction(
             condition=real_condition,
@@ -578,7 +597,7 @@ def generate_launch_description():
 
         # ── Static base_link -> imu_link TF (no MCU only) ────────────────────
         # When MCU is virtual there is no IMU driver publishing this transform.
-        # FusionCore (not currently wired) required it before it would activate. An identity
+        # FusionCore required it before it would activate. An identity
         # transform is correct for bench/dev — assumes IMU is at robot centre.
         # When a real MCU is present the IMU driver owns this TF; do not
         # compete with it.
