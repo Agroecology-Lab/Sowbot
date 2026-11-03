@@ -68,16 +68,29 @@ def install_stubs() -> None:
             self.linear = SimpleNamespace(x=0.0, y=0.0, z=0.0)
             self.angular = SimpleNamespace(x=0.0, y=0.0, z=0.0)
 
+    class TransformStamped(FakeMessage):
+        def __init__(self, **fields):
+            super().__init__(**fields)
+            self.header = SimpleNamespace(stamp=None, frame_id='')
+            self.child_frame_id = ''
+            self.transform = SimpleNamespace(translation=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                                             rotation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0))
+
     qos_names = ('DurabilityPolicy', 'Duration', 'LivelinessPolicy', 'QoSProfile', 'ReliabilityPolicy')
     stubs = {
         'rclpy': _module('rclpy'),
         'rclpy.node': _module('rclpy.node', Node=type('Node', (), {})),
         'rclpy.qos': _module('rclpy.qos', **{
-            name: SimpleNamespace(RELIABLE='reliable', TRANSIENT_LOCAL='transient_local', AUTOMATIC='automatic')
+            name: SimpleNamespace(RELIABLE='reliable', BEST_EFFORT='best_effort', TRANSIENT_LOCAL='transient_local', AUTOMATIC='automatic')
             if name.endswith('Policy') else (lambda *a, **k: SimpleNamespace(args=a, kwargs=k))
             for name in qos_names}),
         'geometry_msgs': _module('geometry_msgs'),
-        'geometry_msgs.msg': _module('geometry_msgs.msg', Twist=Twist),
+        'geometry_msgs.msg': _module('geometry_msgs.msg', Twist=Twist, TransformStamped=TransformStamped),
+        'nav_msgs': _module('nav_msgs'),
+        'nav_msgs.msg': _module('nav_msgs.msg', Odometry=type('Odometry', (FakeMessage,), {})),
+        'sensor_msgs': _module('sensor_msgs'),
+        'sensor_msgs.msg': _module('sensor_msgs.msg', NavSatFix=type('NavSatFix', (FakeMessage,), {}),
+                                   NavSatStatus=SimpleNamespace(STATUS_NO_FIX=-1, STATUS_FIX=0)),
         'std_msgs': _module('std_msgs'),
         'std_msgs.msg': _module('std_msgs.msg', Bool=Bool, Empty=Empty),
     }
