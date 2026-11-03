@@ -13,9 +13,19 @@ class FixedRandom:
         return (low + high) / 2
 
 
-def make_agent(route=(1, 2, 4), graph=None, **kwargs):
+class RecordingRadio(Radio):
+    def __init__(self, fail=False):
+        self.frames, self.fail = [], fail
+
+    async def send(self, payload):
+        if self.fail:
+            raise OSError('radio down')
+        self.frames.append(Frame.decode(payload))
+
+
+def make_agent(route=(1, 2, 4), graph=None, radio=None, **kwargs):
     graph = graph or Graph([(1, 2), (1, 3), (2, 3), (2, 4)])
-    return Agent(2, route, graph, Radio(), AsyncMock(), rng=FixedRandom(), **kwargs)
+    return Agent(2, route, graph, radio or Radio(), AsyncMock(), rng=FixedRandom(), **kwargs)
 
 
 def test_receive_rejects_invalid_own_duplicate_and_old_frames():
@@ -108,23 +118,59 @@ def test_blocked_waits_until_threshold_then_starts_retreat(monkeypatch):
     assert agent.retreating and agent.retreats == 1
 
 
-def test_drive_announces_edge_then_arrival():
-    agent = make_agent(scale=0)
-    agent.driver.drive = AsyncMock()
-    asyncio.run(agent._drive((1, 2)))
-    agent.driver.drive.assert_awaited_once_with(1, 2)
-    assert (agent.cur, agent.idx) == (2, 1)
-    assert [f.kind for _, f in agent.q] == [ARRIVED] * 4
-    assert agent.q[0][1].nodes == (2, 4)
+def test_drive_sends_enter_before_driving_then_announces_arrival():
+    async def scenario():
+        radio = RecordingRadio()
+        agent = make_agent(scale=0, radio=radio)
+        seen = []
+        agent.driver.drive = AsyncMock(side_effect=lambda a, b: seen.append([f.kind for f in radio.frames]))
+        sender = asyncio.create_task(agent._sender())
+        assert await agent._drive((1, 2))
+        await asyncio.sleep(0.01)
+        sender.cancel()
+        agent.driver.drive.assert_awaited_once_with(1, 2)
+        assert seen[0] and seen[0][0] == ENTER
+        assert (agent.cur, agent.idx) == (2, 1)
+        originals = [f for f in radio.frames if f.resend == 0]
+        assert [f.kind for f in originals] == [ENTER, ARRIVED]
+        assert originals[1].nodes == (2, 4)
+
+    asyncio.run(scenario())
 
 
 def test_drive_failure_does_not_advance_position():
-    agent = make_agent(scale=0)
-    agent.driver.drive = AsyncMock(side_effect=RuntimeError('motor failed'))
-    with pytest.raises(RuntimeError, match='motor failed'):
-        asyncio.run(agent._drive((1, 2)))
-    assert (agent.cur, agent.idx) == (1, 0)
-    assert agent.q[0][1].kind == ENTER
+    async def scenario():
+        radio = RecordingRadio()
+        agent = make_agent(scale=0, radio=radio)
+        agent.driver.drive = AsyncMock(side_effect=RuntimeError('motor failed'))
+        sender = asyncio.create_task(agent._sender())
+        with pytest.raises(RuntimeError, match='motor failed'):
+            await agent._drive((1, 2))
+        sender.cancel()
+        assert (agent.cur, agent.idx) == (1, 0)
+        assert radio.frames[0].kind == ENTER
+
+    asyncio.run(scenario())
+
+
+def test_drive_does_not_move_when_enter_is_not_sent():
+    async def scenario():
+        agent = make_agent(scale=0, radio=RecordingRadio(fail=True))
+        sender = asyncio.create_task(agent._sender())
+        assert not await agent._drive((1, 2))
+        sender.cancel()
+        agent.driver.drive.assert_not_awaited()
+        assert (agent.cur, agent.idx) == (1, 0)
+
+    asyncio.run(scenario())
+
+
+def test_superseded_frame_settles_delivery_as_not_sent():
+    agent = make_agent()
+    enter = agent.announce(ENTER, (1, 2))
+    assert not enter.event.is_set()
+    agent.announce(ARRIVED, (1,))
+    assert enter.event.is_set() and not enter.ok
 
 
 def test_run_completes_route_and_sends_finished():
@@ -246,12 +292,18 @@ def test_mission_waits_for_initial_node_to_clear():
 
 
 def test_mission_completes_retreat_and_resumes_route():
-    graph = Graph([(1, 2), (1, 3), (3, 2), (2, 4)])
-    agent = make_agent(graph=graph, scale=0)
-    agent.driver.drive = AsyncMock()
-    agent.log = Mock()
-    assert agent._start_retreat()
-    asyncio.run(agent._mission())
+    async def scenario():
+        graph = Graph([(1, 2), (1, 3), (3, 2), (2, 4)])
+        agent = make_agent(graph=graph, scale=0, radio=RecordingRadio())
+        agent.driver.drive = AsyncMock()
+        agent.log = Mock()
+        assert agent._start_retreat()
+        sender = asyncio.create_task(agent._sender())
+        await asyncio.wait_for(agent._mission(), timeout=5)
+        sender.cancel()
+        return agent
+
+    agent = asyncio.run(scenario())
     assert agent.driver.drive.await_args_list == [((1, 3),), ((3, 2),), ((2, 4),)]
     assert (agent.cur, agent.idx, agent.retreating, agent.resume) == (4, 2, False, None)
     agent.log.assert_any_call('retreat done, resuming')
@@ -259,7 +311,7 @@ def test_mission_completes_retreat_and_resumes_route():
 
 def test_drive_sends_beacon_while_motion_is_in_progress(monkeypatch):
     async def scenario():
-        agent = make_agent(scale=0.001)
+        agent = make_agent(scale=0.001, radio=RecordingRadio())
         release = asyncio.Event()
 
         async def drive(_a, _b):
@@ -268,13 +320,16 @@ def test_drive_sends_beacon_while_motion_is_in_progress(monkeypatch):
         announce = agent.announce
 
         def record(kind, *args, **kwargs):
-            announce(kind, *args, **kwargs)
+            delivery = announce(kind, *args, **kwargs)
             if kind == BEACON:
                 release.set()
+            return delivery
 
         agent.driver.drive = drive
         agent.announce = Mock(side_effect=record)
+        sender = asyncio.create_task(agent._sender())
         await asyncio.wait_for(agent._drive((1, 2)), timeout=1)
+        sender.cancel()
         calls = agent.announce.call_args_list
         assert [call.args[0] for call in calls] == [ENTER, BEACON, ARRIVED]
         assert calls[1].args[1:3] == ([1, 2, 4], 1)

@@ -29,7 +29,7 @@ class Radio:
 class MeshRadio(Radio):
     """One MeshCore companion radio through meshcore_py."""
 
-    def __init__(self, port, idx=1, name="sowbot", secret=None, zero_hop=True, baud=115200):
+    def __init__(self, port, idx=1, name='sowbot', secret=None, zero_hop=True, baud=115200):
         """Configure the serial port and channel.
 
         Secret is a hex-encoded channel key; omit it to use an existing channel.
@@ -43,25 +43,26 @@ class MeshRadio(Radio):
         Import, connection, and invalid hex secret errors propagate. RuntimeError is
         raised if the radio rejects the channel setup or has no channel at the
         configured index, because the robot would otherwise move without being heard.
+        The port is disconnected again if anything after the connection fails.
         """
         from meshcore import MeshCore, EventType
         self._EventType = EventType
-        key = bytes.fromhex(self.secret) if self.secret else None      # fail on a bad key before opening the port
+        key = bytes.fromhex(self.secret) if self.secret else None      # NOTE: fail on a bad key before opening the port
         self.mc = await MeshCore.create_serial(self.port, self.baud)
         try:
             if key:
                 res = await self.mc.commands.set_channel(self.idx, self.name, key)
                 if res.type == EventType.ERROR:
-                    raise RuntimeError(f"set_channel {self.idx} failed: {res.payload}")
+                    raise RuntimeError(f'set_channel {self.idx} failed: {res.payload}')
             res = await self.mc.commands.get_channel(self.idx)
             if res.type == EventType.ERROR:
-                raise RuntimeError(f"channel {self.idx} is not available on the radio: {res.payload}")
+                raise RuntimeError(f'channel {self.idx} is not available on the radio: {res.payload}')
+            self.mc.subscribe(EventType.CHANNEL_DATA_RECV, self._on_event,
+                              attribute_filters={'channel_idx': self.idx, 'data_type': DATA_TYPE})
+            await self.mc.start_auto_message_fetching()
         except BaseException:
             await self.mc.disconnect()
             raise
-        self.mc.subscribe(EventType.CHANNEL_DATA_RECV, self._on_event,
-                          attribute_filters={"channel_idx": self.idx, "data_type": DATA_TYPE})
-        await self.mc.start_auto_message_fetching()
 
     async def stop(self):
         """Disconnect the companion radio; disconnect errors propagate."""
@@ -70,7 +71,7 @@ class MeshRadio(Radio):
     async def _on_event(self, ev):
         self.last_rx = time.monotonic()
         if self.cb:
-            self.cb(bytes.fromhex(ev.payload["payload"]))
+            self.cb(bytes.fromhex(ev.payload['payload']))
 
     async def send(self, payload):
         """Send channel data.
@@ -78,11 +79,11 @@ class MeshRadio(Radio):
         An error response from the radio raises RuntimeError, so the caller sees that
         the frame was not sent. Exceptions from the radio command propagate as well.
         """
-        # path=b"" is zero-hop (direct range only); None floods through repeaters.
+        # NOTE: path=b"" is zero-hop (direct range only); None floods through repeaters.
         res = await self.mc.commands.send_channel_data(self.idx, DATA_TYPE, payload,
-                                                       path=b"" if self.zero_hop else None)
+                                                       path=b'' if self.zero_hop else None)
         if res.type == self._EventType.ERROR:
-            raise RuntimeError(f"send_channel_data error: {res.payload}")
+            raise RuntimeError(f'send_channel_data error: {res.payload}')
 
 
 class LoopBus:
@@ -137,4 +138,3 @@ class LoopRadio(Radio):
     async def send(self, payload):
         """Schedule a transmission on the simulated bus."""
         self.bus.transmit(self, payload)
-
