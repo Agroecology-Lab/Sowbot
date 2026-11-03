@@ -106,9 +106,16 @@ class TestAnchorEstimator(unittest.TestCase):
 
     def test_invalid_limits_are_rejected(self):
         """Verify non-positive limits raise ValueError."""
-        for kwargs in ({'samples': 0}, {'max_skew_s': 0.0}, {'max_spread_m': -1.0}):
+        for kwargs in ({'samples': 0}, {'max_skew_s': 0.0}, {'max_spread_m': -1.0}, {'max_skew_s': math.nan},
+                       {'max_spread_m': math.nan}, {'max_spread_m': math.inf}):
             with self.subTest(**kwargs), self.assertRaises(ValueError):
                 map_anchor.AnchorEstimator(LAT0, LON0, 0.0, **kwargs)
+
+    def test_origin_outside_the_valid_range_is_rejected(self):
+        """Verify a latitude beyond 90 degrees or a longitude beyond 180 degrees raises ValueError."""
+        for lat, lon in ((91.0, 0.0), (-90.5, 0.0), (0.0, 181.0), (0.0, -180.5), (math.nan, 0.0)):
+            with self.subTest(lat=lat, lon=lon), self.assertRaises(ValueError):
+                map_anchor.AnchorEstimator(lat, lon, 0.0)
 
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@ from launch.actions import (
     SetEnvironmentVariable,
     TimerAction,
 )
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
@@ -326,6 +326,15 @@ def _mavlink_endpoint():
     return endpoint
 
 
+def _sim_true(sim):
+    """Return PythonExpression parts that are true when the sim argument is true.
+
+    Accepts the same values as IfCondition (true or 1, any case, surrounding space ignored),
+    so every launch site reads sim the same way, as in sim:=True or sim:=1.
+    """
+    return ["'", sim, "'.strip().lower() in ('true', '1')"]
+
+
 def _map_origin():
     """Return (lat, lon, yaw_deg) of the surveyed map origin, or None when it is not set.
 
@@ -402,7 +411,7 @@ def generate_launch_description():
     mavlink_enabled = bool(_mavlink_endpoint())
     map_origin = _map_origin()
     driver_handles_cmd_vel = PythonExpression(
-        ["'true' if '", LaunchConfiguration('sim'), "' == 'true' or not ", str(mavlink_enabled), " else 'false'"]
+        ["'true' if (", *_sim_true(LaunchConfiguration('sim')), ") or not ", str(mavlink_enabled), " else 'false'"]
     )
 
     any_hw_present = (rover_port  != 'virtual' or
@@ -419,7 +428,7 @@ def generate_launch_description():
     )
     sim = LaunchConfiguration('sim')
     sim_condition  = IfCondition(sim)
-    real_condition = IfCondition(PythonExpression(["'", sim, "' != 'true'"]))
+    real_condition = UnlessCondition(sim)
 
     gps_enabled = PythonExpression(
         ["'", rover_port, "' != 'virtual' and '", gps_type, "' == 'ublox'"]
@@ -562,7 +571,7 @@ def generate_launch_description():
         #   ros2 topic info -v /fc/odom
         GroupAction(
             condition=IfCondition(
-                PythonExpression(["'", sim, "' == 'true' or not ", str(mavlink_enabled)])
+                PythonExpression([*_sim_true(sim), " or not ", str(mavlink_enabled)])
             ),
             actions=[
                 _fusioncore_node(devkit_bringup_pkg),
@@ -639,7 +648,7 @@ def generate_launch_description():
         *([Node(
             condition=IfCondition(
                 PythonExpression(
-                    ["'", mcu_port, "' == 'virtual' and '", sim, "' != 'true'"]
+                    ["'", mcu_port, "' == 'virtual' and not (", *_sim_true(sim), ")"]
                 )
             ),
             package='tf2_ros',

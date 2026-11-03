@@ -123,6 +123,7 @@ class TestCreateTwistHandler(unittest.TestCase):
         handler = twist_handler.create_twist_handler(node, Mock())
         self.assertIsInstance(handler, twist_handler.TwistHandler)
         node.create_subscription.assert_called_once()
+        node.declare_parameter.assert_any_call('handle_cmd_vel', True)
 
     def test_no_handler_when_the_bridge_owns_cmd_vel(self):
         """Verify handle_cmd_vel false creates no handler and no subscription."""

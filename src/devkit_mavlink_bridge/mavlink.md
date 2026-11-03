@@ -109,12 +109,24 @@ With no endpoint set the bridge does not start and FusionCore runs. FusionCore p
 
 ## Map origin
 
-`map -> odom` ties the topological map to the ground. In real mode `devkit.launch.py` publishes it one of two ways:
+`map -> odom` ties the topological map to the ground.
+In real mode `devkit.launch.py` publishes it one of two ways:
 
-- **`MAP_ORIGIN_LAT` and `MAP_ORIGIN_LON` set in `.env`** (degrees, the surveyed position of the map's (0, 0)): the `map_odom_anchor` node publishes it. `MAP_YAW_DEG` (default 0) is the direction of the map x axis, counter-clockwise from east. The node pairs `fc/ekf_fix` (or `gnss/fix` without the bridge) with the odom position on `fc/odom`, and publishes once, when the last 10 estimates agree within 0.5 m. Until then there is no `map -> odom`, so Nav2 waits. It does not re-anchor while running, so restart it if the EKF origin is reset. Setting only one of the two coordinates stops the launch.
-- **Not set:** an identity transform, so map waypoints are offset from the robot by wherever the localiser started. Fine on the bench, wrong in a field.
+- **`MAP_ORIGIN_LAT` and `MAP_ORIGIN_LON` set in `.env`** (degrees, the surveyed position of the map's (0, 0)): the `map_odom_anchor` node publishes it.
+  `MAP_YAW_DEG` (default 0) is the direction of the map x axis, counter-clockwise from east.
+  The node pairs `fc/ekf_fix` (or `gnss/fix` without the bridge) with the odom position on `fc/odom`.
+  It publishes once, when the last 10 estimates agree within 0.5 m.
+  Until then there is no `map -> odom`, so Nav2 waits.
+  While it waits it logs a warning every 10 s that names the topic with nothing on it.
+  Without the bridge, `gnss/fix` needs a GNSS receiver on `GPS_PORT_ROVER` or an external publisher.
+  It does not re-anchor while running, so restart it if the EKF origin is reset.
+  Setting only one of the two coordinates, or a latitude outside 90 degrees, stops the launch.
+- **Not set:** an identity transform, so map waypoints are offset from the robot by wherever the localiser started.
+  That is fine on the bench and wrong in a field.
 
-The anchor assumes the odom frame is east-north-up. `fc/odom` is (see the topics table). On the FusionCore path this is untested.
+The anchor assumes the odom frame is east-north-up.
+`fc/odom` is (see the topics table).
+On the FusionCore path this is untested.
 
 ## Bridge topics
 

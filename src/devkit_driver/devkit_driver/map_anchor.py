@@ -54,8 +54,11 @@ class AnchorEstimator:
     def __init__(self, origin_lat: float, origin_lon: float, map_yaw_rad: float,
                  samples: int = 10, max_skew_s: float = 0.5, max_spread_m: float = 0.5):
         """Store the surveyed origin and the acceptance limits."""
-        if samples < 1 or max_skew_s <= 0.0 or max_spread_m <= 0.0:
-            raise ValueError('samples, max_skew_s and max_spread_m must be positive')
+        if samples < 1 or not (math.isfinite(max_skew_s) and max_skew_s > 0.0
+                               and math.isfinite(max_spread_m) and max_spread_m > 0.0):
+            raise ValueError('samples must be at least 1, max_skew_s and max_spread_m positive and finite')
+        if not (-90.0 <= origin_lat <= 90.0 and -180.0 <= origin_lon <= 180.0):
+            raise ValueError('origin_lat must be within 90 degrees and origin_lon within 180 degrees')
         self._origin = (origin_lat, origin_lon)
         self._map_yaw = map_yaw_rad
         self._max_skew_s = max_skew_s

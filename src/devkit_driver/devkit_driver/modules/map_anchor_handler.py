@@ -10,6 +10,8 @@ from sensor_msgs.msg import NavSatFix, NavSatStatus
 
 from ..map_anchor import AnchorEstimator
 
+_WAIT_WARNING_PERIOD_S = 10.0
+
 
 class MapAnchorHandler:
     """Publish a static map -> odom transform anchored to a surveyed geodetic origin.
@@ -46,16 +48,22 @@ class MapAnchorHandler:
         self._map_frame = str(parameter('map_frame'))
         self._odom_frame = str(parameter('odom_frame'))
         self.anchored = False
+        self._fix_topic = str(parameter('fix_topic'))
+        self._odom_topic = str(parameter('odom_topic'))
+        self._fixes = 0
+        self._odoms = 0
         # Best effort matches both reliable and best-effort publishers.
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
-        node.create_subscription(NavSatFix, str(parameter('fix_topic')), self.handle_fix, qos)
-        node.create_subscription(Odometry, str(parameter('odom_topic')), self.handle_odom, qos)
+        node.create_subscription(NavSatFix, self._fix_topic, self.handle_fix, qos)
+        node.create_subscription(Odometry, self._odom_topic, self.handle_odom, qos)
+        node.create_timer(_WAIT_WARNING_PERIOD_S, self._warn_if_waiting)
 
     def handle_fix(self, msg: NavSatFix) -> None:
         """Feed a valid fix to the estimator; ignore no-fix status and nonfinite positions."""
         if self.anchored or msg.status.status < NavSatStatus.STATUS_FIX:
             return
         if math.isfinite(msg.latitude) and math.isfinite(msg.longitude):
+            self._fixes += 1
             self._publish(self._estimator.add_fix(self._clock(), msg.latitude, msg.longitude))
 
     def handle_odom(self, msg: Odometry) -> None:
@@ -64,7 +72,18 @@ class MapAnchorHandler:
             return
         position = msg.pose.pose.position
         if math.isfinite(position.x) and math.isfinite(position.y):
+            self._odoms += 1
             self._publish(self._estimator.add_odom(self._clock(), position.x, position.y))
+
+    def _warn_if_waiting(self) -> None:
+        """Name the missing input every period while no fix or no odom position has arrived."""
+        if self.anchored:
+            return
+        missing = [f'{kind} on {topic}' for kind, topic, count in
+                   (('a valid fix', self._fix_topic, self._fixes), ('odometry', self._odom_topic, self._odoms))
+                   if count == 0]
+        if missing:
+            self._node.get_logger().warn(f'map -> odom is waiting for {" and ".join(missing)}: nothing has arrived')
 
     def _publish(self, result: tuple[float, float, float] | None) -> None:
         """Broadcast map -> odom once, or warn if the window is full but disagrees."""

@@ -106,6 +106,42 @@ class TestMapAnchorHandler(unittest.TestCase):
         self.node.get_logger().warn.assert_called_once()
         self.assertFalse(self.handler.anchored)
 
+    def _warn_if_waiting(self):
+        """Fire the wait-warning timer callback registered by the handler."""
+        self.node.create_timer.assert_called_once()
+        self.node.create_timer.call_args.args[1]()
+
+    def test_warning_names_both_missing_inputs(self):
+        """Verify the timer warns naming the fix and odom topics when nothing has arrived."""
+        self._warn_if_waiting()
+        message = self.node.get_logger().warn.call_args.args[0]
+        self.assertIn('fc/ekf_fix', message)
+        self.assertIn('fc/odom', message)
+
+    def test_warning_names_only_the_missing_input(self):
+        """Verify the timer warns about the fix topic only once odometry is flowing."""
+        self.handler.handle_odom(_odom())
+        self._warn_if_waiting()
+        message = self.node.get_logger().warn.call_args.args[0]
+        self.assertIn('fc/ekf_fix', message)
+        self.assertNotIn('fc/odom', message)
+
+    def test_no_warning_when_both_inputs_arrive_or_after_anchoring(self):
+        """Verify the timer is silent once both inputs have arrived, and after anchoring."""
+        self.handler.handle_fix(_fix())
+        self.handler.handle_odom(_odom())
+        self._warn_if_waiting()
+        self.node.get_logger().warn.assert_not_called()
+        self.handler.anchored = True
+        self._warn_if_waiting()
+        self.node.get_logger().warn.assert_not_called()
+
+    def test_ignored_fixes_do_not_count_as_arrived(self):
+        """Verify a no-fix message still leaves the fix topic reported as missing."""
+        self.handler.handle_fix(_fix(status=-1))
+        self._warn_if_waiting()
+        self.assertIn('fc/ekf_fix', self.node.get_logger().warn.call_args.args[0])
+
 
 if __name__ == '__main__':
     unittest.main()

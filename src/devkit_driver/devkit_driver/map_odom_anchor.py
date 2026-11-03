@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Run MapAnchorHandler as a node: static map -> odom from a surveyed geodetic origin."""
+import contextlib
+
 import rclpy
 from rclpy.node import Node
 from tf2_ros import StaticTransformBroadcaster
@@ -21,9 +23,8 @@ def main(args=None):  # pragma: no cover
     rclpy.init(args=args)
     node = MapOdomAnchor()
     try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
+        with contextlib.suppress(KeyboardInterrupt):
+            rclpy.spin(node)
     finally:
         node.destroy_node()
         if rclpy.ok():

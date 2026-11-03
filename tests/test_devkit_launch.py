@@ -79,15 +79,24 @@ def _includes_bridge(description):
                and str(item.args[0]).endswith('mavlink_bridge.launch.py') for item in _walk(description))
 
 
-def _flags(description):
-    """Return the literal true/false values found in PythonExpression objects."""
-    return [
-        p
-        for item in _walk(description)
-        if type(item).__name__ == 'PythonExpression'
-        for p in item.args[0]
-        if p in ('True', 'False')
-    ]
+def _evaluate(expression, sim):
+    """Evaluate a PythonExpression with every LaunchConfiguration replaced by the sim value."""
+    parts = [sim if type(part).__name__ == 'LaunchConfiguration' else str(part) for part in expression.args[0]]
+    return eval(''.join(parts))  # pylint: disable=eval-used
+
+
+def _driver_handle_cmd_vel(description):
+    """Return the handle_cmd_vel launch argument passed to devkit_driver.launch.py."""
+    (include,) = [item for item in _walk(description) if type(item).__name__ == 'IncludeLaunchDescription'
+                  and str(item.args[0].args[0]).endswith('devkit_driver.launch.py')]
+    return dict(include.kwargs['launch_arguments'])['handle_cmd_vel']
+
+
+def _bridge_group(description):
+    (group,) = [item for item in _walk(description) if type(item).__name__ == 'GroupAction'
+                and any(type(i).__name__ == 'PythonLaunchDescriptionSource'
+                        and str(i.args[0]).endswith('mavlink_bridge.launch.py') for i in _walk(item))]
+    return group
 
 
 class TestMavlinkBridgeInclude(unittest.TestCase):
@@ -104,12 +113,29 @@ class TestMavlinkBridgeInclude(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             _description(MAVLINK_ENDPOINT='TODO_SERIAL_DEVICE_HERE')
 
-    def test_driver_is_told_to_leave_cmd_vel_to_the_bridge(self):
-        """Verify the endpoint is baked into the handle_cmd_vel expression for the driver."""
-        with_bridge = _description(MAVLINK_ENDPOINT='/dev/ttyACM2')
-        without = _description()
-        self.assertIn('True', _flags(with_bridge))
-        self.assertNotIn('True', _flags(without))
+    def test_bridge_group_runs_only_when_sim_is_not_true(self):
+        """Verify the bridge group's condition is UnlessCondition on the sim argument."""
+        condition = _bridge_group(_description(MAVLINK_ENDPOINT='/dev/ttyACM2')).kwargs['condition']
+        self.assertEqual(type(condition).__name__, 'UnlessCondition')
+        self.assertEqual(type(condition.args[0]).__name__, 'LaunchConfiguration')
+        self.assertEqual(condition.args[0].args, ('sim',))
+
+    def test_driver_leaves_cmd_vel_to_the_bridge(self):
+        """Verify handle_cmd_vel is false for the driver when the bridge runs and true otherwise."""
+        with_bridge = _driver_handle_cmd_vel(_description(MAVLINK_ENDPOINT='/dev/ttyACM2'))
+        without = _driver_handle_cmd_vel(_description())
+        self.assertEqual(_evaluate(with_bridge, 'false'), 'false')
+        self.assertEqual(_evaluate(without, 'false'), 'true')
+
+    def test_driver_handles_cmd_vel_in_sim_whatever_the_spelling(self):
+        """Verify sim true, True, 1 and padded values all give the driver cmd_vel, as IfCondition reads them."""
+        expression = _driver_handle_cmd_vel(_description(MAVLINK_ENDPOINT='/dev/ttyACM2'))
+        for sim in ('true', 'True', '1', ' TRUE '):
+            with self.subTest(sim=sim):
+                self.assertEqual(_evaluate(expression, sim), 'true')
+        for sim in ('false', 'False', '0'):
+            with self.subTest(sim=sim):
+                self.assertEqual(_evaluate(expression, sim), 'false')
 
 
 class TestFusionCorePath(unittest.TestCase):
@@ -130,6 +156,16 @@ class TestFusionCorePath(unittest.TestCase):
                     for p in e.args[0]]
         self.assertEqual(gate(_description())[-1], 'False')
         self.assertEqual(gate(_description(MAVLINK_ENDPOINT='/dev/ttyACM2'))[-1], 'True')
+
+    def test_fusioncore_runs_in_sim_with_an_endpoint_however_sim_is_spelled(self):
+        """Verify the FusionCore gate evaluates true for sim true, True and 1 even with an endpoint."""
+        description = _description(MAVLINK_ENDPOINT='/dev/ttyACM2')
+        (group,) = [item for item in _walk(description) if type(item).__name__ == 'GroupAction'
+                    and _nodes(item, package='fusioncore_ros')]
+        (expression,) = [e for e in _walk(group.kwargs['condition']) if type(e).__name__ == 'PythonExpression']
+        for sim, expected in (('true', True), ('True', True), ('1', True), ('false', False), ('0', False)):
+            with self.subTest(sim=sim):
+                self.assertEqual(_evaluate(expression, sim), expected)
 
 
 class TestMapOdom(unittest.TestCase):
