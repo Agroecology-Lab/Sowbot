@@ -37,7 +37,7 @@ from sowbot_avoid.sim import simulate         # noqa: E402
 from sowbot_avoid.topo import load_topo       # noqa: E402
 
 DOCK_OFFSET = 1.5
-EPS = 1e-6      # metres: floating-point noise when judging "closer than the clearance", not a safety margin
+EPS = 1e-6      # NOTE: metres, floating-point noise when judging "closer than the clearance", not a safety margin
 
 
 class Infeasible(Exception):
@@ -267,6 +267,8 @@ def main():
     ap.add_argument("--stagger", type=float, default=0.0, help="agents start up to this many unscaled seconds late")
     ap.add_argument("--jsonl", help="write one JSON line per run")
     a = ap.parse_args()
+    if a.clearance <= EPS:
+        ap.error(f"--clearance must be greater than {EPS:g} m")
 
     topo = load_topo(a.map, a.clearance)
     xs, ys = [p[0] for p in topo.graph.xy.values()], [p[1] for p in topo.graph.xy.values()]

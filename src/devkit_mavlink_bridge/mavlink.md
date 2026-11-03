@@ -107,6 +107,15 @@ With no endpoint set the bridge does not start and FusionCore runs. FusionCore p
 - `manage.py` skips the `fusioncore.yaml` lever-arm check on this path. Set the antenna offsets on the flight controller.
 - The bridge and the ESP32/Lizard `devkit_driver` both subscribe to `cmd_vel`. When the bridge runs, `devkit.launch.py` passes `handle_cmd_vel:=false` to the driver, so only the bridge acts on it.
 
+## Map origin
+
+`map -> odom` ties the topological map to the ground. In real mode `devkit.launch.py` publishes it one of two ways:
+
+- **`MAP_ORIGIN_LAT` and `MAP_ORIGIN_LON` set in `.env`** (degrees, the surveyed position of the map's (0, 0)): the `map_odom_anchor` node publishes it. `MAP_YAW_DEG` (default 0) is the direction of the map x axis, counter-clockwise from east. The node pairs `fc/ekf_fix` (or `gnss/fix` without the bridge) with the odom position on `fc/odom`, and publishes once, when the last 10 estimates agree within 0.5 m. Until then there is no `map -> odom`, so Nav2 waits. It does not re-anchor while running, so restart it if the EKF origin is reset. Setting only one of the two coordinates stops the launch.
+- **Not set:** an identity transform, so map waypoints are offset from the robot by wherever the localiser started. Fine on the bench, wrong in a field.
+
+The anchor assumes the odom frame is east-north-up. `fc/odom` is (see the topics table). On the FusionCore path this is untested.
+
 ## Bridge topics
 
 Inbound, from the LEVIA-H7. `odom -> base_link` is broadcast only with `publish_tf` (launch default true), from the pose on `fc/odom` and under the same gating, so it stops when `fc/odom` stops.

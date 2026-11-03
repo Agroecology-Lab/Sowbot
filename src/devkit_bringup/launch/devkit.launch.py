@@ -326,12 +326,35 @@ def _mavlink_endpoint():
     return endpoint
 
 
-def _fusioncore_node(devkit_bringup_pkg):
-    """FusionCore UKF node, launched when no MAVLink endpoint is set.
+def _map_origin():
+    """Return (lat, lon, yaw_deg) of the surveyed map origin, or None when it is not set.
 
-    With MAVLINK_ENDPOINT set, the LEVIA-H7's EKF3 is the localiser: the MAVLink bridge
+    MAP_ORIGIN_LAT and MAP_ORIGIN_LON (degrees) are the surveyed geodetic position of the
+    topological map's (0, 0). MAP_YAW_DEG (default 0) is the direction of the map x axis,
+    counter-clockwise from east. Both coordinates are needed: a half-set origin would
+    silently fall back to the wrong map, so raise instead.
+    """
+    raw = {name: os.getenv(name, '').strip() for name in ('MAP_ORIGIN_LAT', 'MAP_ORIGIN_LON')}
+    if not any(raw.values()):
+        return None
+    if not all(raw.values()):
+        raise RuntimeError('Set both MAP_ORIGIN_LAT and MAP_ORIGIN_LON, or neither.')
+    try:
+        lat, lon = float(raw['MAP_ORIGIN_LAT']), float(raw['MAP_ORIGIN_LON'])
+        yaw_deg = float(os.getenv('MAP_YAW_DEG', '').strip() or 0.0)
+    except ValueError as error:
+        raise RuntimeError(f'MAP_ORIGIN_LAT, MAP_ORIGIN_LON and MAP_YAW_DEG must be numbers: {error}') from error
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0 and abs(yaw_deg) <= 360.0):
+        raise RuntimeError('MAP_ORIGIN_LAT must be within 90, MAP_ORIGIN_LON within 180 and MAP_YAW_DEG within 360.')
+    return lat, lon, yaw_deg
+
+
+def _fusioncore_node(devkit_bringup_pkg):
+    """FusionCore UKF node, launched whenever the MAVLink bridge is not running.
+
+    With the bridge running (MAVLINK_ENDPOINT set and sim not true), the LEVIA-H7's EKF3 is the localiser: the MAVLink bridge
     publishes fc/odom and owns odom -> base_link (see devkit_mavlink_bridge/mavlink.md) and
-    this node is not launched. Without an endpoint FusionCore is the localiser, and a relay
+    this node is not launched. Otherwise FusionCore is the localiser, and a relay
     in generate_launch_description() republishes /fusion/odom on /fc/odom so Nav2 reads one
     odometry topic on both paths.
 
@@ -377,6 +400,7 @@ def generate_launch_description():
     # told not to (handle_cmd_vel:=false) whenever the bridge runs, that is with an endpoint and
     # sim not true.
     mavlink_enabled = bool(_mavlink_endpoint())
+    map_origin = _map_origin()
     driver_handles_cmd_vel = PythonExpression(
         ["'true' if '", LaunchConfiguration('sim'), "' == 'true' or not ", str(mavlink_enabled), " else 'false'"]
     )
@@ -529,22 +553,28 @@ def generate_launch_description():
             ],
         ),
 
-        # ── FusionCore UKF (no MAVLink endpoint) ─────────────────────────────
-        # The localiser when the MAVLink bridge is not running. It publishes
-        # /fusion/odom (read by the UI); the relay below republishes it on /fc/odom,
-        # the topic Nav2 reads (nav2_params.yaml), so Nav2 is path-independent.
+        # ── FusionCore UKF (no MAVLink bridge) ───────────────────────────────
+        # The localiser whenever the MAVLink bridge is not running: no endpoint, or
+        # sim forced with an endpoint (the bridge is real-only). It publishes
+        # /fusion/odom (read by the UI); the relay republishes it on /fc/odom, the
+        # topic Nav2 reads (nav2_params.yaml), so Nav2 is path-independent.
         # Check QoS against Nav2's odom subscription on the rover:
         #   ros2 topic info -v /fc/odom
-        *([
-            _fusioncore_node(devkit_bringup_pkg),
-            Node(
-                package='topic_tools',
-                executable='relay',
-                name='fusion_odom_to_fc_relay',
-                arguments=['/fusion/odom', '/fc/odom'],
-                output='screen',
+        GroupAction(
+            condition=IfCondition(
+                PythonExpression(["'", sim, "' == 'true' or not ", str(mavlink_enabled)])
             ),
-        ] if not mavlink_enabled else []),
+            actions=[
+                _fusioncore_node(devkit_bringup_pkg),
+                Node(
+                    package='topic_tools',
+                    executable='relay',
+                    name='fusion_odom_to_fc_relay',
+                    arguments=['/fusion/odom', '/fc/odom'],
+                    output='screen',
+                ),
+            ],
+        ),
 
         # ── ArduPilot EKF3 via MAVLink bridge (real hardware only) ───────────
         # Publishes fc/odom and owns the odom -> base_link TF, replacing FusionCore
@@ -561,19 +591,37 @@ def generate_launch_description():
             ],
         )] if mavlink_enabled else []),
 
-        # ── Static map -> odom TF (real hardware only) ───────────────────────
+        # ── map -> odom TF (real hardware only) ──────────────────────────────
         # In sim, fake_nav2_server owns the full map->odom->base_link TF chain.
-        # In real mode, the MAVLink bridge publishes odom->base_link; this node
-        # closes the chain with an identity map->odom.
-        # TODO: replace with GPS-anchored origin once tmap2 nodes are surveyed.
-        Node(
+        # In real mode, the MAVLink bridge (or FusionCore) publishes odom->base_link and
+        # this closes the chain.
+        # With MAP_ORIGIN_LAT/MAP_ORIGIN_LON set, map_odom_anchor publishes map->odom from
+        # the surveyed origin once fixes and odometry agree; until then there is no
+        # map->odom and Nav2 waits. Without them it is an identity transform, so map
+        # waypoints are offset from the robot by wherever the localiser started.
+        # Anchoring assumes the odom frame is east-north-up. That holds for the EKF3
+        # pose from the bridge (see mavlink.md); on the FusionCore path it is untested.
+        *([Node(
+            condition=real_condition,
+            package='devkit_driver',
+            executable='map_odom_anchor',
+            name='map_odom_anchor',
+            parameters=[{
+                'origin_lat': map_origin[0],
+                'origin_lon': map_origin[1],
+                'map_yaw_deg': map_origin[2],
+                'fix_topic': 'fc/ekf_fix' if mavlink_enabled else 'gnss/fix',
+                'odom_topic': 'fc/odom',
+            }],
+            output='screen',
+        )] if map_origin else [Node(
             condition=real_condition,
             package='tf2_ros',
             executable='static_transform_publisher',
             name='map_to_odom_static',
             arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
             output='screen',
-        ),
+        )]),
 
         # ── Static odom -> base_link TF (no real MCU) ────────────────────────
         # Needed whenever the MCU is virtual and nothing else localises: no

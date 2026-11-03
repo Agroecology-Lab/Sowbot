@@ -55,3 +55,15 @@ class TwistHandler:
         self._moving = False
         self.log.warn(f'cmd_vel older than {self._timeout_s}s: stopping wheels')
         run_on_rosys_loop(self._wheels.stop())
+
+
+def create_twist_handler(node: Node, wheels: Wheels) -> TwistHandler | None:
+    """Return a TwistHandler, or None when the handle_cmd_vel parameter (default true) is false.
+
+    The MAVLink bridge also subscribes to cmd_vel; the launch file turns this off when it runs.
+    """
+    node.declare_parameter('handle_cmd_vel', True)
+    if node.get_parameter('handle_cmd_vel').value:
+        return TwistHandler(node, wheels)
+    node.get_logger().info('cmd_vel is owned by the MAVLink bridge: wheels are not driven from this node')
+    return None

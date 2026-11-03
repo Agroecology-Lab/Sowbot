@@ -30,6 +30,7 @@ setup(
             'relposned_heading_shim = devkit_driver.relposned_heading_shim:main',
             'course_over_ground = devkit_driver.course_over_ground:main',
             'rtk_navsatfix_shim = devkit_driver.rtk_navsatfix_shim:main',
+            'map_odom_anchor = devkit_driver.map_odom_anchor:main',
         ],
     },
 )
