@@ -36,20 +36,6 @@ From `pkg/`:
 
 ## Simulate
 
-### Built-in grid
-
-There is no simulation CLI. Call `simulate()`:
-
-    import asyncio
-    from sowbot_avoid.sim import simulate
-
-    routes = {1: [4, 5, 6, 3, 11], 2: [2, 5, 8, 7, 12], 3: [6, 5, 4, 1, 10]}
-    print(asyncio.run(simulate(routes, loss=0.2, seed=2)))
-
-The grid is 3x3 at 2.5 m, nodes 1 to 9, docks 10 to 12. Robots 1 and 3 meet head-on, and all three cross at node 5.
-`scale` (default 0.1) multiplies every timer, so runs are ten times faster than real time.
-The result holds `done`, `sep` (smallest separation seen), `sep_live`, `sep_parked`, `frames`, `lost`, `retreats`, `secs` and `sent`.
-
 ### Maize map, 2 to 6 robots
 
 The maize map is farmer-generated and changes, so always pass it with `--map`. Without it the script searches upwards for `maps/maize_map` and silently falls back to the 9-node test fixture if it finds none. Check the `map` line the sweep prints first: path, node count and size.
@@ -57,7 +43,7 @@ The maize map is farmer-generated and changes, so always pass it with `--map`. W
 From `pkg/`:
 
     MAP=../../../maps/maize_map
-    N=4
+    N=3
     python sweeps/maize_sweep.py --map $MAP --scenario random --robots $N --loss 0 --seeds 5
 
 Use `--robots 2 3 4 5 6` for the whole range, `--loss 0.1` for frame loss, `--jsonl out.jsonl` for per-run data.
