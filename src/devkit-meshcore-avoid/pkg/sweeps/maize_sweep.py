@@ -37,6 +37,7 @@ from sowbot_avoid.sim import simulate         # noqa: E402
 from sowbot_avoid.topo import load_topo       # noqa: E402
 
 DOCK_OFFSET = 1.5
+EPS = 1e-6      # metres: floating-point noise when judging "closer than the clearance", not a safety margin
 
 
 class Infeasible(Exception):
@@ -185,8 +186,8 @@ def verdict(g, clr):
     """
     n = len(g)
     unfinished = sum(not r["done"] for r in g)
-    live_bad = sum(r["sep_live"] < clr - 1e-6 for r in g)
-    park_bad = sum(r["sep_parked"] < clr - 1e-6 for r in g)
+    live_bad = sum(r["sep_live"] < clr - EPS for r in g)
+    park_bad = sum(r["sep_parked"] < clr - EPS for r in g)
     closest = fmt(min(r["sep_live"] for r in g))
     if unfinished or live_bad:
         why = []
@@ -203,6 +204,7 @@ def verdict(g, clr):
 
 
 def summary(groups, clr):
+    """Print one PASS, WARN or FAIL line per case, then the totals and the legend."""
     print("\nSummary")
     counts = defaultdict(int)
     for k in sorted(groups):
@@ -216,6 +218,7 @@ def summary(groups, clr):
 
 
 def report(rows, clr):
+    """Print the verdict summary, then the detailed table, for all runs."""
     groups = defaultdict(list)
     for r in rows:
         groups[(r["scenario"], r["n"], r["loss"], r["park"], r["resends"])].append(r)
@@ -228,8 +231,8 @@ def report(rows, clr):
         live = [r["sep_live"] for r in g]
         park = [r["sep_parked"] for r in g]
         print(f"{k[0]:8s} {k[1]:2d} {k[2]:4.2f} {k[3]:5s} {k[4]:7s} | {len(g):4d} "
-              f"{100 * sum(r['done'] for r in g) / len(g):5.0f} {sum(x < clr - 1e-6 for x in live):8d} {fmt(min(live)):>8s} "
-              f"{sum(x < clr - 1e-6 for x in park):10d} {fmt(min(park)):>8s} | "
+              f"{100 * sum(r['done'] for r in g) / len(g):5.0f} {sum(x < clr - EPS for x in live):8d} {fmt(min(live)):>8s} "
+              f"{sum(x < clr - EPS for x in park):10d} {fmt(min(park)):>8s} | "
               f"{statistics.median(r['secs'] for r in g):5.0f} {statistics.median(r['frames'] for r in g):6.0f} "
               f"{statistics.fmean(r['retreats'] for r in g):4.1f}")
     print("\nlive<clr: runs where two running robots came closer than the clearance. "

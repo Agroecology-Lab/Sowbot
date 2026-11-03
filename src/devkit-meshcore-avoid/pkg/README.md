@@ -75,7 +75,7 @@ The sweep ends with a plain summary above the detailed table. Example: 3 robots 
 
 | Verdict | Meaning |
 |---|---|
-| PASS | Every robot finished, and no two moving robots came closer than the clearance (1 m) |
+| PASS | Every robot finished, and no two moving robots came closer than the clearance (1 m, less a 1 micrometre floating-point tolerance) |
 | WARN | As PASS, but a robot passed a finished robot closer than the clearance. The others cannot see a finished robot, so this is luck, not protection |
 | FAIL | A run did not finish, or two moving robots came closer than the clearance |
 
