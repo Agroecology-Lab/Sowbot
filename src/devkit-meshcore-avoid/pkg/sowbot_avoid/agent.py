@@ -114,6 +114,8 @@ class Agent:
             edge = (self.cur, self.route[self.idx + 1])
             while blockers := self.blocked_by(edge):
                 if self._stuck(blockers) and self._sidestep():
+                    await self._announce()                          # peers still hold our old claims
+                    await asyncio.sleep(ARBITRATE * self.k)
                     edge = (self.cur, self.route[self.idx + 1])
                     continue
                 await self._wait(0.1)
