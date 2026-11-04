@@ -163,10 +163,11 @@ At start-up: random 0 to 1 s delay, HELLO, listen 1.5 s, wait until our node is 
 
 **Loss.** No acknowledgements. ENTER is resent at about 0.7 s and 2 s, ARRIVED and FINISHED at about 1, 3 and 7 s, each jittered by 0.7 to 1.3. Resends keep their sequence number but carry a resend index, so every copy differs and passes MeshCore's duplicate filter. A newer frame drops older queued resends (not FINISHED). Before sending, a robot waits while it heard a frame in the last 0.1 s, backing off 0.12 to 0.48 s, for at most 2 s.
 
-**Deadlock retreat.** Only the lower id retreats, because a robot blocked by a lower id just waits. A robot blocked only by higher ids retreats if a blocker's first claim conflicts with its own node and it has waited 3 s, or after a random 10 to 20 s wait.
-It searches breadth-first over edges free of others' holds, never through a park node, for the nearest node that is not the next route node and is free of holds and claims. The route becomes: that node, back to the blocked node, then the rest of the route. While retreating it sends no claims.
-Each retreat hop waits 1.5 s. If a conflicting hold remains, it yields the hop. A higher-id rival that announced its own retreat in that window loses the tie.
-At most 10 retreats. With no free side-step node the robot keeps waiting.
+**Side-step.** Only the lower id gives way: a robot blocked only by higher ids for 3 s side-steps.
+It goes to the nearest row waypoint (`R<n>_W<k>`, by path length) that is clear of every hold and claim and whose row no other robot has announced. Any announced node of a row takes the whole row, so if row 1 is in use it moves up to row 2, and so on.
+It never stops on an `_IN` or `_OUT` node, a headland node or a dock. It drives through them on the way.
+The route becomes: the way to the stop, then the way on to the node it was heading for. At the stop it waits until that stretch, plus the next two edges, is announced clear, then resumes.
+At most 10 side-steps. With no free waypoint the robot keeps waiting.
 
 ## Limits
 

@@ -66,3 +66,11 @@ def test_partial_stored_ids_rejected(tmp_path):
     p.write_text(json.dumps(d))
     with pytest.raises(TopoError):
         load_topo(p)
+
+
+def test_side_step_stops_are_row_waypoints_only():
+    t = load_topo(FIXTURE)
+    stops = {t.names[n] for n in t.graph.rows}
+    assert stops and all("_W" in n for n in stops)
+    assert not any(n.endswith(("_IN", "_OUT")) for n in stops)
+    assert t.graph.row_key(t.ids["F2C_R2_W1"]) == t.graph.row_key(t.ids["F2C_R2_OUT"]) != t.graph.row_key(t.ids["F2C_R1_IN"])

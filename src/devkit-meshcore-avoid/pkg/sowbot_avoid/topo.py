@@ -99,8 +99,12 @@ def _build(nodes, edges, clearance):
     und = {tuple(sorted((a, b))) for a, b in directed}
     zero = [(a, b) for a, b in und if math.dist(nodes[a]["xy"], nodes[b]["xy"]) == 0.0]
     docks = sorted(ids[n] for n in nodes if is_dock(n))
+    # Side-step stops are row waypoints only: never an _IN or _OUT node, a headland node (no row
+    # number) or a dock. Robots pass through those on the way.
+    stops = {ids[n] for n, v in nodes.items() if not is_dock(n) and v["role"] == "waypoint" and v["row"] > 0}
+    row_of = {ids[n]: v["row"] for n, v in nodes.items() if not is_dock(n) and v["row"] > 0}
     g = Graph([(ids[a], ids[b]) for a, b in sorted(und)], {ids[n]: v["xy"] for n, v in nodes.items()}, clearance,
-              park=docks)
+              park=docks, rows=stops, row_of=row_of)
     for n in ids.values():
         g.adj.setdefault(n, set())              # isolated nodes stay in the graph
     names = {i: n for n, i in ids.items()}
