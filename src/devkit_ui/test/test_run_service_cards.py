@@ -5,6 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from devkit_ui.constants import FULLSCREEN_MAP_PATH
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.view_models import run_view_model
 from devkit_ui.view_models.global_view_model import GlobalViewModel
@@ -125,6 +126,23 @@ class TestNodeMapCard(unittest.TestCase):
             TopoNode(name='A', x=0.0, y=0.0, edges=['B'] if connected else []),
             TopoNode(name='B', x=end_x, y=4.0),
         ])
+
+    def test_card_links_to_the_fullscreen_map_in_a_new_tab(self):
+        """Verify the Run tab card offers a real link that opens the full-screen map in a new tab."""
+        button = fake_ui.find('button')
+
+        self.assertIn(f'href={FULLSCREEN_MAP_PATH}', button.properties)
+        self.assertIn('target=_blank', button.properties)
+
+    def test_fullscreen_card_fills_the_window_without_the_link(self):
+        """Verify the full-screen card has no button to itself and stretches both SVG layers."""
+        fake_ui.reset()
+        card = node_map_card.NodeMapCard(self.vm, self.pose, fullscreen=True)
+
+        self.assertEqual(card.styles, ['height:100vh'])
+        self.assertFalse([e for e in fake_ui.elements if e.kind == 'button'])
+        self.assertIn('[&_svg]:h-full', card._map_html.class_names)
+        self.assertEqual(card._map_html.class_names, card._robot_html.class_names)
 
     def test_first_tick_draws_both_layers_and_unchanged_ticks_do_no_work(self):
         """Verify initial rendering draws both layers and unchanged refreshes skip redraws."""

@@ -41,7 +41,7 @@ from devkit_ui.application_services.topology_application_service import (
 )
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
 from devkit_ui.application_services.track_application_service import TrackApplicationService
-from devkit_ui.constants import FIELD27_CENTER, NODE_NAME
+from devkit_ui.constants import FIELD27_CENTER, FULLSCREEN_MAP_PATH, NODE_NAME
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 from devkit_ui.domain_services.mission_domain_service import MissionDomainService
 from devkit_ui.domain_services.navigation_domain_service import NavigationDomainService
@@ -56,6 +56,7 @@ from devkit_ui.missions import MissionStore
 from devkit_ui.obstacles import ObstacleManager
 from devkit_ui.pages.plan.plan_page import PlanPage
 from devkit_ui.pages.run.nav_page import NavPage
+from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.sim.sim_page import SimPage
 from devkit_ui.pages.system.system_page import SystemPage
 from devkit_ui.process_registry import shutdown_tools
@@ -185,12 +186,18 @@ class NiceGuiNode:
             """
             self.content()
 
+        @ui.page(FULLSCREEN_MAP_PATH)
+        def fullscreen_map_page():
+            """
+            Builds the node map alone, filling the window, for the Run tab's open-in-new-tab button.
+            """
+            self.fullscreen_map()
+
     # ── UI shell ──────────────────────────────────────────────────────────────
 
     def content(self) -> None:
         """Build the Run, Plan, Sim, and System tabs, initially selecting Run."""
-        if _APP_CSS:
-            ui.add_head_html(f'<style>{_APP_CSS}</style>')
+        self._add_app_css()
         with ui.tabs().classes('w-full') as tabs:
             tab_run     = ui.tab('Run',     icon='route')
             tab_plan    = ui.tab('Plan',    icon='checklist')
@@ -216,6 +223,18 @@ class NiceGuiNode:
                     robot_brain_vm=self._robot_brain_vm,
                     system_vm=self._system_vm,
                 )
+
+    def fullscreen_map(self) -> None:
+        """Build a page holding only the live node map, with no page padding."""
+        self._add_app_css()
+        ui.query('.nicegui-content').classes('p-0')
+        NodeMapCard(self._topo_vm, self._run_vm.node_map, fullscreen=True)
+
+    @staticmethod
+    def _add_app_css() -> None:
+        """Apply the shared dashboard stylesheet to the current page."""
+        if _APP_CSS:
+            ui.add_head_html(f'<style>{_APP_CSS}</style>')
 
     # ── Plan tab ──────────────────────────────────────────────────────────────
 

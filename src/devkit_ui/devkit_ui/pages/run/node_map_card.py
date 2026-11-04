@@ -1,5 +1,6 @@
 from nicegui import ui
 
+from devkit_ui.constants import FULLSCREEN_MAP_PATH
 from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
@@ -7,7 +8,8 @@ from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 class NodeMapCard(ui.card):
     def __init__(self, topo_vm: TopologyViewModel,
-                 pose_state: RunViewModel.NodeMap):
+                 pose_state: RunViewModel.NodeMap,
+                 fullscreen: bool = False):
         """
         Initialize a card displaying the node map and robot marker overlay.
 
@@ -16,6 +18,8 @@ class NodeMapCard(ui.card):
                 selected node, and current node.
             pose_state (RunViewModel.NodeMap): State providing the latest
                 robot pose in map frame.
+            fullscreen (bool): Fill the browser window and omit the button
+                that opens this view, for the dedicated full-screen page.
         """
         super().__init__()
 
@@ -26,19 +30,32 @@ class NodeMapCard(ui.card):
         self._prev_map_key: tuple | None = None
         self._prev_robot_key: tuple | None = None
 
-        self.classes('flex-1')
+        self.classes('w-full' if fullscreen else 'flex-1')
+        if fullscreen:
+            self.style('height:100vh')
 
         with self:
-            ui.label('Node Map').classes('sec-label')
+            with ui.row().classes('w-full items-center justify-between no-wrap'):
+                ui.label('Node Map').classes('sec-label')
+                if not fullscreen:
+                    # NOTE: a real link target keeps the click a user gesture, so popup blockers allow the new tab.
+                    ui.button(icon='open_in_full').props(
+                        f'flat dense round href={FULLSCREEN_MAP_PATH} target=_blank '
+                        'title="Open full screen in a new tab"')
 
             # Node map + robot marker overlay (same viewBox, so they
             # align). Overlay is pointer-events:none so clicks reach
             # the nodes; it updates on movement without rebuilding
             # the clickable node DOM.
-            with ui.element('div').classes('relative w-full'):
-                self._map_html = ui.html().classes('w-full')
+            if fullscreen:
+                # Both layers fill the same box, so the SVGs letterbox identically and stay aligned.
+                box, layer = 'relative w-full flex-1', 'absolute inset-0 w-full h-full [&_svg]:w-full [&_svg]:h-full'
+            else:
+                box, layer = 'relative w-full', 'w-full'
+            with ui.element('div').classes(box):
+                self._map_html = ui.html().classes(layer)
                 self._robot_html = ui.html().classes(
-                    'absolute top-0 left-0 w-full'
+                    layer if fullscreen else 'absolute top-0 left-0 w-full'
                 ).style('pointer-events:none')
 
         inject_click_js()

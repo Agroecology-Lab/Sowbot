@@ -33,3 +33,5 @@ TOOL_EXPLORER = 'explorer'
 TOOL_GRAPHER = 'grapher'
 TOOL_RVIZ = 'rviz'
 TOOL_MEDKIT = 'medkit'
+
+FULLSCREEN_MAP_PATH = '/run/map'
