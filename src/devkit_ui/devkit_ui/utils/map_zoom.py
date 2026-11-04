@@ -1,3 +1,5 @@
+import json
+
 from nicegui import ui
 
 _MAX_ZOOM = 20
@@ -10,9 +12,9 @@ def enable_zoom(viewport_id: str, content_id: str) -> None:
     redrawn without losing alignment.
     """
     script = """
-        (() => {
-            const view = document.getElementById('{viewport_id}');
-            const content = document.getElementById('{content_id}');
+        ((viewportId, contentId, maxZoom) => {
+            const view = document.getElementById(viewportId);
+            const content = document.getElementById(contentId);
             if (!view || !content || view.__zoomEnabled) return;
             view.__zoomEnabled = true;
             view.style.touchAction = 'none';
@@ -23,14 +25,14 @@ def enable_zoom(viewport_id: str, content_id: str) -> None:
 
             const apply = () => {
                 const {width, height} = view.getBoundingClientRect();
-                k = Math.min(Math.max(k, 1), {max_zoom});
+                k = Math.min(Math.max(k, 1), maxZoom);
                 x = Math.min(Math.max(x, width * (1 - k)), 0);
                 y = Math.min(Math.max(y, height * (1 - k)), 0);
                 content.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
             };
 
             const zoomAt = (px, py, factor) => {
-                const next = Math.min(Math.max(k * factor, 1), {max_zoom});
+                const next = Math.min(Math.max(k * factor, 1), maxZoom);
                 x = px - (px - x) * next / k;
                 y = py - (py - y) * next / k;
                 k = next;
@@ -87,6 +89,7 @@ def enable_zoom(viewport_id: str, content_id: str) -> None:
                     pinch = dist;
                 }
             });
-        })();
-    """.format(viewport_id=viewport_id, content_id=content_id, max_zoom=_MAX_ZOOM)
-    ui.run_javascript(script)
+        })
+    """
+    # NOTE: the script is full of literal braces, so pass the values as JSON arguments instead of str.format.
+    ui.run_javascript(f'{script}({json.dumps(viewport_id)}, {json.dumps(content_id)}, {_MAX_ZOOM});')
