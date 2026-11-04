@@ -6,7 +6,7 @@ import math
 import random
 import time
 
-from .frame import ARRIVED, Frame
+from .frame import Frame
 
 # Seconds, all multiplied by the timescale (tests only).
 ARBITRATE = 1.5     # after announcing, wait for rival claims; also the age at which a claim counts as committed
@@ -71,8 +71,7 @@ class Agent:
         """
         now, out = time.monotonic(), set()
         for rid, f in self.book.items():
-            h = f.hold()
-            if h and self.g.conflict(edge, h):
+            if self.g.conflict(edge, f.hold()):
                 out.add(rid)
                 continue
             if rid < self.rid or now - self.seen[rid] >= ARBITRATE * self.k:
@@ -92,7 +91,7 @@ class Agent:
         nxt = [] if self.hold_idx == self.idx else self.route[self.idx + 1:self.idx + 1 + LOOKAHEAD]
         while True:
             self.seq = (self.seq + 1) & 255
-            frame = Frame(self.rid, self.seq, ARRIVED, 0, len(nxt), False, tuple([self.cur] + nxt))
+            frame = Frame(self.rid, self.seq, tuple([self.cur] + nxt))
             deadline = time.monotonic() + LBT_MAX * self.k
             while time.monotonic() - self.radio.last_rx < 0.1 * self.k and time.monotonic() < deadline:
                 await asyncio.sleep(self.rng.uniform(*BACKOFF) * self.k)
@@ -164,7 +163,7 @@ class Agent:
         hold blocks. On success the route becomes the way out, then the way on to the node we
         were heading for, and run() waits at the stop until that stretch is announced clear.
         """
-        holds = [h for f in self.book.values() if (h := f.hold())]
+        holds = [f.hold() for f in self.book.values()]
         claims = [c for f in self.book.values() for c in f.claims()]
         taken = {self.g.row_key(n) for f in self.book.values() for n in f.nodes}
         free_edge = lambda u, v: not any(self.g.conflict((u, v), h) for h in holds)

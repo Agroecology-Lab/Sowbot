@@ -15,7 +15,7 @@ of an anchor). Every robot stands at its own start node from t=0.
 Docks are the map's own nodes named dock, dock1, dock2, ... (any case). When the map has some,
 each route is extended to the nearest dock not taken by another route; routes left over end on
 the map's own nodes. When the map has none, no dock is made up and every route ends on a map node.
-A finished robot is ignored by its peers, so sep_parked shows what a finished robot costs.
+A finished robot keeps its last hold in every peer's book. sep_parked is the closest approach to one.
 """
 import argparse
 import asyncio
@@ -188,7 +188,7 @@ def verdict(g, clr):
 
     FAIL: a run did not finish, or two running robots came closer than the clearance.
     WARN: everything finished and running robots stayed clear, but a robot passed a
-    finished one closer than the clearance (peers cannot see a finished robot).
+    finished one closer than the clearance.
     Otherwise the status is PASS. clr is in meters; a separation counts as too
     close only when it is strictly below clr minus 1e-6 meters. An empty group
     raises ValueError.
@@ -251,7 +251,7 @@ def report(rows, clr):
               f"{statistics.median(r['secs'] for r in g):5.0f} {statistics.median(r['frames'] for r in g):6.0f} "
               f"{statistics.fmean(r['sidesteps'] for r in g):4.1f}")
     print("\nlive<clr: runs where two running robots came closer than the clearance. "
-          "parked<clr: runs where a robot passed a finished one that close (peers cannot see it). "
+          "parked<clr: runs where a robot passed a finished one that close "
           "secs: median unscaled seconds.")
 
 

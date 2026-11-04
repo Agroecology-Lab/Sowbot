@@ -11,7 +11,7 @@ One agent per robot, each with its own companion radio. No central controller.
 |---|---|
 | `sowbot_avoid/frame.py` | Frame codec (`docs/packet-format.md`) |
 | `sowbot_avoid/graph.py` | Map, conflict test, path search |
-| `sowbot_avoid/agent.py` | The protocol: notebook, claims, resends, beacons, retreats |
+| `sowbot_avoid/agent.py` | The protocol: notebook, claims, side-steps |
 | `sowbot_avoid/radio.py` | `MeshRadio` (real) and `LoopBus` (simulated channel) |
 | `sowbot_avoid/driver.py` | `Driver` interface for your motion stack |
 | `sowbot_avoid/sim.py` | `simulate()`, `SimDriver`, a 3x3 test grid |
@@ -74,7 +74,7 @@ The sweep ends with a plain summary above the detailed table. Example: 3 robots 
 | Verdict | Meaning |
 |---|---|
 | PASS | Every robot finished, and no two moving robots came closer than the clearance (1 m, less a 1 micrometre floating-point tolerance) |
-| WARN | As PASS, but a robot passed a finished robot closer than the clearance. The others cannot see a finished robot, so this is luck, not protection |
+| WARN | As PASS, but a robot passed a finished robot closer than the clearance. A finished robot still holds its last node, so this means it was not blocked there |
 | FAIL | A run did not finish, or two moving robots came closer than the clearance |
 
 Each line is one case: scenario, robot count and loss, across all its seeds. A case fails if any one seed fails.
@@ -111,7 +111,7 @@ One collision domain where every robot hears every other. Overlapping frames are
      "edges": [[4, 5], [5, 6], [6, 11]], "park": [11]}
 
 Edges work both ways. Every route node needs coordinates and every hop must be an edge.
-`park` lists docks and is optional. When it is present a route must end at one, and retreats never use them, because peers ignore a robot that has sent FINISHED. Without it there are no docks and a route may end on any node.
+`park` lists docks and is optional. When it is present a route must end at one, and side-steps never use them. A finished robot keeps its last hold in every peer's book, so ending on a route node blocks it for good; a dock stays out of the way. Without it there are no docks and a route may end on any node.
 
 | Option | Meaning |
 |---|---|
@@ -139,29 +139,13 @@ Every robot has the same map and a fixed route of nodes. Each one broadcasts wha
 
 **Conflict.** Two node pairs conflict when the distance between their segments is below `clearance`. A node is a zero-length segment. A node without coordinates always conflicts. Without any coordinates, pairs conflict only if they share a node.
 
-**Frames.** 3 bytes plus 2 per node, at most 11, so one AES block on air.
+**Frames.** One kind of frame: 2 bytes (robot id, sequence) plus 2 per node, at most 3 nodes, so 8 bytes and one AES block on air. The first node is the one the robot stands on (its hold). The next two are its claims: the edges it will drive next. A robot announces on arriving at each node, and once at start-up. It sends nothing else: no boot, resend, beacon or finish messages. `docs/packet-format.md` has the layout and timing.
 
-| Kind | Sent | Hold | Claims |
-|---|---|---|---|
-| HELLO | Boot | none | none |
-| ENTER | Before driving an edge | the edge | next 2 edges |
-| BEACON | Every 5 s while driving, if nothing else was sent | the edge | next 2 edges |
-| ARRIVED | On reaching a node | the node | next 2 edges |
-| FINISHED | Route done | none | none |
+**Priority.** Before driving edge `e`, a robot is blocked by a peer if the peer's hold conflicts with `e`, or if one of its claims conflicts with `e` and the peer has a lower id or its frame is older than 1.5 s (it has committed). Claims that include the node we stand on are ignored. Holds always win. Otherwise the lower id wins.
 
-Sequence numbers are 8-bit. A frame is accepted only if its sequence is 1 to 127 ahead of the stored one. A HELLO with a new sequence resets the entry, since the sender rebooted.
+**Driving an edge.** Check for blockers and wait while there are any. Drive. Keep the old node held for 2 s after arriving, then announce the new node. At start-up: random 0 to 1 s delay, announce, then wait 1.5 s for rival claims. The same 1.5 s wait follows every announcement.
 
-**Priority.** Before driving edge `e`, a robot is blocked by a peer if the peer's hold conflicts with `e`, or if the peer has a lower id and one of its claims conflicts with `e` (ignoring claims that include the node we stand on). Holds always win. Otherwise the lower id wins. A retreating robot gives way to every claim. FINISHED peers are ignored.
-
-**Driving an edge.**
-1. Queue ENTER and wait until the radio has sent it. If it failed, do not drive.
-2. Check for blockers again. If one appeared, send ARRIVED to withdraw the hold.
-3. Drive, with a BEACON if nothing was sent for 5 s.
-4. Keep the edge held for 2 s after arriving, then send ARRIVED.
-
-At start-up: random 0 to 1 s delay, HELLO, listen 1.5 s, wait until our node is unblocked, ARRIVED, then wait 1.5 s for rival first claims.
-
-**Loss.** No acknowledgements. ENTER is resent at about 0.7 s and 2 s, ARRIVED and FINISHED at about 1, 3 and 7 s, each jittered by 0.7 to 1.3. Resends keep their sequence number but carry a resend index, so every copy differs and passes MeshCore's duplicate filter. A newer frame drops older queued resends (not FINISHED). Before sending, a robot waits while it heard a frame in the last 0.1 s, backing off 0.12 to 0.48 s, for at most 2 s.
+**Loss.** No acknowledgements and no resends. A new sequence number on every frame makes each one differ, so it passes MeshCore's duplicate filter. A peer that missed a frame learns the robot's position from the next one, one node later. Before sending, a robot waits while it heard a frame in the last 0.1 s, backing off 0.12 to 0.48 s, for at most 2 s. A failed send is retried every 0.1 s.
 
 **Side-step.** Only the lower id gives way: a robot blocked only by higher ids for 3 s side-steps.
 It goes to the nearest row waypoint (`R<n>_W<k>`, by path length) that is clear of every hold and claim and whose row no other robot has announced. Any announced node of a row takes the whole row, so if row 1 is in use it moves up to row 2, and so on.
@@ -173,8 +157,8 @@ At most 10 side-steps. With no free waypoint the robot keeps waiting.
 
 - Not run on hardware. MeshCore timing, range and loss are assumed.
 - Notebook entries never expire. A peer that dies holding an edge blocks it indefinitely.
-- A finished robot is invisible to its peers, so others can pass close to a docked one or one that stopped on a map node.
-- Head-on meetings on tight maps can exhaust the retreat limit.
+- A finished robot never clears its last hold, so it blocks that node and everything within the clearance of it for the rest of the run. End routes on a dock, off the rows.
+- Head-on meetings on tight maps can exhaust the side-step limit.
 - Robots must share the same map and node id table. Unless every node has `avoid_id` set, ids come from sorted node names, so renaming or adding a node changes them. `topo.py` computes a digest of the table, but the agent does not exchange it.
 - A failed radio send stops the next edge but not the current one. Lost reception is not detected.
 - Robot size, speed and stopping distance are folded into one `clearance`.

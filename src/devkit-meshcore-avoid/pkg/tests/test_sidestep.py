@@ -1,7 +1,7 @@
 """Side-step: nearest free row waypoint, never an _IN or _OUT node, never a row another robot announced."""
 from unittest.mock import AsyncMock
 
-from sowbot_avoid import ARRIVED, Agent, Frame, Graph
+from sowbot_avoid import Agent, Frame, Graph
 from sowbot_avoid.radio import Radio
 
 
@@ -30,7 +30,7 @@ def agent(route=(5, 6, 7)):
 
 
 def hear(a, rid, node):
-    a.book[rid] = Frame(rid, 0, ARRIVED, nodes=(node,))
+    a.book[rid] = Frame(rid, 0, (node,))
     a.seen[rid] = 0
 
 

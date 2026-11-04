@@ -13,7 +13,7 @@ from .radio import LoopBus
 class World:
     def __init__(self):
         self.pos, self.min_sep, self.pair = {}, float("inf"), None
-        # Finished robots are invisible to their peers, so their separation is tracked apart:
+        # A finished robot keeps its last hold, so its separation is tracked apart:
         # min_live is between two robots still running, min_parked involves a finished one.
         self.finished, self.min_live, self.min_parked = set(), float("inf"), float("inf")
 
@@ -93,7 +93,7 @@ async def simulate(routes, loss, seed, scale=0.1, timeout=300, graph=None, delay
         d = SimDriver(world, rid, g, scale=scale)
         d.place(route[0])
         agents.append(Agent(rid, route, g, bus.radio(), d, scale, random.Random(seed * 100 + rid)))
-        # the agent logs "finished" once its route is done; from then on its peers ignore it
+        # the agent logs "finished" once its route is done; from then on it counts as parked
         agents[-1].log = (lambda r: lambda *a: world.finished.add(r) if a and a[0] == "finished" else None)(rid)
 
     async def launch(a):

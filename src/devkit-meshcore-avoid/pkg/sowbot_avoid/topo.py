@@ -7,7 +7,7 @@ added or renamed; `ids_stored` is False in that case and `digest` lets two robot
 they hold the same table.
 
 A node the farmer has renamed `dock`, `dock1`, `dock2`, ... (any case) is a dock: it goes into
-`Graph.park`, so retreats never stop on it, and it is left out of the rows. A map with no such
+`Graph.park`, so side-steps never stop on it, and it is left out of the rows. A map with no such
 node has no docks and nothing in the package assumes one.
 
 PyYAML is needed for the YAML map only; the JSON fixture format needs nothing.
