@@ -11,6 +11,13 @@ Schema (version 1): GeoJSON FeatureCollection, [lon, lat] coordinates.
   features:   properties.role == 'row', LineString, properties.row (int),
               properties.frag (int). Feature order is mission order.
               'field' / 'obstacle' features are informational and ignored.
+
+Multi-field files (properties.multi_field true, exported by LiteFarm's "All fields"
+download) hold the rows of several fields. properties.fields lists them, each with its
+own origin and settings; the first one supplies origin and params. Every row feature
+carries properties.field. Rows are merged in file order with unique row numbers (each
+field's numbers are offset past the previous field's), and no headland edge joins the
+last swath of one field to the first of the next.
 """
 import json
 import math
@@ -57,6 +64,26 @@ def _dist_m(a, b):
     return math.hypot(dx, dy)
 
 
+def _merge_fields(rows, field_of):
+    """Give rows of several fields unique numbers and find the swaths that end a field.
+
+    Each field's row numbers are offset past the largest number used so far. A field's rows must be
+    together in the file, since file order is mission order. Returns (unique rows, break indices).
+    """
+    merged, breaks, seen = [], set(), set()
+    offset = top = 0
+    for i, (row, field) in enumerate(zip(rows, field_of)):
+        if i and field != field_of[i - 1]:
+            if field in seen:
+                raise PlanError(f'rows of field {field} are not together')
+            offset = top + 1
+            breaks.add(i - 1)
+        seen.add(field)
+        merged.append(offset + row)
+        top = max(top, offset + row)
+    return merged, breaks
+
+
 def parse_plan(text, robot_ll=None, max_distance_m=DEFAULT_MAX_DISTANCE_M) -> Plan:
     """Parse and validate plan text. Raises PlanError with a user-readable reason."""
     if len(text) > MAX_BYTES:
@@ -72,12 +99,19 @@ def parse_plan(text, robot_ll=None, max_distance_m=DEFAULT_MAX_DISTANCE_M) -> Pl
         raise PlanError('missing top-level properties')
     if props.get('version') != SCHEMA_VERSION:
         raise PlanError(f"unsupported plan version {props.get('version')!r}")
-    origin = props.get('origin')
+    multi = props.get('multi_field') is True
+    meta = props
+    if multi:
+        fields = props.get('fields')
+        if not (isinstance(fields, list) and fields and isinstance(fields[0], dict)):
+            raise PlanError('multi-field plan lists no fields')
+        meta = fields[0]
+    origin = meta.get('origin')
     if not (isinstance(origin, list) and len(origin) == 2):
         raise PlanError('origin must be [lat, lon]')
     origin_ll = _latlon(origin[0], origin[1], 'origin')
 
-    swaths, rows = [], []
+    swaths, rows, field_of = [], [], []
     for i, f in enumerate(doc.get('features') or []):
         fp = (f or {}).get('properties') or {}
         if fp.get('role') != 'row':
@@ -92,16 +126,24 @@ def parse_plan(text, robot_ll=None, max_distance_m=DEFAULT_MAX_DISTANCE_M) -> Pl
         if isinstance(row, bool) or not isinstance(row, int) or row < 0:
             raise PlanError(f'feature {i}: row must be a non-negative integer')
         # GeoJSON is [lon, lat]; the planner and topo code use (lat, lon).
+        field = fp.get('field')
+        if multi and (isinstance(field, bool) or not isinstance(field, int) or field < 1):
+            raise PlanError(f'feature {i}: field must be a positive integer')
         swaths.append([_latlon(c[1], c[0], f'feature {i}') for c in coords])
         rows.append(row)
+        field_of.append(field if multi else None)
         if len(swaths) > MAX_ROWS:
             raise PlanError(f'more than {MAX_ROWS} rows')
     if not swaths:
         raise PlanError('no rows in plan')
 
+    field_breaks = set()
+    if multi:
+        rows, field_breaks = _merge_fields(rows, field_of)
+
     # Fragments of one row (split by an obstacle) must not be joined by a
     # headland edge: that edge would cross the obstacle.
-    break_after = {i for i in range(len(rows) - 1) if rows[i] == rows[i + 1]}
+    break_after = {i for i in range(len(rows) - 1) if rows[i] == rows[i + 1]} | field_breaks
 
     if robot_ll is not None:
         pts = [p for s in swaths for p in (s[0], s[-1])]
@@ -111,8 +153,8 @@ def parse_plan(text, robot_ll=None, max_distance_m=DEFAULT_MAX_DISTANCE_M) -> Pl
             raise PlanError(f'plan is {d / 1000:.1f} km from the robot '
                             f'(limit {max_distance_m / 1000:.1f} km); refusing to import')
 
-    if 'contour' in props and not isinstance(props['contour'], bool):
+    if 'contour' in meta and not isinstance(meta['contour'], bool):
         raise PlanError('contour must be a boolean')
     keys = ('tool_width', 'angle', 'headland', 'snake', 'contour', 'generator')
-    params = {k: props.get(k) for k in keys}
+    params = {k: meta.get(k) for k in keys}
     return Plan(swaths, origin_ll, break_after, params)
