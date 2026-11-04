@@ -72,7 +72,7 @@ def _merge_fields(rows, field_of):
     """
     merged, breaks, seen = [], set(), set()
     offset = top = 0
-    for i, (row, field) in enumerate(zip(rows, field_of)):
+    for i, (row, field) in enumerate(zip(rows, field_of, strict=True)):
         if i and field != field_of[i - 1]:
             if field in seen:
                 raise PlanError(f'rows of field {field} are not together')
