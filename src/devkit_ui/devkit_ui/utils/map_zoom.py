@@ -6,12 +6,8 @@ _MAX_ZOOM = 20
 def enable_zoom(viewport_id: str, content_id: str) -> None:
     """Make an element pannable and zoomable by wheel, drag and pinch.
 
-    The transform goes on the content element, which is never re-rendered, so the
-    map and robot layers inside it can be redrawn freely and stay aligned.
-
-    Parameters:
-        viewport_id: Id of the clipping element that receives pointer events.
-        content_id: Id of the child element that is scaled and translated.
+    The transform sits on the content element so map and robot layers can be
+    redrawn without losing alignment.
     """
     script = """
         (() => {{
