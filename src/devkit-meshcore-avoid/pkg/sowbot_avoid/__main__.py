@@ -39,8 +39,9 @@ def check_mission(a, graph, route):
     """Raise MissionError unless the id, clearance, channel and route can be flown safely.
 
     A route must follow map edges (the Agent checks that), have coordinates for every
-    node when the map has any, and end at a park node: other robots ignore a robot
-    that has finished, so it must not stay on a traversable node.
+    node when the map has any. When the map lists park nodes (docks), the route must end
+    at one: other robots ignore a robot that has finished, so it must not stay on a
+    traversable node. A map with no park nodes puts no condition on the last node.
     """
     if not 1 <= a.id <= 255:
         raise MissionError(f"--id must be 1-255, got {a.id}")
@@ -52,16 +53,17 @@ def check_mission(a, graph, route):
         missing = sorted({n for n in route if n not in graph.xy})
         if missing:
             raise MissionError(f"route nodes without coordinates in the map: {missing}")
-    if route[-1] not in graph.park:
+    if graph.park and route[-1] not in graph.park:
         raise MissionError(f"route must end at a park node of the map {sorted(graph.park)}, not {route[-1]}")
 
 
 async def run(a):
     """Run the configured route with a dynamically loaded driver and MeshCore radio.
 
-    Everything that can be checked offline (options, map, route, driver, key) is
-    checked before the radio is opened; MissionError is raised for bad input.
-    The radio is stopped after the agent exits, including on agent failure.
+    Route, mission and key validation happens before the radio is opened and
+    raises MissionError for invalid values. Map file, JSON and driver loading
+    errors propagate, as do radio and driver errors. The radio is stopped after
+    the agent exits, including on agent failure, if it started successfully.
     """
     try:
         route = [int(x) for x in a.route.split(",")]
@@ -76,7 +78,7 @@ async def run(a):
     t0 = time.monotonic()
     log = lambda *x: print(f"{time.monotonic() - t0:7.1f}s robot {a.id}:", *x, flush=True)
     try:
-        agent = Agent(a.id, route, graph, radio, driver, log=log, supersede=not a.keep_resends)
+        agent = Agent(a.id, route, graph, radio, driver, log=log)
     except ValueError as e:
         raise MissionError(str(e)) from e
     await radio.start()
@@ -92,7 +94,7 @@ def main():
     ap.add_argument("--serial", required=True)
     ap.add_argument("--id", type=int, required=True, help="robot id, 1-255")
     ap.add_argument("--map", required=True)
-    ap.add_argument("--route", required=True, help="comma-separated node ids, ending at a park node")
+    ap.add_argument("--route", required=True, help="comma-separated node ids, ending at a park node if the map has any")
     ap.add_argument("--driver", required=True, help="module:Class implementing Driver")
     ap.add_argument("--clearance", type=float, default=1.0)
     ap.add_argument("--channel-idx", type=int, default=1)
@@ -102,8 +104,6 @@ def main():
                          "omit if the channel is already set up (kept off the command line so it "
                          "stays out of the process list and shell history)")
     ap.add_argument("--flood", action="store_true", help="flood through repeaters instead of zero-hop")
-    ap.add_argument("--keep-resends", action="store_true",
-                    help="keep older resends queued when a newer frame is sent (as in the issue text)")
     a = ap.parse_args()
     try:
         asyncio.run(run(a))

@@ -1,17 +1,7 @@
-# Legacy packet format (MeshCore GRP_DATA)
+# Packet format (MeshCore GRP_DATA)
 
-Proposal.
-Not run on hardware or in the sim.
-Source: meshcore-dev/meshcore @ 81dbae5.
-
-
-
-cd ~/feldfreund_devkit_ros/src/devkit-meshcore-avoid/pkg
-pipx install pytest pyyaml
-python3 -m venv .venv
-.venv/bin/pip install -e ".[test]"
-.venv/bin/python -m pytest -q tests/test_topo.py tests/test_sweep_setup.py
-.venv/bin/python sweeps/maize_sweep.py --seeds 5
+Not run on hardware. Source for the MeshCore limits: meshcore-dev/meshcore @ 81dbae5.
+The codec is `sowbot_avoid/frame.py`; what the agent sends is `sowbot_avoid/agent.py`.
 
 ## MeshCore constraints
 
@@ -23,7 +13,7 @@ python3 -m venv .venv
 | Max app payload | 165 B (`MeshCore.h`), 167 B (`companion_protocol.md`) |
 | Cipher | AES-128 ECB, zero padded to 16 B blocks |
 | Dedupe | ring of 160 hashes over type + encrypted payload; seen packets not delivered |
-| Rule | every resend must differ in plaintext |
+| Rule | two frames with the same plaintext are dropped as duplicates, so every frame must differ |
 
 On-air size, zero-hop: 1 header + 1 path len + 1 channel hash + 2 MAC + padded blocks.
 
@@ -32,45 +22,75 @@ On-air size, zero-hop: 1 header + 1 path len + 1 channel hash + 2 MAC + padded b
 | 0-13 B | 1 | 21 B |
 | 14-29 B | 2 | 37 B |
 
-## Frame (3 B header + 2 B per node, 11 B max)
+## Frame
+
+There is one kind of frame. It says where the sender stands and where it will drive next.
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 1 | robot id |
-| 1 | 1 | seq. +1 on every new frame (beacons included); resends keep it; compared mod 256 |
-| 2 | 1 | flags |
-| 3 | 2 each, 1-4 | node path, u16 LE |
+| 0 | 1 | robot id, 1-255 (0 is rejected) |
+| 1 | 1 | seq. +1 on every frame, wraps at 256 |
+| 2 | 2 each, 1-3 | node path, u16 LE |
 
-## Flags
+- Node 0 of the path is the node the sender stands on: its hold.
+- Nodes 1 and 2, if present, are its next two route nodes: its claims, the edges P0→P1 and P1→P2.
+- Node ids are 0-65535. Every robot must use the same node id table (`avoid_id` in the map, or ids assigned by sorted name; see `topo.py`).
+- The decoder rejects robot id 0 and any payload that is not 1 to 3 whole nodes.
 
-| Bits | Field | Values |
+| Frame | Bytes | On air |
 |---|---|---|
-| 0-2 | kind | 0 HELLO, 1 ENTER, 2 BEACON, 3 ARRIVED, 4 FINISHED |
-| 3-4 | resend index | 0 original; ENTER: 1 (~0.7 s), 2 (~2 s); ARRIVED: 1 (+1 s), 2 (+3 s), 3 (+7 s) |
-| 5-6 | claim count | 0-2 |
-| 7 | retreating | gives way to all, no claims |
+| 2 claims, 3 nodes | 2 + 6 = 8 | 21 B |
+| 1 claim, 2 nodes | 2 + 4 = 6 | 21 B |
+| no claims, 1 node | 2 + 2 = 4 | 21 B |
 
-## Node path by kind
+A new seq on every frame makes each plaintext differ, so MeshCore's duplicate filter passes it.
+There are no resends, and no hello, enter, beacon or finish frames.
 
-| Kind | Hold | Claims | Nodes |
-|---|---|---|---|
-| ENTER, BEACON | edge P0→P1 | P1→P2, P2→P3 | 2 + claim count |
-| ARRIVED | node P0 | P0→P1, P1→P2 | 1 + claim count |
-| HELLO, FINISHED | none | none | 0 |
+## When the agent sends
 
-## Examples
+One frame on arriving at each node, with the node and the next two route nodes (fewer near the end of the route: none on the last node). One frame at start-up.
 
-| Frame | Bytes |
+At a side-step stop the robot waits, so it sends its node alone. It sends claims again, with a fresh frame, once the route onward is clear. Claims from a waiting robot would block the peers it is waiting for.
+
+| Step | Seconds |
 |---|---|
-| ENTER, 2 claims, 4 nodes | 3 + 8 = 11 |
-| ARRIVED, 2 claims, 3 nodes | 3 + 6 = 9 |
-| FINISHED | 3 |
+| Boot jitter before the first frame | 0 to 1 |
+| After announcing, wait for rival claims (`ARBITRATE`) | 1.5 |
+| Hold the old node while the tail clears (`TAIL`) | 2.0 after arriving |
+| Listen before talk | wait while a frame was heard in the last 0.1, back off 0.12 to 0.48, at most 2 |
+| Radio send failed | retry after 0.1 |
+
+Each node costs 3.5 s plus the drive time, so the frame rate is about 0.15 per second at 3 m spacing and 0.24 per second at 0.5 m, whatever the speed.
+
+## What the agent does with received frames
+
+- Keeps the latest frame per robot id. A frame with the same seq as the stored one is ignored. Frames from itself are ignored.
+- Entries never expire. A robot that stopped keeps its last hold and claims in every peer's book, including a robot that finished its route.
+
+### Blocking
+
+An edge is blocked by robot R when:
+
+- R's hold conflicts with the edge. Always.
+- Or a claim of R conflicts with the edge, and R has a lower id, or R's frame is older than 1.5 s (R has committed). Claims that include the node we stand on are ignored.
+
+Conflict: with coordinates, the two segments are closer than the clearance (strict). Without coordinates, they share a node. A node missing a coordinate counts as a conflict.
+
+### Side-step
+
+A robot blocked for 3 s only by higher ids, and not yet side-stepped 10 times, side-steps. Higher ids never do.
+
+- Stop: the nearest row waypoint (by path length over edges no hold blocks) that is clear of every hold and claim, and whose row no other robot has announced. Any announced node of a row takes the whole row.
+- Never an `_IN`, `_OUT`, headland or dock node. The robot drives through those.
+- Route becomes: the way to the stop, then the way on to the node it was heading for.
+- At the stop: announce the node alone. Wait until the stretch back to that node, plus the next two edges, has no lower-id robot holding or claiming it. Then announce with claims and resume.
 
 ## Differences from sim (`claimsim2.py`)
 
 | Item | Sim | This format |
 |---|---|---|
 | Payload size | 20 B on air | 21 B on air (one block) |
-| `epoch`, `heard`, `whois`, `ackreq` | present | omitted (new protocol only) |
-| Map version | none | none; 2 B spare in one block |
-| Duplicate drop on resend | not modelled | handled by resend index and seq |
+| `epoch`, `heard`, `whois`, `ackreq` | present | omitted |
+| Map version | none | none |
+| Duplicate drop | not modelled | new seq on every frame |
+| Frames sent | ENTER, ARRIVED, FINISHED, resends | one frame per node, no resends |

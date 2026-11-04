@@ -47,8 +47,8 @@ def test_simulate_timeout_returns_partial_results_and_cancels_unfinished_agent(m
     agents = []
 
     class FakeAgent:
-        def __init__(self, rid, route, graph, radio, driver, scale, rng, supersede):
-            self.rid, self.done, self.retreats, self.sent = rid, False, rid, rid + 1
+        def __init__(self, rid, route, graph, radio, driver, scale, rng):
+            self.rid, self.done, self.sidesteps = rid, False, rid
             self.cancelled = False
             agents.append(self)
 
@@ -65,6 +65,6 @@ def test_simulate_timeout_returns_partial_results_and_cancels_unfinished_agent(m
     result = asyncio.run(sim_module.simulate({1: [1], 2: [2]}, loss=0, seed=0, scale=0.01, timeout=2))
     assert result['done'] is False
     assert result['sep'] == 2.5
-    assert result['retreats'] == 3 and result['sent'] == {1: 2, 2: 3}
+    assert result['sidesteps'] == 3
     assert result['frames'] == result['lost'] == 0
     assert agents[0].done and agents[1].cancelled

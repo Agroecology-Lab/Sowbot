@@ -34,7 +34,7 @@ from devkit_ui.dem import (
 # the terrain more tightly, lower "DEM grid resolution" in the Mission sidebar
 # (which also tightens the tolerance) rather than shortening this interval: a
 # denser chain along the same chord adds no information.
-CONTOUR_WAYPOINT_INTERVAL_M = 2.5
+CONTOUR_WAYPOINT_INTERVAL_M = 3.0
 
 
 def resample_row_xy(points_ll: list, anchor_lat: float, anchor_lon: float,

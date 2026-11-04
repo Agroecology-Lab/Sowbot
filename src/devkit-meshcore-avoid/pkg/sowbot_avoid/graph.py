@@ -23,18 +23,39 @@ def seg_dist(a, b, c, d):
 
 
 class Graph:
-    def __init__(self, edges, xy=None, clearance=1.0, park=()):
+    def __init__(self, edges, xy=None, clearance=1.0, park=(), rows=None, row_of=None):
         """Build an undirected graph with optional node coordinates and parking nodes.
 
         Clearance uses the same units as xy and is the exclusive conflict
-        distance threshold. Park nodes are excluded as retreat waypoints.
+        distance threshold. The agent excludes park nodes as side-step stops.
+        Rows identifies possible stopping nodes for side-stepping. If omitted,
+        it defaults to nodes in edges excluding park nodes. An explicit rows
+        set may include park nodes, which the agent still excludes.
+        row_of maps a node to its row number (1 and up). The agent treats a row as taken when
+        another robot has announced any node of it. A node with no row number counts as a row
+        of its own.
         """
         self.xy = {int(k): tuple(v) for k, v in (xy or {}).items()}
         self.clearance, self.park = clearance, set(park)   # park: docks/chargers, never used as side-step points
+        self._rows = None if rows is None else set(rows)
+        self.row_of = {n: r for n, r in (row_of or {}).items() if r}
         self.adj = {}
         for a, b in edges:
             self.adj.setdefault(a, set()).add(b)
             self.adj.setdefault(b, set()).add(a)
+
+    @property
+    def rows(self):
+        """Return the stopping-node candidates used by the agent.
+
+        Explicit rows are returned as the stored mutable set; the default is a
+        new set of nodes in edges excluding park nodes on each access.
+        """
+        return set(self.adj) - self.park if self._rows is None else self._rows
+
+    def row_key(self, n):
+        """Key that is equal for nodes of the same row, and unique to the node when it has no row."""
+        return ("row", self.row_of[n]) if n in self.row_of else ("node", n)
 
     @classmethod
     def load(cls, path, clearance=1.0):

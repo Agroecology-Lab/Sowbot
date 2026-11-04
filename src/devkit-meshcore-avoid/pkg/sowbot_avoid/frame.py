@@ -1,61 +1,37 @@
-"""Frame codec for the legacy scheme. See docs/packet-format.md. No dependencies."""
+"""Frame codec. See docs/packet-format.md. No dependencies."""
 from dataclasses import dataclass
 
 DATA_TYPE = 0xFFFF
-HELLO, ENTER, BEACON, ARRIVED, FINISHED = range(5)
-KIND_NAMES = ["HELLO", "ENTER", "BEACON", "ARRIVED", "FINISHED"]
-NODES_FOR_KIND = {HELLO: 0, ENTER: 2, BEACON: 2, ARRIVED: 1, FINISHED: 0}
+MAX_NODES = 3       # the node we stand on, then two intended nodes
 
 
 @dataclass(frozen=True)
 class Frame:
+    """One announcement: the sender stands on nodes[0] and intends to drive through nodes[1:]."""
     rid: int
     seq: int
-    kind: int
-    resend: int = 0
-    nclaims: int = 0
-    retreat: bool = False
     nodes: tuple = ()
 
     def encode(self):
-        """Encode this frame as header bytes followed by little-endian 16-bit nodes.
+        """Encode as robot id, sequence, then little-endian 16-bit nodes.
 
-        The sequence is reduced modulo 256. A robot ID or packed flags outside
-        the byte range raises ValueError; out-of-range nodes raise OverflowError.
+        The sequence is reduced modulo 256. A robot ID outside the byte range raises
+        ValueError; out-of-range nodes raise OverflowError.
         """
-        flags = self.kind | (self.resend << 3) | (self.nclaims << 5) | (int(self.retreat) << 7)
-        return bytes([self.rid, self.seq & 255, flags]) + b"".join(n.to_bytes(2, "little") for n in self.nodes)
+        return bytes([self.rid, self.seq & 255]) + b"".join(n.to_bytes(2, "little") for n in self.nodes)
 
     @staticmethod
     def decode(b):
-        """Decode a frame, returning None for an invalid header or payload length.
-
-        Robot ID zero, unknown kinds, more than two claims, and claims on
-        HELLO or FINISHED frames are rejected.
-        """
-        if len(b) < 3 or b[0] == 0:
+        """Decode a frame, returning None for robot ID zero or a length that is not 1 to 3 nodes."""
+        if len(b) < 4 or len(b) % 2 or len(b) > 2 + 2 * MAX_NODES or b[0] == 0:
             return None
-        kind, resend, nclaims, retreat = b[2] & 7, (b[2] >> 3) & 3, (b[2] >> 5) & 3, bool(b[2] >> 7)
-        if kind > FINISHED or nclaims > 2 or (kind in (HELLO, FINISHED) and nclaims):
-            return None
-        need = NODES_FOR_KIND[kind] + nclaims
-        if len(b) != 3 + 2 * need:
-            return None
-        nodes = tuple(int.from_bytes(b[3 + 2 * i:5 + 2 * i], "little") for i in range(need))
-        return Frame(b[0], b[1], kind, resend, nclaims, retreat, nodes)
+        nodes = tuple(int.from_bytes(b[i:i + 2], "little") for i in range(2, len(b), 2))
+        return Frame(b[0], b[1], nodes)
 
     def hold(self):
-        """Node or edge the sender occupies, as an (a, b) pair; (n, n) for a node. None if no hold."""
-        if self.kind in (ENTER, BEACON):
-            return (self.nodes[0], self.nodes[1])
-        if self.kind == ARRIVED:
-            return (self.nodes[0], self.nodes[0])
-        return None
+        """The node the sender stands on, as an (n, n) pair."""
+        return (self.nodes[0], self.nodes[0])
 
     def claims(self):
-        """The sender's next edges (chained after the hold)."""
-        if self.kind not in (ENTER, BEACON, ARRIVED):
-            return ()
-        s = 1 if self.kind in (ENTER, BEACON) else 0
-        return tuple((self.nodes[s + i], self.nodes[s + i + 1]) for i in range(self.nclaims))
-
+        """The sender's next edges, chained after the node it stands on."""
+        return tuple(zip(self.nodes, self.nodes[1:]))

@@ -16,7 +16,7 @@ KEY = '00112233445566778899aabbccddeeff'
 def args(**changes):
     values = dict(map='map.json', clearance=2.0, driver='robot:Driver', serial='/dev/radio',
                   channel_idx=3, channel_name='channel', channel_secret_file=None, flood=True,
-                  id=7, route='1,2,3', keep_resends=True)
+                  id=7, route='1,2,3')
     values.update(changes)
     return SimpleNamespace(**values)
 
@@ -54,7 +54,7 @@ def test_run_configures_dependencies_and_always_stops_radio(wired, failure):
     positional, keyword = wired.agent_factory.call_args
     assert positional[0] == 7 and positional[1] == [1, 2, 3]
     assert positional[3:] == (wired.radio, wired.driver)
-    assert keyword['supersede'] is False and callable(keyword['log'])
+    assert set(keyword) == {'log'} and callable(keyword['log'])
     wired.radio.start.assert_awaited_once()
     wired.agent.run.assert_awaited_once()
     wired.radio.stop.assert_awaited_once()
@@ -104,6 +104,11 @@ def test_bad_input_is_rejected_before_the_radio_is_opened(wired, changes, messag
     wired.radio.stop.assert_not_awaited()
 
 
+def test_route_may_end_anywhere_when_the_map_has_no_park_nodes():
+    graph = Graph([(1, 2), (2, 3)], {1: (0, 0), 2: (3, 0), 3: (6, 0)}, 2.0)
+    cli.check_mission(args(), graph, [1, 2])
+
+
 def test_route_hops_are_checked_by_the_real_agent(monkeypatch, tmp_path):
     map_file = tmp_path / 'map.json'
     map_file.write_text(json.dumps({'nodes': {'1': [0, 0], '2': [3, 0], '3': [6, 0]},
@@ -129,7 +134,7 @@ def test_main_parses_defaults_and_route_arguments(monkeypatch):
     parsed = captured[0]
     assert (parsed.id, parsed.route, parsed.clearance) == (2, '1,2', 1.0)
     assert (parsed.channel_idx, parsed.channel_name, parsed.channel_secret_file) == (1, 'sowbot', None)
-    assert not parsed.flood and not parsed.keep_resends
+    assert not parsed.flood and not hasattr(parsed, 'keep_resends')
 
 
 def test_main_has_no_secret_on_the_command_line(monkeypatch, capsys):

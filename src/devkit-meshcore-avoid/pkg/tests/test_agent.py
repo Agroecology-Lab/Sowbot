@@ -1,10 +1,10 @@
 import asyncio
 import time
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from sowbot_avoid import ARRIVED, BEACON, ENTER, FINISHED, HELLO, Agent, Frame, Graph
+from sowbot_avoid import Agent, Frame, Graph
 from sowbot_avoid import agent as agent_module
 from sowbot_avoid.radio import Radio
 
@@ -15,382 +15,176 @@ class FixedRandom:
 
 
 class RecordingRadio(Radio):
-    def __init__(self, fail=False):
+    def __init__(self, fail=0):
         self.frames, self.fail = [], fail
 
     async def send(self, payload):
         if self.fail:
+            self.fail -= 1
             raise OSError('radio down')
         self.frames.append(Frame.decode(payload))
 
 
-def make_agent(route=(1, 2, 4), graph=None, radio=None, **kwargs):
+def make_agent(route=(1, 2, 4), graph=None, radio=None, rid=2, **kwargs):
     graph = graph or Graph([(1, 2), (1, 3), (2, 3), (2, 4)])
-    return Agent(2, route, graph, radio or Radio(), AsyncMock(), rng=FixedRandom(), **kwargs)
+    return Agent(rid, route, graph, radio or RecordingRadio(), AsyncMock(), rng=FixedRandom(), **kwargs)
 
 
-def test_receive_rejects_invalid_own_duplicate_and_old_frames():
+def hear(agent, rid, *nodes, seq=0, age=0.0):
+    agent.book[rid] = Frame(rid, seq, nodes)
+    agent.seen[rid] = time.monotonic() - age
+
+
+# ---- construction ------------------------------------------------------------------------------
+@pytest.mark.parametrize('kwargs, message', [
+    (dict(rid=0), 'robot id'), (dict(rid=256), 'robot id'),
+    (dict(route=()), 'empty'), (dict(route=(1, 65536)), 'outside 0-65535'),
+    (dict(route=(1, 4)), 'not map edges'),
+])
+def test_bad_configuration_is_rejected(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        make_agent(**kwargs)
+
+
+# ---- receive -----------------------------------------------------------------------------------
+def test_receive_keeps_the_latest_valid_frame_per_robot():
     agent = make_agent()
     agent.on_rx(b'bad')
-    agent.on_rx(Frame(2, 1, HELLO).encode())
+    agent.on_rx(Frame(2, 1, (1,)).encode())                    # our own id
     assert agent.book == {} and not agent.wake.is_set()
-    agent.on_rx(Frame(1, 255, HELLO).encode())
-    assert agent.book[1].seq == 255 and agent.wake.is_set()
+    agent.on_rx(Frame(1, 5, (3,)).encode())
+    assert agent.book[1].nodes == (3,) and agent.wake.is_set()
     agent.wake.clear()
-    for seq in (255, 254, 127):  # duplicate, backwards, half-range ambiguity
-        agent.on_rx(Frame(1, seq, FINISHED).encode())
-    assert agent.book[1].seq == 255 and not agent.wake.is_set()
-    agent.on_rx(Frame(1, 0, FINISHED).encode())
-    assert agent.book[1].kind == FINISHED and agent.book[1].seq == 0
-    assert agent.wake.is_set()
+    agent.on_rx(Frame(1, 5, (4,)).encode())                    # same seq: ignored
+    assert agent.book[1].nodes == (3,) and not agent.wake.is_set()
+    agent.on_rx(Frame(1, 6, (4,)).encode())
+    assert agent.book[1].nodes == (4,) and agent.wake.is_set()
 
 
-def test_holds_claim_priority_and_finished_frames():
+# ---- blocking ----------------------------------------------------------------------------------
+def test_a_hold_always_blocks():
     agent = make_agent()
-    agent.book = {
-        1: Frame(1, 0, ARRIVED, nclaims=1, nodes=(3, 2)),
-        3: Frame(3, 0, ARRIVED, nclaims=1, nodes=(4, 2)),
-        4: Frame(4, 0, ENTER, nodes=(2, 5)),
-        5: Frame(5, 0, FINISHED),
-    }
-    assert agent.blocked_by((1, 2)) == {1, 4}
-    agent.retreating = True
-    assert agent.blocked_by((1, 2)) == {1, 3, 4}
-    agent.book = {1: Frame(1, 0, ARRIVED, nclaims=1, nodes=(3, 1))}
-    assert agent.blocked_by((1, 2)) == set()  # claims containing our current node are ignored
-    assert agent.mutual(1)
-    assert not agent.mutual(99)
+    hear(agent, 5, 2)                                          # higher id, brand new, standing on node 2
+    assert agent.blocked_by((1, 2)) == {5}
+    assert agent.blocked_by((1, 3)) == set()
 
 
-def test_announce_wraps_sequence_schedules_repeats_and_supersedes(monkeypatch):
-    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 100)
-    agent = make_agent(scale=2)
-    agent.seq = 255
-    agent.announce(ENTER, (1, 2), repeats=(1, 3))
-    assert [(t, f.seq, f.resend) for t, f in agent.q] == [(100, 0, 0), (102, 0, 1), (106, 0, 2)]
-    agent.announce(FINISHED, (), repeats=(1,))
-    agent.announce(HELLO, ())
-    assert [(f.kind, f.seq, f.resend) for _, f in agent.q] == [
-        (FINISHED, 1, 0), (HELLO, 2, 0), (FINISHED, 1, 1),
-    ]
-    assert agent.tx_wake.is_set() and agent.last_tx == 100
+def test_lower_id_claims_win_and_higher_id_claims_wait_until_committed():
+    agent = make_agent()
+    hear(agent, 1, 9, 2)                                       # lower id claims 9->2
+    hear(agent, 3, 9, 3)                                       # higher id claims 9->3, just announced
+    assert agent.blocked_by((1, 2)) == {1}
+    assert agent.blocked_by((1, 3)) == set()
+    agent.seen[3] -= agent_module.ARBITRATE + 0.1              # now older than the arbitration window
+    assert agent.blocked_by((1, 3)) == {3}
 
 
-def test_announce_can_keep_old_repeats_and_retreat_has_no_claims(monkeypatch):
-    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 10)
-    agent = make_agent(supersede=False)
-    assert agent._claims_from(0) == [2, 4]
-    assert agent._claims_from(1) == [4]
-    agent.retreating = True
-    assert agent._claims_from(0) == []
-    agent.announce(ARRIVED, (1,), repeats=(1,))
-    agent.announce(HELLO, ())
-    assert len(agent.q) == 3
-    assert all(f.retreat for _, f in agent.q)
+def test_claims_that_include_our_own_node_are_ignored():
+    agent = make_agent()
+    hear(agent, 1, 3, 1)                                       # lower id claims 3->1, we stand on 1
+    assert agent.blocked_by((1, 2)) == set()
 
 
-def test_retreat_avoids_park_and_resumes_original_route():
-    graph = Graph([(1, 2), (1, 3), (3, 2), (2, 4), (1, 5)], park=(5,))
-    agent = make_agent(graph=graph)
-    assert agent._start_retreat()
-    assert agent.route == [1, 3]
-    assert agent.resume == [3, 2, 4]
-    assert agent.retreating and agent.retreats == 1 and agent.idx == 0
-
-
-def test_retreat_fails_when_all_side_paths_are_occupied_or_parked():
-    graph = Graph([(1, 2), (1, 3), (1, 5)], park=(5,))
+def test_conflict_uses_clearance_when_there_are_coordinates():
+    graph = Graph([(1, 2), (2, 3)], {1: (0, 0), 2: (3, 0), 3: (3, 0.5)}, clearance=1.0)
     agent = make_agent(route=(1, 2), graph=graph)
-    agent.book[1] = Frame(1, 0, ARRIVED, nodes=(3,))
-    assert not agent._start_retreat()
-    assert agent.route == [1, 2] and not agent.retreating
+    hear(agent, 5, 3)
+    assert agent.blocked_by((1, 2)) == {5}                     # node 3 is 0.5 m from the edge end
 
 
-def test_blocked_waits_until_threshold_then_starts_retreat(monkeypatch):
+# ---- send --------------------------------------------------------------------------------------
+def test_announce_sends_current_node_and_next_two():
+    agent = make_agent(route=(1, 2, 4, 2, 1))
+    agent.seq = 255
+    asyncio.run(agent._announce())
+    frame = agent.radio.frames[0]
+    assert frame == Frame(2, 0, (1, 2, 4))                      # seq wrapped
+    agent.idx, agent.cur = 3, 2
+    asyncio.run(agent._announce())
+    assert agent.radio.frames[1] == Frame(2, 1, (2, 1))
+    agent.idx, agent.cur = 4, 1
+    asyncio.run(agent._announce())
+    assert agent.radio.frames[2] == Frame(2, 2, (1,))           # last node: hold only
+
+
+def test_announce_retries_until_the_radio_takes_it():
+    radio = RecordingRadio(fail=2)
+    agent = make_agent(radio=radio, scale=0.01)
+    logged = []
+    agent.log = lambda *a: logged.append(a)
+    asyncio.run(agent._announce())
+    assert len(radio.frames) == 1 and len(logged) == 2
+
+
+def test_announce_waits_while_the_channel_is_busy(monkeypatch):
+    radio = RecordingRadio()
+    agent = make_agent(radio=radio, scale=0.01)
+    radio.last_rx = time.monotonic()
+    slept = []
+
+    async def fake_sleep(t):
+        slept.append(t)
+        radio.last_rx = 0.0
+
+    monkeypatch.setattr(agent_module.asyncio, 'sleep', fake_sleep)
+    asyncio.run(agent._announce())
+    assert len(slept) == 1 and len(radio.frames) == 1
+
+
+# ---- mission -----------------------------------------------------------------------------------
+def test_run_drives_every_edge_and_sends_one_frame_per_node():
+    radio = RecordingRadio()
+    agent = make_agent(route=(1, 2, 4), radio=radio, scale=0.001)
+    asyncio.run(agent.run())
+    assert agent.done and agent.cur == 4
+    assert [c.args for c in agent.driver.drive.call_args_list] == [(1, 2), (2, 4)]
+    assert [f.nodes for f in radio.frames] == [(1, 2, 4), (2, 4), (4,)]
+
+
+def test_run_waits_for_a_hold_to_clear():
+    async def scenario():
+        agent = make_agent(route=(1, 2), scale=0.01, rid=7)    # higher id: waits, never side-steps
+        hear(agent, 5, 2)
+
+        async def release():
+            await asyncio.sleep(0.3)
+            agent.on_rx(Frame(5, 1, (4,)).encode())
+
+        task = asyncio.create_task(release())
+        t0 = time.monotonic()
+        await agent.run()
+        await task
+        return agent, time.monotonic() - t0
+
+    agent, took = asyncio.run(scenario())
+    assert agent.done and took >= 0.3
+    agent.driver.drive.assert_awaited_once_with(1, 2)
+
+
+def test_driver_failure_propagates_and_does_not_advance():
+    agent = make_agent(route=(1, 2), scale=0.001)
+    agent.driver.drive.side_effect = RuntimeError('wheel stuck')
+    with pytest.raises(RuntimeError, match='wheel stuck'):
+        asyncio.run(agent.run())
+    assert agent.cur == 1 and agent.idx == 0 and not agent.done
+
+
+# ---- deadlock ----------------------------------------------------------------------------------
+def test_only_the_lower_id_gives_way_and_only_after_the_wait(monkeypatch):
     agent = make_agent()
-    agent.book[3] = Frame(3, 0, ARRIVED, nclaims=1, nodes=(9, 1))
-    agent._wait = AsyncMock()
-    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 100)
-    asyncio.run(agent._blocked({3}))
-    assert agent.blocked_since == 100
-    agent._wait.assert_awaited_once_with(0.1)
-    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 103)
-    asyncio.run(agent._blocked({3}))
-    assert agent.retreating and agent.retreats == 1
+    now = [100.0]
+    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: now[0])
+    assert not agent._stuck({3})                               # clock starts
+    now[0] += agent_module.STUCK - 0.1
+    assert not agent._stuck({3})
+    now[0] += 0.2
+    assert agent._stuck({3})
+    assert not agent._stuck({1})                               # a lower id blocks: wait, do not give way
+    assert not agent._stuck({1, 3})
 
 
-def test_drive_sends_enter_before_driving_then_announces_arrival():
-    async def scenario():
-        radio = RecordingRadio()
-        agent = make_agent(scale=0, radio=radio)
-        seen = []
-        agent.driver.drive = AsyncMock(side_effect=lambda a, b: seen.append([f.kind for f in radio.frames]))
-        sender = asyncio.create_task(agent._sender())
-        assert await agent._drive((1, 2))
-        await asyncio.sleep(0.01)
-        sender.cancel()
-        agent.driver.drive.assert_awaited_once_with(1, 2)
-        assert seen[0] and seen[0][0] == ENTER
-        assert (agent.cur, agent.idx) == (2, 1)
-        originals = [f for f in radio.frames if f.resend == 0]
-        assert [f.kind for f in originals] == [ENTER, ARRIVED]
-        assert originals[1].nodes == (2, 4)
-
-    asyncio.run(scenario())
-
-
-def test_drive_failure_does_not_advance_position():
-    async def scenario():
-        radio = RecordingRadio()
-        agent = make_agent(scale=0, radio=radio)
-        agent.driver.drive = AsyncMock(side_effect=RuntimeError('motor failed'))
-        sender = asyncio.create_task(agent._sender())
-        with pytest.raises(RuntimeError, match='motor failed'):
-            await agent._drive((1, 2))
-        sender.cancel()
-        assert (agent.cur, agent.idx) == (1, 0)
-        assert radio.frames[0].kind == ENTER
-
-    asyncio.run(scenario())
-
-
-def test_drive_does_not_move_when_enter_is_not_sent():
-    async def scenario():
-        agent = make_agent(scale=0, radio=RecordingRadio(fail=True))
-        sender = asyncio.create_task(agent._sender())
-        assert not await agent._drive((1, 2))
-        sender.cancel()
-        agent.driver.drive.assert_not_awaited()
-        assert (agent.cur, agent.idx) == (1, 0)
-
-    asyncio.run(scenario())
-
-
-def test_drive_does_not_move_when_a_peer_claims_the_edge_while_enter_is_queued():
-    async def scenario():
-        radio = RecordingRadio()
-        agent = make_agent(scale=0, radio=radio)
-        announce = agent.announce
-
-        def announce_then_peer_holds_edge(kind, *args, **kwargs):
-            delivery = announce(kind, *args, **kwargs)
-            if kind == ENTER:
-                agent.on_rx(Frame(3, 1, ENTER, nodes=(2, 5)).encode())      # arrives before our ENTER is sent
-            return delivery
-
-        agent.announce = announce_then_peer_holds_edge
-        sender = asyncio.create_task(agent._sender())
-        assert not await agent._drive((1, 2))
-        await asyncio.sleep(0.01)
-        sender.cancel()
-        agent.driver.drive.assert_not_awaited()
-        assert (agent.cur, agent.idx) == (1, 0)
-        assert [f.kind for f in radio.frames if f.resend == 0] == [ENTER, ARRIVED]     # hold withdrawn
-
-    asyncio.run(scenario())
-
-
-def test_old_frame_with_a_reused_sequence_number_cannot_settle_the_new_delivery():
-    agent = make_agent(supersede=False)
-    first = agent.announce(ENTER, (1, 2))
-    old_frame = agent.q[0][1]
-    agent.seq = old_frame.seq - 1               # NOTE: the sequence number comes round again while the old frame is pending
-    second = agent.announce(ENTER, (1, 2))
-    new_frame = agent.q[-1][1]
-    assert new_frame.seq == old_frame.seq and first.event.is_set() and not first.ok
-    agent._settle(old_frame, True)
-    assert not second.event.is_set()
-    agent._settle(new_frame, True)
-    assert second.event.is_set() and second.ok
-
-
-def test_sender_transmits_even_if_the_channel_never_goes_quiet():
-    class BusyRadio(RecordingRadio):
-        @property
-        def last_rx(self):
-            return time.monotonic()
-
-    async def scenario():
-        radio = BusyRadio()
-        agent = make_agent(scale=0.01, radio=radio)
-        sender = asyncio.create_task(agent._sender())
-        delivery = agent.announce(HELLO, ())
-        await asyncio.wait_for(delivery.event.wait(), timeout=2)
-        sender.cancel()
-        assert delivery.ok and [f.kind for f in radio.frames] == [HELLO]
-
-    asyncio.run(scenario())
-
-
-def test_superseded_frame_settles_delivery_as_not_sent():
+def test_side_step_limit(monkeypatch):
     agent = make_agent()
-    enter = agent.announce(ENTER, (1, 2))
-    assert not enter.event.is_set()
-    agent.announce(ARRIVED, (1,))
-    assert enter.event.is_set() and not enter.ok
-
-
-def test_run_completes_route_and_sends_finished():
-    class RecordingRadio(Radio):
-        def __init__(self):
-            self.frames = []
-
-        async def send(self, payload):
-            self.frames.append(Frame.decode(payload))
-
-    async def scenario():
-        radio = RecordingRadio()
-        driver = AsyncMock()
-        agent = Agent(2, [1, 2, 4], Graph([(1, 2), (2, 4)]), radio, driver,
-                      scale=0.001, rng=FixedRandom())
-        await asyncio.wait_for(agent.run(), timeout=1)
-        assert agent.done and agent.cur == 4 and agent.idx == 2
-        assert driver.drive.await_args_list == [((1, 2),), ((2, 4),)]
-        assert radio.cb == agent.on_rx
-        assert any(frame.kind == FINISHED for frame in radio.frames)
-
-    asyncio.run(scenario())
-
-
-def test_forced_retreat_and_retreat_limit(monkeypatch):
-    agent = make_agent()
-    agent.blocked_since = 10
-    agent.forced_after = 15
-    agent._start_retreat = Mock(return_value=True)
-    agent._wait = AsyncMock()
-    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 25)
-    asyncio.run(agent._blocked({3}))
-    agent._start_retreat.assert_called_once_with()
-    agent.retreats = agent_module.RETREAT_MAX
-    asyncio.run(agent._blocked({3}))
-    agent._start_retreat.assert_called_once_with()
-    agent._wait.assert_awaited_once_with(0.1)
-
-
-def test_only_the_lower_id_retreats(monkeypatch):
-    agent = make_agent()                         # id 2
-    agent.blocked_since, agent.forced_after = 10, 15
-    agent._start_retreat, agent._wait = Mock(return_value=True), AsyncMock()
-    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 100)
-    asyncio.run(agent._blocked({1}))             # a lower id blocks us: wait for it
-    asyncio.run(agent._blocked({1, 3}))          # any lower id among the blockers is enough to wait
-    agent._start_retreat.assert_not_called()
-    assert agent._wait.await_count == 2
-
-
-def test_only_the_lowest_id_retreats(monkeypatch):
-    agent = make_agent()                      # robot 2
-    agent.blocked_since, agent.forced_after = 10, 15
-    agent._start_retreat, agent._wait = Mock(return_value=True), AsyncMock()
-    monkeypatch.setattr(agent_module.time, 'monotonic', lambda: 25)
-    asyncio.run(agent._blocked({1}))          # blocked by a lower id: wait for it
-    asyncio.run(agent._blocked({1, 3}))       # one blocker is lower: still wait
-    agent._start_retreat.assert_not_called()
-    assert agent._wait.await_count == 2
-
-
-@pytest.mark.parametrize(('delta', 'accepted'), [(1, True), (127, True), (128, False), (255, False)])
-def test_receive_sequence_window_boundaries(delta, accepted):
-    agent = make_agent()
-    original = Frame(1, 200, HELLO)
-    agent.on_rx(original.encode())
-    agent.wake.clear()
-    incoming = Frame(1, (200 + delta) % 256, FINISHED)
-    agent.on_rx(incoming.encode())
-    assert agent.book[1] == (incoming if accepted else original)
-    assert agent.wake.is_set() is accepted
-
-
-def test_sender_continues_after_radio_error_and_logs_it():
-    async def scenario():
-        agent = make_agent(supersede=False)
-        error = RuntimeError('radio unavailable')
-        sent = asyncio.Event()
-
-        async def send(payload):
-            if not sent.is_set():
-                sent.set()
-                raise error
-            received.append(Frame.decode(payload))
-            delivered.set()
-
-        received = []
-        delivered = asyncio.Event()
-        agent.radio.send = send
-        agent.log = Mock()
-        agent.announce(HELLO, ())
-        agent.announce(FINISHED, ())
-        sender = asyncio.create_task(agent._sender())
-        try:
-            await asyncio.wait_for(delivered.wait(), timeout=1)
-        finally:
-            sender.cancel()
-            await asyncio.gather(sender, return_exceptions=True)    # collect the cancellation
-        assert [frame.kind for frame in received] == [FINISHED]
-        agent.log.assert_called_once_with('send failed', error)
-        assert agent.sent == 2
-
-    asyncio.run(scenario())
-
-
-def test_mission_waits_for_initial_node_to_clear():
-    agent = make_agent(route=(1,), scale=0)
-    agent.blocked_by = Mock(side_effect=[{3}, set()])
-
-    async def wait(_delay):
-        assert [frame.kind for _, frame in agent.q] == [HELLO]
-
-    agent._wait = AsyncMock(side_effect=wait)
-    agent.announce = Mock(wraps=agent.announce)
-    asyncio.run(agent._mission())
-    assert [call.args for call in agent.blocked_by.call_args_list] == [((1, 1),), ((1, 1),)]
-    agent._wait.assert_awaited_once_with(0.1)
-    assert [call.args[0] for call in agent.announce.call_args_list] == [HELLO, ARRIVED, FINISHED]
-
-
-def test_mission_completes_retreat_and_resumes_route():
-    async def scenario():
-        graph = Graph([(1, 2), (1, 3), (3, 2), (2, 4)])
-        agent = make_agent(graph=graph, scale=0, radio=RecordingRadio())
-        agent.driver.drive = AsyncMock()
-        agent.log = Mock()
-        assert agent._start_retreat()
-        sender = asyncio.create_task(agent._sender())
-        await asyncio.wait_for(agent._mission(), timeout=5)
-        sender.cancel()
-        return agent
-
-    agent = asyncio.run(scenario())
-    assert agent.driver.drive.await_args_list == [((1, 3),), ((3, 2),), ((2, 4),)]
-    assert (agent.cur, agent.idx, agent.retreating, agent.resume) == (4, 2, False, None)
-    agent.log.assert_any_call('retreat done, resuming')
-
-
-def test_drive_sends_beacon_while_motion_is_in_progress(monkeypatch):
-    async def scenario():
-        agent = make_agent(scale=0.001, radio=RecordingRadio())
-        release = asyncio.Event()
-
-        async def drive(_a, _b):
-            await release.wait()
-
-        announce = agent.announce
-
-        def record(kind, *args, **kwargs):
-            delivery = announce(kind, *args, **kwargs)
-            if kind == BEACON:
-                release.set()
-            return delivery
-
-        agent.driver.drive = drive
-        agent.announce = Mock(side_effect=record)
-        sender = asyncio.create_task(agent._sender())
-        await asyncio.wait_for(agent._drive((1, 2)), timeout=1)
-        sender.cancel()
-        calls = agent.announce.call_args_list
-        assert [call.args[0] for call in calls] == [ENTER, BEACON, ARRIVED]
-        assert calls[1].args[1:3] == ([1, 2, 4], 1)
-        assert (agent.cur, agent.idx) == (2, 1)
-
-    monkeypatch.setattr(agent_module, 'BEACON_EVERY', 0)
-    asyncio.run(scenario())
+    agent.sidesteps = agent_module.SIDESTEP_MAX
+    agent.blocked_since = 0
+    assert not agent._stuck({3})

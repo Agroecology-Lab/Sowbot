@@ -1,10 +1,12 @@
 """Node claim: on entering a node, announce it and the next two intended nodes (Sowbot issue #202)."""
 import asyncio
 import contextlib
+import heapq
+import math
 import random
 import time
 
-from .frame import ARRIVED, Frame
+from .frame import Frame
 
 # Seconds, all multiplied by the timescale (tests only).
 ARBITRATE = 1.5     # after announcing, wait for rival claims; also the age at which a claim counts as committed
@@ -43,6 +45,7 @@ class Agent:
         self.idx, self.cur = 0, route[0]
         self.wake = asyncio.Event()
         self.blocked_since, self.sidesteps = None, 0
+        self.hold_idx = self.hold_end = None    # route index of a side-step stop where we wait for the route to clear
         self.done = False
 
     # ---- receive -------------------------------------------------------------------------------
@@ -68,8 +71,7 @@ class Agent:
         """
         now, out = time.monotonic(), set()
         for rid, f in self.book.items():
-            h = f.hold()
-            if h and self.g.conflict(edge, h):
+            if self.g.conflict(edge, f.hold()):
                 out.add(rid)
                 continue
             if rid < self.rid or now - self.seen[rid] >= ARBITRATE * self.k:
@@ -81,11 +83,15 @@ class Agent:
 
     # ---- send ----------------------------------------------------------------------------------
     async def _announce(self):
-        """Send current node + next LOOKAHEAD nodes. Retries until the radio takes it."""
-        nxt = self.route[self.idx + 1:self.idx + 1 + LOOKAHEAD]
+        """Send current node + next LOOKAHEAD nodes. Retries until the radio takes it.
+
+        At a side-step stop only the node is sent, no claims: the robot waits there, and claims on
+        the way back would block the peers that it is waiting for.
+        """
+        nxt = [] if self.hold_idx == self.idx else self.route[self.idx + 1:self.idx + 1 + LOOKAHEAD]
         while True:
             self.seq = (self.seq + 1) & 255
-            frame = Frame(self.rid, self.seq, ARRIVED, 0, len(nxt), False, tuple([self.cur] + nxt))
+            frame = Frame(self.rid, self.seq, tuple([self.cur] + nxt))
             deadline = time.monotonic() + LBT_MAX * self.k
             while time.monotonic() - self.radio.last_rx < 0.1 * self.k and time.monotonic() < deadline:
                 await asyncio.sleep(self.rng.uniform(*BACKOFF) * self.k)
@@ -103,7 +109,12 @@ class Agent:
 
     # ---- mission -------------------------------------------------------------------------------
     async def run(self):
-        """Follow the route, then mark the agent done. Driver errors propagate."""
+        """Follow the route, then mark the agent done. Driver errors propagate.
+
+        If blocked long enough, the agent may add a side-step to its route,
+        announce the revised claims and wait for arbitration before retrying.
+        At the side-step stop it waits until the route onward is announced clear.
+        """
         self.radio.set_handler(self.on_rx)
         await asyncio.sleep(self.rng.uniform(0, 1.0) * self.k)      # boot jitter
         while True:
@@ -111,9 +122,18 @@ class Agent:
             if self.idx >= len(self.route) - 1:
                 break
             await asyncio.sleep(ARBITRATE * self.k)                 # let rival claims arrive
+            if self.hold_idx == self.idx:                           # at a side-step stop
+                while self._route_blocked():
+                    await self._wait(0.1)
+                self.hold_idx = None
+                self.log('route clear, resuming')
+                await self._announce()                              # now with claims again
+                await asyncio.sleep(ARBITRATE * self.k)
             edge = (self.cur, self.route[self.idx + 1])
             while blockers := self.blocked_by(edge):
                 if self._stuck(blockers) and self._sidestep():
+                    await self._announce()                          # peers still hold our old claims
+                    await asyncio.sleep(ARBITRATE * self.k)
                     edge = (self.cur, self.route[self.idx + 1])
                     continue
                 await self._wait(0.1)
@@ -134,28 +154,62 @@ class Agent:
                 and now - self.blocked_since >= STUCK * self.k)
 
     def _sidestep(self):
-        """Detour via the nearest row node that no other robot holds or claims, then rejoin the route.
+        """Detour to the nearest free row waypoint, then rejoin the route.
 
-        Headland nodes are driven through but never stopped on.
+        Stops are row waypoints only (Graph.rows): never an _IN or _OUT node, which the robot
+        passes through. A waypoint is skipped when any other robot has announced a node of its
+        row, so with row 1 in use the nearest waypoint of another row is taken. The stop must
+        also be clear of every hold and claim. "Nearest" is by path length over edges that no
+        hold blocks. On success the route becomes the way out, then the way on to the node we
+        were heading for, and run() waits at the stop until that stretch is announced clear.
         """
-        holds = [h for f in self.book.values() if (h := f.hold())]
+        holds = [f.hold() for f in self.book.values()]
         claims = [c for f in self.book.values() for c in f.claims()]
+        taken = {self.g.row_key(n) for f in self.book.values() for n in f.nodes}
         free_edge = lambda u, v: not any(self.g.conflict((u, v), h) for h in holds)
         free_node = lambda n: not any(self.g.conflict((n, n), x) for x in holds + claims)
         nxt = self.route[self.idx + 1]
-        reach, queue = {self.cur}, [self.cur]
-        for u in queue:                                     # breadth first: nearest first
+        dist, prev, heap = {self.cur: 0.0}, {}, [(0.0, self.cur)]
+        while heap:                                         # Dijkstra: nearest first
+            d, u = heapq.heappop(heap)
+            if d > dist[u]:
+                continue
             for v in sorted(self.g.adj.get(u, ())):
-                if v in reach or v in self.g.park or not free_edge(u, v):
+                if v in self.g.park or not free_edge(u, v):
                     continue
-                reach.add(v)
-                queue.append(v)
-                if v != nxt and v in self.g.rows and free_node(v):
-                    out, back = self.g.path(self.cur, v, free_edge), self.g.path(v, nxt)
-                    if out and back:
-                        self.route[self.idx:self.idx + 2] = out + back[1:]
-                        self.sidesteps += 1
-                        self.blocked_since = None
-                        self.log(f'side-step {self.sidesteps}: via {out}')
-                        return True
+                w = math.dist(self.g.xy[u], self.g.xy[v]) if u in self.g.xy and v in self.g.xy else 1.0
+                if d + w < dist.get(v, math.inf):
+                    dist[v], prev[v] = d + w, u
+                    heapq.heappush(heap, (d + w, v))
+        for d, v in sorted((d, v) for v, d in dist.items()):
+            if v == nxt or v == self.cur or v not in self.g.rows or self.g.row_key(v) in taken or not free_node(v):
+                continue
+            back = self.g.path(v, nxt)
+            if not back:
+                continue
+            out = [v]
+            while out[-1] != self.cur:
+                out.append(prev[out[-1]])
+            out.reverse()
+            self.route[self.idx:self.idx + 2] = out + back[1:]
+            self.hold_idx = self.idx + len(out) - 1
+            self.hold_end = self.hold_idx + len(back) - 1       # index of the node we were heading for
+            self.sidesteps += 1
+            self.blocked_since = None
+            self.log(f'side-step {self.sidesteps}: via {out}')
+            return True
         return False
+
+    def _route_blocked(self):
+        """IDs of lower-id robots blocking an edge of the stretch from the side-step stop to the
+        node we were heading for, plus the LOOKAHEAD edges after it.
+
+        Higher ids are ignored here, so waiting robots can never wait on each other in a cycle:
+        a higher id yields to us. The per-edge check in run() still stops us from driving into
+        any hold or committed claim.
+        """
+        stretch = self.route[self.hold_idx:self.hold_end + 1 + LOOKAHEAD]
+        out = set()
+        for e in zip(stretch, stretch[1:]):
+            out |= self.blocked_by(e)
+        return {r for r in out if r < self.rid}

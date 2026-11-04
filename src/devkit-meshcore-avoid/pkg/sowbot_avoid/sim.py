@@ -13,7 +13,7 @@ from .radio import LoopBus
 class World:
     def __init__(self):
         self.pos, self.min_sep, self.pair = {}, float("inf"), None
-        # Finished robots are invisible to their peers, so their separation is tracked apart:
+        # A finished robot keeps its last hold, so its separation is tracked apart:
         # min_live is between two robots still running, min_parked involves a finished one.
         self.finished, self.min_live, self.min_parked = set(), float("inf"), float("inf")
 
@@ -71,26 +71,29 @@ def grid(n=3, step=2.5):
     return Graph(edges, xy, park=(d1, d2, d3))
 
 
-async def simulate(routes, loss, seed, scale=0.1, timeout=300, supersede=True, graph=None, delays=None):
+async def simulate(routes, loss, seed, scale=0.1, timeout=300, graph=None, delays=None):
     """Run routes keyed by robot ID on the simulated grid, or on graph when given.
 
     Every robot stands at its first node from the start. delays maps a robot ID to
     seconds (unscaled) before its agent starts; until then peers cannot see it.
 
     Loss is the random frame loss probability; scale multiplies simulated timing
-    and timeout is in unscaled seconds. On timeout, return partial results;
-    done indicates whether all agents finished. Other errors propagate.
+    and timeout is in unscaled seconds. A TimeoutError, including one raised by
+    an agent, yields partial results; other errors propagate.
 
-    Return completion, minimum observed separation, frame and loss counts,
-    retreat count, elapsed unscaled seconds, and send counts by robot ID.
+    The result includes done (whether all agents finished), sep (minimum observed
+    separation), sep_live (between running robots), sep_parked (involving a
+    finished robot), and pair (IDs at the minimum sep, or None). Separations use
+    graph coordinate units and are infinite if no pair was observed. It also
+    includes frames, lost, sidesteps, and secs (elapsed unscaled seconds).
     """
     rng, g, world = random.Random(seed), graph or grid(), World()
     bus, agents, delays = LoopBus(rng, loss, scale), [], delays or {}
     for rid, route in routes.items():
         d = SimDriver(world, rid, g, scale=scale)
         d.place(route[0])
-        agents.append(Agent(rid, route, g, bus.radio(), d, scale, random.Random(seed * 100 + rid), supersede=supersede))
-        # the agent logs "finished" once its route is done; from then on its peers ignore it
+        agents.append(Agent(rid, route, g, bus.radio(), d, scale, random.Random(seed * 100 + rid)))
+        # the agent logs "finished" once its route is done; from then on it counts as parked
         agents[-1].log = (lambda r: lambda *a: world.finished.add(r) if a and a[0] == "finished" else None)(rid)
 
     async def launch(a):
@@ -104,6 +107,5 @@ async def simulate(routes, loss, seed, scale=0.1, timeout=300, supersede=True, g
         pass
     return dict(done=all(a.done for a in agents), sep=world.min_sep, sep_live=world.min_live,
                 sep_parked=world.min_parked, pair=world.pair, frames=bus.frames, lost=bus.lost,
-                retreats=sum(a.retreats for a in agents), secs=(time.monotonic() - t0) / scale,
-                sent={a.rid: a.sent for a in agents})
+                sidesteps=sum(a.sidesteps for a in agents), secs=(time.monotonic() - t0) / scale)
 

@@ -5,17 +5,17 @@ Not part of the pytest run: the agents use wall-clock timing, so results depend 
 load. Run it on an idle machine, one job at a time.
 
   python sweeps/maize_sweep.py --seeds 10
-  python sweeps/maize_sweep.py --scenario opposed --robots 2 4 --loss 0 0.2 --park none --seeds 20
+  python sweeps/maize_sweep.py --scenario opposed --robots 2 4 --loss 0 0.2 --seeds 20
   python sweeps/maize_sweep.py --map tests/data/maize_map_fixture.json --seeds 3 --jsonl out.jsonl
 
 Scenarios follow claimsim2: follow (same direction along the rows), opposed (alternating
 directions), random (random start and goal) and local (start and goal within --local-radius
 of an anchor). Every robot stands at its own start node from t=0.
 
---park docks   each route ends on its own dock node, hung 1.5 m off the goal (what the CLI demands today)
---park none    routes end on the map's own nodes, as in a field with no docks; a finished robot is
-               ignored by its peers, so sep_parked shows what that costs
---resends      default drops older resends when a newer frame is queued; keep keeps them (--keep-resends)
+Docks are the map's own nodes named dock, dock1, dock2, ... (any case). When the map has some,
+each route is extended to the nearest dock not taken by another route; routes left over end on
+the map's own nodes. When the map has none, no dock is made up and every route ends on a map node.
+A finished robot keeps its last hold in every peer's book. sep_parked is the closest approach to one.
 """
 import argparse
 import asyncio
@@ -36,7 +36,6 @@ from sowbot_avoid.graph import Graph          # noqa: E402
 from sowbot_avoid.sim import simulate         # noqa: E402
 from sowbot_avoid.topo import load_topo       # noqa: E402
 
-DOCK_OFFSET = 1.5
 EPS = 1e-6      # NOTE: metres, floating-point noise when judging "closer than the clearance", not a safety margin
 
 
@@ -56,6 +55,7 @@ def default_map():
 
 # ---- routing -----------------------------------------------------------------------------------
 def shortest(g, a, b):
+    """Shortest path by length. Dock nodes are never passed through, only used as an end point."""
     dist, prev, h = {a: 0.0}, {}, [(0.0, a)]
     while h:
         d, u = heapq.heappop(h)
@@ -64,6 +64,8 @@ def shortest(g, a, b):
         if d > dist[u]:
             continue
         for v in sorted(g.adj[u]):
+            if v in g.park and v != b:
+                continue
             nd = d + math.dist(g.xy[u], g.xy[v])
             if nd < dist.get(v, math.inf):
                 dist[v], prev[v] = nd, u
@@ -95,7 +97,8 @@ def spaced(g, picks, cand, clearance):
 
 def scenario(topo, name, n, rng, local_radius):
     """Return n routes (lists of node ids) with distinct, mutually clear start nodes."""
-    g, nodes, clr = topo.graph, sorted(topo.graph.xy), topo.graph.clearance
+    g, clr = topo.graph, topo.graph.clearance
+    nodes = [n for n in sorted(g.xy) if n not in g.park]
     routes, starts = [], []
 
     def add(route):
@@ -132,42 +135,45 @@ def scenario(topo, name, n, rng, local_radius):
     return routes
 
 
-def add_docks(topo, routes):
-    """Give each route its own dock node off its last node; return (graph, routes)."""
-    g = topo.graph
-    edges = {(a, b) for a in g.adj for b in g.adj[a] if a < b}
-    xy = dict(g.xy)
-    cx = statistics.fmean(p[0] for p in xy.values())
-    cy = statistics.fmean(p[1] for p in xy.values())
-    by_goal = defaultdict(list)
-    for k, r in enumerate(routes):
-        by_goal[r[-1]].append(k)
-    nxt, out, docks = max(xy) + 1, [list(r) for r in routes], set()
-    for goal, ks in by_goal.items():
-        base = math.atan2(xy[goal][1] - cy, xy[goal][0] - cx)
-        for j, k in enumerate(ks):
-            ang = base + (j - (len(ks) - 1) / 2) * math.radians(60)
-            xy[nxt] = (xy[goal][0] + DOCK_OFFSET * math.cos(ang), xy[goal][1] + DOCK_OFFSET * math.sin(ang))
-            edges.add((goal, nxt))
-            out[k].append(nxt)
-            docks.add(nxt)
-            nxt += 1
-    return Graph(sorted(edges), xy, g.clearance, docks), out
+def assign_docks(topo, routes):
+    """Extend routes to the map's docks, one dock per route; return the new routes.
+
+    Routes are served in order and each takes the nearest free dock it can reach. A map with no
+    docks returns the routes unchanged. Routes left without a dock keep their own last node.
+    """
+    g, free, out = topo.graph, set(topo.docks), []
+    for r in routes:
+        best = None
+        for d in sorted(free):
+            sp = shortest(g, r[-1], d)
+            if sp and (best is None or len(sp) < len(best)):
+                best = sp
+        if best:
+            free.discard(best[-1])
+            r = r + best[1:]
+        out.append(r)
+    return out
 
 
 # ---- one run -----------------------------------------------------------------------------------
-def run_one(topo, sc, n, loss, seed, park, keep, a):
-    rng = random.Random(f"{sc}/{n}/{seed}")             # same routes for every loss, park and resend setting
+def run_one(topo, sc, n, loss, seed, a):
+    """Run one scenario and return simulation results with sweep metadata.
+
+    Routes end at the map's docks when it has any (see assign_docks). Options in a supply local
+    radius in meters, start stagger and timeout in unscaled seconds, and scale.
+    The result includes wall-clock time in seconds and the total route hops.
+    Infeasible propagates if routes cannot be constructed. Simulation timeouts
+    return partial results; other simulation and event-loop errors propagate.
+    """
+    rng = random.Random(f"{sc}/{n}/{seed}")             # same routes for every loss
     routes = scenario(topo, sc, n, rng, a.local_radius)
     g = topo.graph
-    if park == "docks":
-        g, routes = add_docks(topo, routes)
+    routes = assign_docks(topo, routes)
     delays = {i: rng.uniform(0, a.stagger) for i in range(1, n + 1)} if a.stagger else None
     t0 = time.monotonic()
     r = asyncio.run(simulate({i: rt for i, rt in enumerate(routes, 1)}, loss, seed, a.scale, a.timeout,
-                             supersede=not keep, graph=g, delays=delays))
-    r.pop("sent")
-    r.update(scenario=sc, n=n, loss=loss, seed=seed, park=park, resends="keep" if keep else "default",
+                             graph=g, delays=delays))
+    r.update(scenario=sc, n=n, loss=loss, seed=seed,
              wall=time.monotonic() - t0, hops=sum(len(x) - 1 for x in routes))
     return r
 
@@ -182,7 +188,7 @@ def verdict(g, clr):
 
     FAIL: a run did not finish, or two running robots came closer than the clearance.
     WARN: everything finished and running robots stayed clear, but a robot passed a
-    finished one closer than the clearance (peers cannot see a finished robot).
+    finished one closer than the clearance.
     Otherwise the status is PASS. clr is in meters; a separation counts as too
     close only when it is strictly below clr minus 1e-6 meters. An empty group
     raises ValueError.
@@ -216,7 +222,7 @@ def summary(groups, clr):
     for k in sorted(groups):
         status, detail = verdict(groups[k], clr)
         counts[status] += 1
-        print(f"  {status:4s}  {k[0]}, {k[1]} robots, loss {k[2]:.2f}, {k[3]}, resends {k[4]}: {detail}")
+        print(f"  {status:4s}  {k[0]}, {k[1]} robots, loss {k[2]:.2f}: {detail}")
     print(f"  Overall: {counts['PASS']} PASS, {counts['WARN']} WARN, {counts['FAIL']} FAIL of {len(groups)} cases.")
     print("  PASS: all finished and kept clear. WARN: also passed a finished robot too close. FAIL: a run did not finish, or moving robots came too close.")
     if min(len(g) for g in groups.values()) < 5:
@@ -230,34 +236,36 @@ def report(rows, clr):
     """
     groups = defaultdict(list)
     for r in rows:
-        groups[(r["scenario"], r["n"], r["loss"], r["park"], r["resends"])].append(r)
+        groups[(r["scenario"], r["n"], r["loss"])].append(r)
     summary(groups, clr)
     print("\nDetails")
-    print(f"\n{'scenario':8s} {'n':>2s} {'loss':>4s} {'park':5s} {'resends':7s} | {'runs':>4s} {'done%':>5s} "
-          f"{'live<clr':>8s} {'min live':>8s} {'parked<clr':>10s} {'min park':>8s} | {'secs':>5s} {'frames':>6s} {'retr':>4s}")
+    print(f"\n{'scenario':8s} {'n':>2s} {'loss':>4s} | {'runs':>4s} {'done%':>5s} "
+          f"{'live<clr':>8s} {'min live':>8s} {'parked<clr':>10s} {'min park':>8s} | {'secs':>5s} {'frames':>6s} {'side':>4s}")
     for k in sorted(groups):
         g = groups[k]
         live = [r["sep_live"] for r in g]
         park = [r["sep_parked"] for r in g]
-        print(f"{k[0]:8s} {k[1]:2d} {k[2]:4.2f} {k[3]:5s} {k[4]:7s} | {len(g):4d} "
+        print(f"{k[0]:8s} {k[1]:2d} {k[2]:4.2f} | {len(g):4d} "
               f"{100 * sum(r['done'] for r in g) / len(g):5.0f} {sum(x < clr - EPS for x in live):8d} {fmt(min(live)):>8s} "
               f"{sum(x < clr - EPS for x in park):10d} {fmt(min(park)):>8s} | "
               f"{statistics.median(r['secs'] for r in g):5.0f} {statistics.median(r['frames'] for r in g):6.0f} "
-              f"{statistics.fmean(r['retreats'] for r in g):4.1f}")
+              f"{statistics.fmean(r['sidesteps'] for r in g):4.1f}")
     print("\nlive<clr: runs where two running robots came closer than the clearance. "
-          "parked<clr: runs where a robot passed a finished one that close (peers cannot see it). "
+          "parked<clr: runs where a robot passed a finished one that close "
           "secs: median unscaled seconds.")
 
 
 def main():
+    """Run the requested sweep, print results and optionally write JSONL.
+
+    Infeasible scenario and robot-count combinations are skipped.
+    """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", default=default_map(), help="topological map YAML, or a JSON fixture")
     ap.add_argument("--scenario", nargs="+", default=["follow", "opposed", "random", "local"],
                     choices=["follow", "opposed", "random", "local"])
     ap.add_argument("--robots", nargs="+", type=int, default=[2, 4, 6])
     ap.add_argument("--loss", nargs="+", type=float, default=[0.0, 0.1, 0.2])
-    ap.add_argument("--park", choices=["docks", "none", "both"], default="docks")
-    ap.add_argument("--resends", choices=["default", "keep", "both"], default="both")
     ap.add_argument("--seeds", type=int, default=10)
     ap.add_argument("--seed0", type=int, default=0)
     ap.add_argument("--scale", type=float, default=0.1, help="timer scale; 0.1 runs ten times faster than real time")
@@ -275,18 +283,17 @@ def main():
     print(f"map {a.map}\n  {len(topo.ids)} nodes, {len(topo.graph.xy)} with coordinates, {len(topo.rows)} rows, "
           f"{max(xs) - min(xs):.1f} x {max(ys) - min(ys):.1f} m, {topo.n_directed} directed edges "
           f"({topo.n_two_way} two-way), {len(topo.zero_length)} zero-length, ids {topo.digest} "
-          f"({'stored in map' if topo.ids_stored else 'assigned by sorted name'})")
-    parks = ["docks", "none"] if a.park == "both" else [a.park]
-    keeps = [False, True] if a.resends == "both" else [a.resends == "keep"]
+          f"({'stored in map' if topo.ids_stored else 'assigned by sorted name'}), "
+          f"{len(topo.docks)} docks")
     out = open(a.jsonl, "w") if a.jsonl else None
     rows, skipped = [], set()
-    jobs = [(sc, n, lo, s, pk, kp) for sc in a.scenario for n in a.robots for lo in a.loss
-            for pk in parks for kp in keeps for s in range(a.seed0, a.seed0 + a.seeds)]
-    for i, (sc, n, lo, s, pk, kp) in enumerate(jobs, 1):
+    jobs = [(sc, n, lo, s) for sc in a.scenario for n in a.robots for lo in a.loss
+            for s in range(a.seed0, a.seed0 + a.seeds)]
+    for i, (sc, n, lo, s) in enumerate(jobs, 1):
         if (sc, n) in skipped:
             continue
         try:
-            r = run_one(topo, sc, n, lo, s, pk, kp, a)
+            r = run_one(topo, sc, n, lo, s, a)
         except Infeasible as e:
             skipped.add((sc, n))
             print(f"skip {sc} n={n}: {e}", file=sys.stderr)
