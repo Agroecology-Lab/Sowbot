@@ -1,6 +1,7 @@
 from nicegui import ui
 
 from devkit_ui.constants import FULLSCREEN_MAP_PATH
+from devkit_ui.utils.map_zoom import enable_zoom
 from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
@@ -48,18 +49,29 @@ class NodeMapCard(ui.card):
             # the nodes; it updates on movement without rebuilding
             # the clickable node DOM.
             if fullscreen:
-                # Both layers fill the same box, so the SVGs letterbox identically and stay aligned.
-                box, layer = 'relative w-full flex-1', 'absolute inset-0 w-full h-full [&_svg]:w-full [&_svg]:h-full'
+                self._build_zoomable_map()
             else:
-                box, layer = 'relative w-full', 'w-full'
-            with ui.element('div').classes(box):
-                self._map_html = ui.html().classes(layer)
-                self._robot_html = ui.html().classes(
-                    layer if fullscreen else 'absolute top-0 left-0 w-full'
-                ).style('pointer-events:none')
+                with ui.element('div').classes('relative w-full'):
+                    self._map_html = ui.html().classes('w-full')
+                    self._robot_html = ui.html().classes(
+                        'absolute top-0 left-0 w-full'
+                    ).style('pointer-events:none')
 
         inject_click_js()
         ui.timer(0.2, self._refresh)
+
+    def _build_zoomable_map(self) -> None:
+        """Build both layers inside a clipped, pannable and zoomable box.
+
+        Both layers fill the same box, so the SVGs letterbox identically and stay aligned.
+        """
+        layer = 'absolute inset-0 w-full h-full [&_svg]:w-full [&_svg]:h-full'
+        with ui.element('div').classes('relative w-full flex-1 overflow-hidden') as viewport:
+            with ui.element('div').classes('absolute inset-0') as content:
+                self._map_html = ui.html().classes(layer)
+                self._robot_html = ui.html().classes(layer).style('pointer-events:none')
+        # NOTE: NiceGUI renders each element with the DOM id c<element id>.
+        enable_zoom(f'c{viewport.id}', f'c{content.id}')
 
     def _refresh(self) -> None:
         """Rebuild and display the map and robot SVG overlays."""

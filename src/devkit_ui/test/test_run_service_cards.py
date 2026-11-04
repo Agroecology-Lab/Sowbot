@@ -137,7 +137,11 @@ class TestNodeMapCard(unittest.TestCase):
     def test_fullscreen_card_fills_the_window_without_the_link(self):
         """Verify the full-screen card has no button to itself and stretches both SVG layers."""
         fake_ui.reset()
-        card = node_map_card.NodeMapCard(self.vm, self.pose, fullscreen=True)
+        with patch.object(node_map_card, 'enable_zoom') as enable_zoom:
+            card = node_map_card.NodeMapCard(self.vm, self.pose, fullscreen=True)
+
+        viewport, content = (e for e in fake_ui.elements if e.kind == 'div')
+        enable_zoom.assert_called_once_with(f'c{viewport.id}', f'c{content.id}')
 
         self.assertEqual(card.styles, ['height:100vh'])
         self.assertFalse([e for e in fake_ui.elements if e.kind == 'button'])
