@@ -5,6 +5,71 @@ One agent per robot, each with its own companion radio. No central controller.
 
 **Status: simulated only, never run on hardware.** Not a safety function: onboard obstacle detection stays in charge.
 
+# How the robots avoid each other
+
+Every robot carries the same map and a fixed route made of waypoints. Each robot radios out where it is and where it is going next. It remembers the latest message from every other robot. It drives a stretch of path only if no other robot is on it or has the right to it. Robots never negotiate.
+
+## Conflicts
+
+- Two stretches of path conflict if they come closer than a set safe distance.
+- A single waypoint counts as a stretch of zero length.
+
+## Messages
+
+- Each message is 8 bytes: robot ID, message number, and up to 3 waypoints.
+- The first waypoint is where the robot is standing.
+- The other two are the stretches it plans to drive next.
+- A robot sends a message each time it reaches a waypoint, and once at start-up. It sends nothing else.
+
+## Who goes first
+
+Before driving a stretch, a robot checks every other robot. It must wait if either of these is true:
+
+- The other robot is standing somewhere that conflicts with the stretch.
+- The other robot plans to use a conflicting stretch, and either it has a lower ID or its last message is more than 1.5 s old (it has committed).
+
+A robot that is standing in the way always wins. Otherwise the lower ID wins.
+
+## Driving
+
+1. Wait until nothing blocks the stretch.
+2. Drive it.
+3. After arriving, keep claiming the old waypoint for 2 s, then announce the new one.
+4. After every announcement, wait 1.5 s for rival claims.
+
+At start-up: wait a random 0 to 1 s, announce, then wait 1.5 s.
+
+## Lost messages
+
+- No confirmations, no resends.
+- A robot that misses a message catches up from the next one, which arrives one waypoint later.
+- Before sending, a robot waits if it heard anything in the last 0.1 s. It backs off 0.12 to 0.48 s, for at most 2 s.
+- If a send fails, it retries every 0.1 s.
+
+## Stepping aside
+
+- Only the lower-ID robot gives way. If it has been blocked only by higher-ID robots for 3 s, it steps aside.
+- It picks the nearest waiting spot in a crop row (by path length) that is clear of every robot and every plan, and whose row no other robot has announced.
+- If any waypoint of a row has been announced, the whole row counts as taken. If row 1 is busy, it tries row 2, and so on.
+- It never stops on row entry or exit points, headland points or docks. It can drive through them.
+- It drives to the spot, waits until the stretch ahead (plus the next two) is announced clear, then carries on to its original waypoint.
+- At most 10 side-steps. If no spot is free, it keeps waiting.
+
+## Limitations
+
+- Not tested on real robots. Radio timing, range and message loss are assumptions.
+- Stored positions never expire. If a robot dies while claiming a stretch, that stretch stays blocked.
+- A finished robot never releases its last position. It blocks that waypoint and everything within the safe distance for the rest of the run. End routes on a dock, away from the rows.
+- Head-on meetings on tight maps can use up all 10 side-steps.
+- All robots must use the same map and the same waypoint ID table. Unless every waypoint has a fixed ID set, IDs come from sorted waypoint names, so renaming or adding a waypoint changes them. A script can compute a checksum of the table, but the robots do not share or compare it.
+- A failed radio send stops the next stretch but not the current one. Missed incoming messages are not detected.
+- Robot size, speed and stopping distance are combined into the single safe distance.
+
+
+
+
+
+
 ## Layout
 
 | Path | Contents |
@@ -136,31 +201,4 @@ Implement `Driver` for your motion stack:
 If `drive` raises, the agent stops. It does not stop the robot itself.
 
 ## How it works
-
-Every robot has the same map and a fixed route of nodes. Each one broadcasts what it holds and what it will take next, keeps the latest frame from every peer, and drives an edge only when no one else holds it or has priority over it. Robots do not negotiate.
-
-**Conflict.** Two node pairs conflict when the distance between their segments is below `clearance`. A node is a zero-length segment. A node without coordinates always conflicts. Without any coordinates, pairs conflict only if they share a node.
-
-**Frames.** One kind of frame: 2 bytes (robot id, sequence) plus 2 per node, at most 3 nodes, so 8 bytes and one AES block on air. The first node is the one the robot stands on (its hold). The next two are its claims: the edges it will drive next. A robot announces on arriving at each node, and once at start-up. It sends nothing else: no boot, resend, beacon or finish messages. `docs/packet-format.md` has the layout and timing.
-
-**Priority.** Before driving edge `e`, a robot is blocked by a peer if the peer's hold conflicts with `e`, or if one of its claims conflicts with `e` and the peer has a lower id or its frame is older than 1.5 s (it has committed). Claims that include the node we stand on are ignored. Holds always win. Otherwise the lower id wins.
-
-**Driving an edge.** Check for blockers and wait while there are any. Drive. Keep the old node held for 2 s after arriving, then announce the new node. At start-up: random 0 to 1 s delay, announce, then wait 1.5 s for rival claims. The same 1.5 s wait follows every announcement.
-
-**Loss.** No acknowledgements and no resends. A new sequence number on every frame makes each one differ, so it passes MeshCore's duplicate filter. A peer that missed a frame learns the robot's position from the next one, one node later. Before sending, a robot waits while it heard a frame in the last 0.1 s, backing off 0.12 to 0.48 s, for at most 2 s. A failed send is retried every 0.1 s.
-
-**Side-step.** Only the lower id gives way: a robot blocked only by higher ids for 3 s side-steps.
-It goes to the nearest row waypoint (`R<n>_W<k>`, by path length) that is clear of every hold and claim and whose row no other robot has announced. Any announced node of a row takes the whole row, so if row 1 is in use it moves up to row 2, and so on.
-It never stops on an `_IN` or `_OUT` node, a headland node or a dock. It drives through them on the way.
-The route becomes: the way to the stop, then the way on to the node it was heading for. At the stop it waits until that stretch, plus the next two edges, is announced clear, then resumes.
-At most 10 side-steps. With no free waypoint the robot keeps waiting.
-
-## Limits
-
-- Not run on hardware. MeshCore timing, range and loss are assumed.
-- Notebook entries never expire. A peer that dies holding an edge blocks it indefinitely.
-- A finished robot never clears its last hold, so it blocks that node and everything within the clearance of it for the rest of the run. End routes on a dock, off the rows.
-- Head-on meetings on tight maps can exhaust the side-step limit.
-- Robots must share the same map and node id table. Unless every node has `avoid_id` set, ids come from sorted node names, so renaming or adding a node changes them. `topo.py` computes a digest of the table, but the agent does not exchange it.
-- A failed radio send stops the next edge but not the current one. Lost reception is not detected.
-- Robot size, speed and stopping distance are folded into one `clearance`.
+learance`.
