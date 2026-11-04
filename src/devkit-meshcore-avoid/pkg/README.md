@@ -21,6 +21,8 @@ One agent per robot, each with its own companion radio. No central controller.
 
 ## Install and test
 
+No more than 1 robot per 100m2 is a sensible ballpark.
+
 Python 3.10 or later. The core package has no dependencies.
 Debian and Ubuntu block system-wide `pip install` (PEP 668), so use a virtual environment. If `venv` is missing, run `sudo apt install python3-venv`.
 
