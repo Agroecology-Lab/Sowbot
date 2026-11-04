@@ -14,7 +14,7 @@ def load_navigation_service_harness():
     tree = ast.parse(source.read_text(encoding='utf-8'))
     node_class = next(node for node in tree.body
                       if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode')
-    names = {'content'}
+    names = {'content', '_add_app_css'}
     members = [node for node in node_class.body
                if isinstance(node, ast.FunctionDef) and node.name in names]
     harness = ast.ClassDef(name='Harness', bases=[], keywords=[], body=members, decorator_list=[])
