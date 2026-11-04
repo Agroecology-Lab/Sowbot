@@ -104,6 +104,11 @@ def test_bad_input_is_rejected_before_the_radio_is_opened(wired, changes, messag
     wired.radio.stop.assert_not_awaited()
 
 
+def test_route_may_end_anywhere_when_the_map_has_no_park_nodes():
+    graph = Graph([(1, 2), (2, 3)], {1: (0, 0), 2: (3, 0), 3: (6, 0)}, 2.0)
+    cli.check_mission(args(), graph, [1, 2])
+
+
 def test_route_hops_are_checked_by_the_real_agent(monkeypatch, tmp_path):
     map_file = tmp_path / 'map.json'
     map_file.write_text(json.dumps({'nodes': {'1': [0, 0], '2': [3, 0], '3': [6, 0]},

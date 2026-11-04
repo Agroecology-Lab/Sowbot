@@ -15,7 +15,7 @@ One agent per robot, each with its own companion radio. No central controller.
 | `sowbot_avoid/radio.py` | `MeshRadio` (real) and `LoopBus` (simulated channel) |
 | `sowbot_avoid/driver.py` | `Driver` interface for your motion stack |
 | `sowbot_avoid/sim.py` | `simulate()`, `SimDriver`, a 3x3 test grid |
-| `sowbot_avoid/topo.py` | Loads the F2C topological map (YAML) or a JSON fixture |
+| `sowbot_avoid/topo.py` | Loads the F2C topological map (YAML) or a JSON fixture. Nodes named `dock`, `dock1`, ... become docks |
 | `sweeps/maize_sweep.py` | Batch simulation over the maize map |
 | `tests/` | pytest suite, plus a 9-node map fixture |
 
@@ -54,8 +54,9 @@ Run it on an idle machine, one job at a time. The default grid is 720 runs, so n
 | Option | Values |
 |---|---|
 | `--scenario` | `follow` (same direction), `opposed` (alternating), `random`, `local` (within `--local-radius` of an anchor) |
-| `--park` | `docks` (own dock off each goal, default), `none` (routes end on map nodes), `both` |
 | `--scale`, `--timeout`, `--clearance`, `--stagger` | Timer scale, unscaled timeout, clearance, random late starts |
+
+**Docks.** Only nodes the farmer has renamed `dock`, `dock1`, `dock2`, ... (any case) count. If the map has some, each route is extended to the nearest dock no other route has taken, and spare routes end on map nodes. If it has none, no dock is created and routes end on map nodes. The map line reports the dock count.
 
 #### Reading the output
 
@@ -65,7 +66,7 @@ The sweep ends with a plain summary above the detailed table. Example: 3 robots 
       53 nodes, 53 with coordinates, 13 rows, 14.1 x 9.9 m, ...
 
     Summary
-      PASS  random, 3 robots, loss 0.00, docks: 1/1 runs finished, closest moving pair 1.20 m
+      PASS  random, 3 robots, loss 0.00, 1/1 runs finished, closest moving pair 1.20 m
       Overall: 1 PASS, 0 WARN, 0 FAIL of 1 cases.
       PASS: all finished and kept clear. WARN: also passed a finished robot too close. FAIL: a run did not finish, or moving robots came too close.
       Fewer than 5 seeds in some cases: one pass proves little. Use --seeds 5 or more.
@@ -76,7 +77,7 @@ The sweep ends with a plain summary above the detailed table. Example: 3 robots 
 | WARN | As PASS, but a robot passed a finished robot closer than the clearance. The others cannot see a finished robot, so this is luck, not protection |
 | FAIL | A run did not finish, or two moving robots came closer than the clearance |
 
-Each line is one case: scenario, robot count, loss, and park mode, across all its seeds. A case fails if any one seed fails.
+Each line is one case: scenario, robot count and loss, across all its seeds. A case fails if any one seed fails.
 
 - **Map line.** Check the node count and size match your farm. If not, you are on the wrong map.
 
@@ -110,7 +111,7 @@ One collision domain where every robot hears every other. Overlapping frames are
      "edges": [[4, 5], [5, 6], [6, 11]], "park": [11]}
 
 Edges work both ways. Every route node needs coordinates and every hop must be an edge.
-`park` lists docks. A route must end at one, and retreats never use them, because peers ignore a robot that has sent FINISHED.
+`park` lists docks and is optional. When it is present a route must end at one, and retreats never use them, because peers ignore a robot that has sent FINISHED. Without it there are no docks and a route may end on any node.
 
 | Option | Meaning |
 |---|---|
@@ -171,7 +172,7 @@ At most 10 retreats. With no free side-step node the robot keeps waiting.
 
 - Not run on hardware. MeshCore timing, range and loss are assumed.
 - Notebook entries never expire. A peer that dies holding an edge blocks it indefinitely.
-- A finished robot is invisible to its peers, so others can pass close to a docked one.
+- A finished robot is invisible to its peers, so others can pass close to a docked one or one that stopped on a map node.
 - Head-on meetings on tight maps can exhaust the retreat limit.
 - Robots must share the same map and node id table. Unless every node has `avoid_id` set, ids come from sorted node names, so renaming or adding a node changes them. `topo.py` computes a digest of the table, but the agent does not exchange it.
 - A failed radio send stops the next edge but not the current one. Lost reception is not detected.

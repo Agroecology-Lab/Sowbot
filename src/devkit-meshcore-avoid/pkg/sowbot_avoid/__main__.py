@@ -39,8 +39,9 @@ def check_mission(a, graph, route):
     """Raise MissionError unless the id, clearance, channel and route can be flown safely.
 
     A route must follow map edges (the Agent checks that), have coordinates for every
-    node when the map has any, and end at a park node: other robots ignore a robot
-    that has finished, so it must not stay on a traversable node.
+    node when the map has any. When the map lists park nodes (docks), the route must end
+    at one: other robots ignore a robot that has finished, so it must not stay on a
+    traversable node. A map with no park nodes puts no condition on the last node.
     """
     if not 1 <= a.id <= 255:
         raise MissionError(f"--id must be 1-255, got {a.id}")
@@ -52,7 +53,7 @@ def check_mission(a, graph, route):
         missing = sorted({n for n in route if n not in graph.xy})
         if missing:
             raise MissionError(f"route nodes without coordinates in the map: {missing}")
-    if route[-1] not in graph.park:
+    if graph.park and route[-1] not in graph.park:
         raise MissionError(f"route must end at a park node of the map {sorted(graph.park)}, not {route[-1]}")
 
 
@@ -93,7 +94,7 @@ def main():
     ap.add_argument("--serial", required=True)
     ap.add_argument("--id", type=int, required=True, help="robot id, 1-255")
     ap.add_argument("--map", required=True)
-    ap.add_argument("--route", required=True, help="comma-separated node ids, ending at a park node")
+    ap.add_argument("--route", required=True, help="comma-separated node ids, ending at a park node if the map has any")
     ap.add_argument("--driver", required=True, help="module:Class implementing Driver")
     ap.add_argument("--clearance", type=float, default=1.0)
     ap.add_argument("--channel-idx", type=int, default=1)
