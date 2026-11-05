@@ -108,6 +108,7 @@ class TestNodeMapCard(unittest.TestCase):
         """Build a map card with fake timers and spies on both SVG renderers."""
         fake_ui.reset()
         self.enterContext(patch.object(node_map_card, 'ui', fake_ui))
+        self.ui_on = self.enterContext(patch.object(fake_ui, 'on', create=True))
         self.inject_click_js = self.enterContext(patch.object(node_map_card, 'inject_click_js'))
         self.build_svg = self.enterContext(patch.object(
             node_map_card, 'build_svg', wraps=node_map_card.build_svg))
@@ -147,6 +148,21 @@ class TestNodeMapCard(unittest.TestCase):
         self.assertFalse([e for e in fake_ui.elements if e.kind == 'button'])
         self.assertIn('[&_svg]:h-full', card._map_html.class_names)
         self.assertEqual(card._map_html.class_names, card._robot_html.class_names)
+
+    def test_node_click_ignores_invalid_payloads_and_selects_existing_node(self):
+        """Verify the map registers a handler that validates the selected node."""
+        self.assertEqual(self.ui_on.call_args.args[0], 'topo_node_clicked')
+        callback = self.ui_on.call_args.args[1]
+        self.vm.set_selected_node('A')
+        for args in (None, {}, {'node': ''}, {'node': 'missing'}):
+            with self.subTest(args=args):
+                callback(SimpleNamespace(args=args))
+                self.assertEqual(self.vm.selected_node, 'A')
+        callback(SimpleNamespace(args={'node': 'B'}))
+        self.assertEqual(self.vm.selected_node, 'B')
+        self.vm.update_doc(None)
+        callback(SimpleNamespace(args={'node': 'A'}))
+        self.assertIsNone(self.vm.selected_node)
 
     def test_first_tick_draws_both_layers_and_unchanged_ticks_do_no_work(self):
         """Verify initial rendering draws both layers and unchanged refreshes skip redraws."""

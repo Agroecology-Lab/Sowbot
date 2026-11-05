@@ -41,7 +41,6 @@ class TestNavPage(unittest.TestCase):
         """Compose the page over shared view models and synthetic telemetry."""
         fake_ui.reset()
         self.addCleanup(fake_ui.reset)
-        self.ui_on = self.enterContext(patch.object(fake_ui, 'on', create=True))
         self.mocks = {name: self.enterContext(patch.object(nav_page, name, new=Mock()))
                       for name in _COLLABORATORS}
         self.drive = Mock(soft_estop_active=False)
@@ -160,21 +159,6 @@ class TestNavPage(unittest.TestCase):
 
         self.assertEqual(self.run_vm.joystick.pose_lbl, 'no odom')
         self.assertIsNone(self.run_vm.node_map.robot_pose)
-
-    def test_node_click_ignores_invalid_payloads_and_selects_existing_node(self):
-        """Verify node clicks select existing nodes and tolerate invalid data or a missing map."""
-        self.assertEqual(self.ui_on.call_args.args[0], 'topo_node_clicked')
-        callback = self.ui_on.call_args.args[1]
-        self.topo_vm.set_selected_node('A')
-        for args in (None, {}, {'node': ''}, {'node': 'missing'}):
-            with self.subTest(args=args):
-                callback(SimpleNamespace(args=args))
-                self.assertEqual(self.topo_vm.selected_node, 'A')
-        callback(SimpleNamespace(args={'node': 'B'}))
-        self.assertEqual(self.topo_vm.selected_node, 'B')
-        self.topo_vm.update_doc(None)
-        callback(SimpleNamespace(args={'node': 'A'}))
-        self.assertIsNone(self.topo_vm.selected_node)
 
     def test_sidebar_actions_use_latest_selection_and_separate_navigation_state(self):
         """Verify sidebar commands use the current selection and distinct navigation state."""

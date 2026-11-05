@@ -58,7 +58,15 @@ class NodeMapCard(ui.card):
                     ).style('pointer-events:none')
 
         inject_click_js()
+        ui.on('topo_node_clicked', self._on_node_clicked)
         ui.timer(0.2, self._refresh)
+
+    def _on_node_clicked(self, e) -> None:
+        """Select the clicked topology node when it exists in the current map."""
+        name = (e.args or {}).get('node')
+        doc = self._topo_vm.topo_doc
+        if name and doc and doc.has_node(name):
+            self._topo_vm.set_selected_node(name)
 
     def _build_zoomable_map(self) -> None:
         """Build both layers inside a clipped, pannable and zoomable box.

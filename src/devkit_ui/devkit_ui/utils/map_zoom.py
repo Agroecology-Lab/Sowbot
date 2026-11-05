@@ -25,7 +25,7 @@ def enable_zoom(viewport_id: str, content_id: str) -> None:
             content.style.transformOrigin = '0 0';
             let k = 1, x = 0, y = 0;
             const pointers = new Map();
-            let pinch = 0;
+            let pinch = 0, dragging = false;
 
             const apply = () => {
                 const {width, height} = view.getBoundingClientRect();
@@ -58,27 +58,38 @@ def enable_zoom(viewport_id: str, content_id: str) -> None:
             });
 
             view.addEventListener('pointerdown', (e) => {
-                view.setPointerCapture(e.pointerId);
-                pointers.set(e.pointerId, [e.clientX, e.clientY]);
+                if (!pointers.size) {
+                    document.addEventListener('pointerup', release);
+                    document.addEventListener('pointercancel', release);
+                }
+                pointers.set(e.pointerId, [e.clientX, e.clientY, e.clientX, e.clientY]);
                 pinch = 0;
             });
 
             const release = (e) => {
                 pointers.delete(e.pointerId);
                 pinch = 0;
+                if (!pointers.size) {
+                    dragging = false;
+                    document.removeEventListener('pointerup', release);
+                    document.removeEventListener('pointercancel', release);
+                }
             };
-            view.addEventListener('pointerup', release);
-            view.addEventListener('pointercancel', release);
 
             view.addEventListener('pointermove', (e) => {
                 const prev = pointers.get(e.pointerId);
                 if (!prev) return;
+                if (!dragging) {
+                    if (Math.hypot(e.clientX - prev[2], e.clientY - prev[3]) < 4) return;
+                    dragging = true;
+                }
+                if (!view.hasPointerCapture(e.pointerId)) view.setPointerCapture(e.pointerId);
                 if (pointers.size === 1) {
                     x += e.clientX - prev[0];
                     y += e.clientY - prev[1];
                     apply();
                 }
-                pointers.set(e.pointerId, [e.clientX, e.clientY]);
+                pointers.set(e.pointerId, [e.clientX, e.clientY, prev[2], prev[3]]);
                 if (pointers.size === 2) {
                     const [a, b] = [...pointers.values()];
                     const dist = Math.hypot(a[0] - b[0], a[1] - b[1]);

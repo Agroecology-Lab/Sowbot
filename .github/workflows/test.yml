@@ -27,6 +27,8 @@ jobs:
             command: make lint-imports
           - name: test
             command: make test
+          - name: browser test
+            command: PYTHONPATH=src/devkit_ui python -m unittest discover -s src/devkit_ui/browser_tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -41,5 +43,8 @@ jobs:
             requirements-dev.txt
       - name: install dependencies
         run: pip install -r requirements-dev.txt
+      - name: install Chromium for browser tests
+        if: matrix.tools.name == 'browser test'
+        run: python -m playwright install --with-deps --only-shell chromium
       - name: ${{ matrix.tools.name }}
         run: ${{ matrix.tools.command }}

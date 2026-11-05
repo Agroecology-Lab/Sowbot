@@ -75,7 +75,6 @@ class NavPage(ui.column):
                     on_select=topo_vm.set_selected_node,
                 )
 
-            ui.on('topo_node_clicked', self._on_node_clicked)
             ui.timer(0.2, self._refresh)
 
     def _go(self) -> None:
@@ -83,13 +82,6 @@ class NavPage(ui.column):
         target = self._topo_vm.selected_node
         if target:
             self._run_vm.go_to(target, self._global_vm.soft_estop_active)
-
-    def _on_node_clicked(self, e) -> None:
-        """Select the clicked topology node when it exists in the current map."""
-        name = (e.args or {}).get('node')
-        doc = self._topo_vm.topo_doc
-        if name and doc and doc.has_node(name):
-            self._topo_vm.set_selected_node(name)
 
     def _refresh(self) -> None:
         """Refresh the pose label, robot overlay and node list from the latest state."""
