@@ -65,10 +65,15 @@ def _dist_m(a, b):
 
 
 def _merge_fields(rows, field_of):
-    """Give rows of several fields unique numbers and find the swaths that end a field.
+    """Offset row numbers between fields and find the swaths that end a field.
 
-    Each field's row numbers are offset past the largest number used so far. A field's rows must be
-    together in the file, since file order is mission order. Returns (unique rows, break indices).
+    ``rows`` and ``field_of`` contain corresponding entries in mission order.
+    Equal row numbers within a field remain equal; later fields are offset past the
+    largest number used so far. Return the adjusted rows and the zero-based indices
+    immediately before field transitions.
+
+    Raise PlanError if a field reappears after another field, or ValueError if the
+    two inputs have different lengths.
     """
     merged, breaks, seen = [], set(), set()
     offset = top = 0
@@ -85,7 +90,17 @@ def _merge_fields(rows, field_of):
 
 
 def parse_plan(text, robot_ll=None, max_distance_m=DEFAULT_MAX_DISTANCE_M) -> Plan:
-    """Parse and validate plan text. Raises PlanError with a user-readable reason."""
+    """Parse a version-1 GeoJSON plan into swaths, origin, breaks and parameters.
+
+    Multi-field plans use the first field's origin and parameters, preserve row
+    order, and mark breaks between fields as well as consecutive row fragments.
+    If ``robot_ll`` is given as (latitude, longitude) in degrees, reject a plan
+    whose row-endpoint center is more than ``max_distance_m`` meters away.
+
+    Raise PlanError with a user-readable reason for validation failures. Malformed
+    feature or coordinate structures can also propagate AttributeError, TypeError,
+    IndexError or KeyError.
+    """
     if len(text) > MAX_BYTES:
         raise PlanError('file too large')
     try:

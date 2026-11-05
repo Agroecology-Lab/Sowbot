@@ -10,6 +10,10 @@ def enable_zoom(viewport_id: str, content_id: str) -> None:
 
     The transform sits on the content element so map and robot layers can be
     redrawn without losing alignment.
+    ``viewport_id`` and ``content_id`` identify the DOM elements receiving input
+    and the transform, respectively. Zoom is limited to 1–20 times; double-click
+    resets zoom and pan. If either element is missing or zoom is already enabled
+    on the viewport, the script does nothing.
     """
     script = """
         ((viewportId, contentId, maxZoom) => {
