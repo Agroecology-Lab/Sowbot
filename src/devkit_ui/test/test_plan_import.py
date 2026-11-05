@@ -148,4 +148,3 @@ class ParseMultiFieldPlanTest(unittest.TestCase):
         """Verify a file without multi_field still needs a top-level origin."""
         with self.assertRaises(PlanError):
             parse_plan(_plan([_feat(ROW0, 0)], origin=None))
-

@@ -144,7 +144,8 @@ class TestNodeMapCard(unittest.TestCase):
         viewport, content = (e for e in fake_ui.elements if e.kind == 'div')
         enable_zoom.assert_called_once_with(f'c{viewport.id}', f'c{content.id}')
 
-        self.assertEqual(card.styles, ['height:100vh'])
+        # The fake ui records .style() calls in 'styles'; the real ui.card has no such member.
+        self.assertEqual(card.styles, ['height:100vh'])  # pylint: disable=no-member
         self.assertFalse([e for e in fake_ui.elements if e.kind == 'button'])
         self.assertIn('[&_svg]:h-full', card._map_html.class_names)
         self.assertEqual(card._map_html.class_names, card._robot_html.class_names)
