@@ -7,7 +7,8 @@ from nicegui import ui
 from devkit_ui.models import TopoDoc, TopoNode
 
 _SVG_W, _SVG_H = 900, 480
-_MARGIN, _NODE_R = 56, 17
+_MARGIN, _NODE_R = 56, 5
+_ROW_LABEL_GAP = 14
 
 
 def _node_transform(nodes: Iterator[TopoNode]):
@@ -55,6 +56,37 @@ def build_robot_svg(nodes: Iterator[TopoNode], robot: tuple | None) -> str:
             f'stroke="#ffffff" stroke-width="2"/></svg>')
 
 
+def _row_labels(doc: TopoDoc, tx, ty) -> list[str]:
+    """One 'Row <id>' label per row, placed just beyond its entry node.
+
+    The label sits on the line from the row's centroid through the entry node, so it
+    stays clear of the row itself. Rows without an entry node use their first node.
+    """
+    rows: dict = {}
+    for nd in doc.nodes:
+        row_id = nd.meta.get('row_id')
+        if row_id is not None:
+            rows.setdefault(row_id, []).append(nd)
+
+    labels: list[str] = []
+    for row_id, members in rows.items():
+        end = next((n for n in members if n.meta.get('row_role') == 'entry'), members[0])
+        ex, ey = tx(end.x), ty(end.y)
+        mx = sum(tx(n.x) for n in members) / len(members)
+        my = sum(ty(n.y) for n in members) / len(members)
+        vx, vy = ex - mx, ey - my
+        norm = math.hypot(vx, vy)
+        ux, uy = (vx / norm, vy / norm) if norm else (0.0, -1.0)
+        lx = ex + ux * (_NODE_R + _ROW_LABEL_GAP)
+        ly = ey + uy * (_NODE_R + _ROW_LABEL_GAP) + 3
+        anchor = 'start' if ux > 0.5 else 'end' if ux < -0.5 else 'middle'
+        labels.append(
+            f'<text class="topo-row-label" x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" '
+            f'fill="#0969da" font-family="Courier New" font-size="10" font-weight="700" '
+            f'style="pointer-events:none">Row {html.escape(str(row_id), quote=True)}</text>')
+    return labels
+
+
 def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) -> str:
     """Render the topology with selected/current highlights, or an empty-map placeholder."""
     if doc is None or not doc.nodes:
@@ -87,6 +119,7 @@ def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) ->
                 f'stroke="{"#d8e8fd" if is_row_edge else "#d0d7de"}" '
                 f'stroke-width="{"2" if is_row_edge else "1"}" stroke-linecap="round"/>')
 
+    sel_label = ''
     for nd in doc.nodes:
         name = nd.name
         cx, cy = tx(nd.x), ty(nd.y)
@@ -107,14 +140,11 @@ def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) ->
             fill, stroke, sw = '#ffffff', '#d0d7de', 1
         # pylint: enable=multiple-statements
 
-        label_col = ('#1a7f37' if is_cur else '#9a6700' if is_sel
-                    else '#0969da' if is_row else '#57606a')
-
         if is_cur:
             parts.append(
-                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R+6}" '
+                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R+4}" '
                 f'fill="none" stroke="#1a7f37" stroke-width="1" opacity="0.4">'
-                f'<animate attributeName="r" values="{_NODE_R+6};{_NODE_R+13}" '
+                f'<animate attributeName="r" values="{_NODE_R+4};{_NODE_R+9}" '
                 f'dur="2s" repeatCount="indefinite"/>'
                 f'<animate attributeName="opacity" values="0.4;0" '
                 f'dur="2s" repeatCount="indefinite"/></circle>')
@@ -124,30 +154,15 @@ def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) ->
             f'cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R}" '
             f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>')
 
-        if is_row:
-            role = str(nd.meta.get('row_role') or '?')
-            row_id = str(nd.meta.get('row_id', ''))
-            # role[0].upper() alone collides: 'entry' and 'exit' both start
-            # with 'e', so IN/OUT nodes would render identically. Map the
-            # roles that actually occur to distinct glyphs matching the
-            # _IN/_OUT/_W{k} name suffixes; fall back to the first letter
-            # for any other role string.
-            glyph = {'entry': 'I', 'exit': 'O', 'waypoint': 'W'}.get(
-                role, role[0].upper() if role else '?')
-            label_text = f"{glyph}{row_id}"
-            escaped_text = html.escape(label_text, quote=True)
+        if is_sel:
+            sel_label = (
+                f'<text class="topo-node-label" x="{cx:.1f}" y="{cy-_NODE_R-6:.1f}" '
+                f'text-anchor="middle" fill="#9a6700" font-family="Courier New" '
+                f'font-size="11" font-weight="700" style="pointer-events:none">'
+                f'{html.escape(str(name), quote=True)}</text>')
 
-            parts.append(
-                f'<text x="{cx:.1f}" y="{cy+4:.1f}" text-anchor="middle" fill="#0969da" '
-                f'font-family="Courier New" font-size="8" font-weight="700" '
-                f'style="pointer-events:none">'
-                f'{escaped_text}'
-                f'</text>')
-
-        parts.append(
-            f'<text x="{cx:.1f}" y="{cy+_NODE_R+12:.1f}" text-anchor="middle" '
-            f'fill="{label_col}" font-family="Courier New" font-size="9" '
-            f'style="pointer-events:none">{html.escape(str(name), quote=True)}</text>')
+    parts.extend(_row_labels(doc, tx, ty))
+    parts.append(sel_label)
 
     return (f'<svg id="topo-map" width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
             f'xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>')
