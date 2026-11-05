@@ -168,6 +168,82 @@ class FarmMapImportTest(unittest.TestCase):
         with self.assertRaisesRegex(FarmMapError, 'version'):
             parse(doc)
 
+    def test_plan_version_must_be_the_supported_integer(self):
+        """Numerically equal booleans and floats are not schema versions."""
+        for value in (True, False, 1.0, '1', None, 2):
+            with self.subTest(value=value):
+                doc = load()
+                doc['properties']['version'] = value
+                with self.assertRaisesRegex(FarmMapError, 'unsupported plan version'):
+                    parse(doc)
+
+    def test_field_numbers_must_match_all_listed_fields(self):
+        """Each listed location must map to its integer number, even without rows."""
+        for value in (None, [], 'numbers'):
+            with self.subTest(field_numbers=value):
+                doc = load()
+                doc['properties']['field_numbers'] = value
+                with self.assertRaisesRegex(FarmMapError, 'field_numbers is missing'):
+                    parse(doc)
+        for value in (None, 2, True, 1.0, '1'):
+            with self.subTest(mapped_number=value):
+                doc = load()
+                field = doc['properties']['fields'][0]
+                doc['properties']['field_numbers'][field['field_location_id']] = value
+                with self.assertRaisesRegex(FarmMapError, 'field_numbers'):
+                    parse(doc)
+        doc = load()
+        field = doc['properties']['fields'][0]
+        del doc['properties']['field_numbers'][field['field_location_id']]
+        with self.assertRaisesRegex(FarmMapError, 'field_numbers'):
+            parse(doc)
+        for location_id in (None, '', [], {}):
+            with self.subTest(location_id=location_id):
+                doc = load()
+                doc['properties']['fields'][0]['field_location_id'] = location_id
+                with self.assertRaisesRegex(FarmMapError, 'field_location_id'):
+                    parse(doc)
+        doc = load()
+        doc['properties']['fields'].append({'field_number': 3, 'field_location_id': 'empty-field'})
+        with self.assertRaisesRegex(FarmMapError, 'field_numbers'):
+            parse(doc)
+        doc['properties']['field_numbers']['empty-field'] = 3
+        self.assertEqual(parse(doc).warnings, ['field 3 is listed but has no rows'])
+
+    def test_malformed_features_are_refused(self):
+        """Malformed feature collections, features and properties give readable errors."""
+        for value in (None, {}, 'features', 1):
+            with self.subTest(features=value):
+                doc = load()
+                doc['features'] = value
+                with self.assertRaisesRegex(FarmMapError, 'features must be a list'):
+                    parse(doc)
+        for value in (None, [], 'feature', 1):
+            with self.subTest(feature=value):
+                doc = load()
+                doc['features'][0] = value
+                with self.assertRaisesRegex(FarmMapError, 'feature 0: must be an object'):
+                    parse(doc)
+        for value in (None, [], 'properties', 1):
+            with self.subTest(properties=value):
+                doc = load()
+                doc['features'][0]['properties'] = value
+                with self.assertRaisesRegex(FarmMapError, 'feature 0: properties must be an object'):
+                    parse(doc)
+
+    def test_malformed_row_geometry_is_refused(self):
+        """Only row geometry needs a LineString object; other features are still ignored."""
+        for value in (None, [], 'geometry', 1, {'type': 'Polygon'}):
+            with self.subTest(geometry=value):
+                doc = load()
+                row = next(f for f in doc['features'] if f['properties'].get('role') == 'row')
+                row['geometry'] = value
+                with self.assertRaisesRegex(FarmMapError, 'row is not a LineString'):
+                    parse(doc)
+        doc = load()
+        doc['features'][0]['geometry'] = None
+        self.assertEqual(parse(doc).content_hash, FIXTURE_HASH)
+
     def test_non_finite_and_short_rows_are_refused(self):
         """A row needs two finite positions."""
         doc = load()

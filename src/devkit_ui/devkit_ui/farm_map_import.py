@@ -185,8 +185,9 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
     props = doc.get('properties')
     if not isinstance(props, dict):
         raise FarmMapError('missing top-level properties')
-    if props.get('version') != SCHEMA_VERSION:
-        raise FarmMapError(f"unsupported plan version {props.get('version')!r}")
+    schema_version = props.get('version')
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version != SCHEMA_VERSION:
+        raise FarmMapError(f'unsupported plan version {schema_version!r}')
     if props.get('multi_field') is not True or not props.get('farm_map_id'):
         raise FarmMapError('not a farm map: export the published farm map from LiteFarm, not a single field')
     map_id, declared = props['farm_map_id'], props.get('content_hash')
@@ -210,19 +211,32 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
         number = _int(entry.get('field_number') if isinstance(entry, dict) else None, 'fields[].field_number', 1)
         if number in field_meta:
             raise FarmMapError(f'field {number} is listed twice')
+        location_id = entry.get('field_location_id')
+        if not isinstance(location_id, str) or not location_id:
+            raise FarmMapError(f'field {number}: field_location_id is missing or invalid')
+        mapped_number = numbers.get(location_id)
+        if isinstance(mapped_number, bool) or not isinstance(mapped_number, int) or mapped_number != number:
+            raise FarmMapError(f'field {number}: field_numbers does not match location {location_id!r}')
         field_meta[number] = entry
 
     rows_by_field: dict[int, list[PlanRow]] = {}
     last_field = None
     count = 0
-    for i, feature in enumerate(doc.get('features') or []):
-        fp = (feature or {}).get('properties') or {}
+    features = doc.get('features')
+    if not isinstance(features, list):
+        raise FarmMapError('features must be a list')
+    for i, feature in enumerate(features):
+        what = f'feature {i}'
+        if not isinstance(feature, dict):
+            raise FarmMapError(f'{what}: must be an object')
+        fp = feature.get('properties')
+        if not isinstance(fp, dict):
+            raise FarmMapError(f'{what}: properties must be an object')
         if fp.get('role') != 'row':
             continue
         count += 1
         if count > MAX_ROWS:
             raise FarmMapError(f'more than {MAX_ROWS} rows')
-        what = f'feature {i}'
         number = _int(fp.get('field'), f'{what}: field', 1)
         row = _int(fp.get('row'), f'{what}: row', 0)
         frag = _int(fp.get('frag', 0), f'{what}: frag', 0)
@@ -232,13 +246,14 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
             raise FarmMapError(f'{what}: row belongs to map {fp.get("farm_map_id")!r}, not {map_id!r}')
         if fp.get('name') != f'F{number}R{row}':
             raise FarmMapError(f'{what}: row name {fp.get("name")!r} should be F{number}R{row}')
-        if (feature.get('geometry') or {}).get('type') != 'LineString':
+        geometry = feature.get('geometry')
+        if not isinstance(geometry, dict) or geometry.get('type') != 'LineString':
             raise FarmMapError(f'{what}: row is not a LineString')
         if number != last_field and number in rows_by_field:
             raise FarmMapError(f'rows of field {number} are not together')
         last_field = number
         rows_by_field.setdefault(number, []).append(
-            PlanRow(row, _points(feature['geometry'].get('coordinates'), what), frag))
+            PlanRow(row, _points(geometry.get('coordinates'), what), frag))
         robot_row_id(number, row)  # refuses a row number that does not fit the stride
     if not rows_by_field:
         raise FarmMapError('no rows in farm map')
@@ -269,4 +284,3 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
                            f'rows give {computed[:12]}): the file was changed or damaged')
     return FarmMap(map_id, version, declared, status, fields, props.get('farm_map_name'), props.get('season'),
                    props.get('previous_farm_map_id'), warnings)
-
