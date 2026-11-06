@@ -19,6 +19,72 @@ This is not a safety function. E-stop and the independent safety subsystem are u
 - Up to 10 robots over about 1 mile square. Slow robots, long rows, missions lasting hours.
 - The robot sends nothing unprompted except a reply to a mission message (accepted or rejected), an end report when a mission ends, and a hello message on boot.
 
+## Map generation 
+```
+
+LiteFarm: published farm map (GeoJSON, content_hash)
+   |
+   | export file, once per season
+   v
++==================== ROBOT 1 (imports map) ===========================+
+|                                                                      |
+|  parse_farm_map()            exists, nothing calls it                |
+|    checks: published, F<f>R<r> names, content_hash recomputed        |
+|    -> FarmMap {fields, rows+frag, content_hash}                      |
+|                                                                      |
+|  import path                                                         |
+|    parse_plan -> topo_row_builder                                    |
+|    [new] keep field/row/frag per swath (today: dropped)             |
+|    [new] drop robot_row_id (field*10000+row)                         |
+|                                                                      |
+|  WRITES: topo map (YAML)                                             |
+|  +----------------------------------------------------------------+  |
+|  | doc.meta                                                       |  |
+|  |   hash8: c50f60d8        [new] first 8 of content_hash         |  |
+|  | nodes (entry / exit / waypoints per swath)                     |  |
+|  |   meta.row_id    = row_id_start + i   (per swath, set once)    |  |
+|  |   meta.row_role  = entry | exit                                |  |
+|  |   meta.lf_field  [new]                                         |  |
+|  |   meta.lf_row    [new]                                         |  |
+|  |   meta.lf_frag   [new]                                         |  |
+|  |   edges: in-row + headland (no headland across field/frag)    |  |
+|  +----------------------------------------------------------------+  |
+|  edit service: add/delete node/row, f2c save, repair                 |
+|     -> [new] any edit sets hash8 to "-"  (robot then rejects "map") |
+|                                                                      |
+|  WRITES: missions.db (SQLite, /workspace/maps/missions.db)           |
+|  +----------------------------------------------------------------+  |
+|  | existing: id name rows(entry node names) action action_params  |  |
+|  |           repeat_every_hours active created_at                 |  |
+|  |           last_run_at last_run_success                         |  |
+|  | [new]:    source(local|remote) external_id task_id map_hash    |  |
+|  |           groups(lf row per entry) state(idle|running|ended)   |  |
+|  |           steps_done stage reason started_at ended_at          |  |
+|  |           result_sent                                          |  |
+|  | [new] table intake_epoch(epoch, max_counter)                   |  |
+|  +----------------------------------------------------------------+  |
++==========================+===========================================+
+                           |
+                           | copy topo map file (how: not yet read)
+              +------------+-------------+
+              v                          v
+   +--------------------+     +--------------------+
+   |  ROBOT 2           |     |  ROBOT 3           |
+   |  placeholder       |     |  placeholder       |
+   |  same topo map:    |     |  same topo map:    |
+   |   same row_ids     |     |   same row_ids     |
+   |   same lf_* meta   |     |   same lf_* meta   |
+   |   same hash8       |     |   same hash8       |
+   |  own missions.db   |     |  own missions.db   |
+   |  never sees farm   |     |  never sees farm   |
+   |  map               |     |  map               |
+   +--------------------+     +--------------------+
+   ```
+
+Each robot resolves (field,row) by scanning node meta (lf_field, lf_row,
+lf_frag sorted by row_id), so the station never needs robot row ids.
+
+
 ## What exists (checked at cdbb668)
 
 - MissionStore keeps missions in SQLite (`/workspace/maps/missions.db`), with a YAML backend for older files. A mission is a list of entry node names, one action, and `last_run_at` and `last_run_success`. The UI can save, activate and delete missions.
@@ -48,6 +114,68 @@ This is not a safety function. E-stop and the independent safety subsystem are u
 - A robot's map counts as edited once a node is dropped, moved or removed. The robot then rejects remote missions with the reason `map` and reports `-` as its map hash in its hello message. This keeps "identical on every robot" true. Hook point is `topology_edit_service`, not yet read in detail.
 - A new season means a new farm map, a new `hash8` and a new topo map on every robot. Until a robot has it, it rejects remote missions with the reason `map`.
 - Check before relying on it: document meta is written by `TopoDoc.to_dict` and kept by its clone method, but the file loader and the way the map is copied between robots were not read. Meta and node metadata must survive save, load, copy to another robot and node-drop edits.
+
+
+### Robot comms
+
+```
++==================== FARMHOUSE SBC =====================================+
+|                                                                        |
+|  +---------------------+   HTTP    +--------------------------------+  |
+|  | docker: LiteFarm    |<--------->| docker: Station service        |  |
+|  |                     |           |                                |  |
+|  |  API                |  POST     |  poll loop (tasks)             |  |
+|  |  DB                 |  /login   |  dispatch + liveness (20 min)  |  |
+|  |                     |           |  result mapping -> PATCH       |  |
+|  |  tasks              |  GET      |                                |  |
+|  |  row plans + rows   |  /task/:farm_id                            |  |
+|  |  published farm map |  /row_plan/task/:id/rows                   |  |
+|  |  (content_hash)     |  /row_plan/:id                             |  |
+|  |                     |  /farm_map/farm/:id/published/geojson      |  |
+|  |                     |<----------+ PATCH /row_plan/task/:id/rows  |  |
+|  |                     |           |   done | aborted               |  |
+|  +---------------------+           |                                |  |
+|                                    |  SQLite (volume)               |  |
+|                                    |   missions, held tasks,        |  |
+|                                    |   unsent PATCHes, per-robot    |  |
+|                                    |   hash8 + last contact         |  |
+|                                    |  config: robot_id, pubkey      |  |
+|                                    |   prefix, assignee_user_id     |  |
+|                                    +---------------+----------------+  |
+|                                                    | serial            |
+|                                                    | /dev/tty* passed  |
+|                                                    | into container    |
+|                                    +---------------v----------------+  |
+|                                    | MeshCore companion radio       |  |
+|                                    | (1 radio, 1 port)              |  |
+|                                    +---------------+----------------+  |
++====================================================|===================+
+                                                     |
+                      MeshCore direct text, <=158 B, acked
+                      (companions do not repeat; unreachable is normal)
+                                                     |
+        M|mid|task|hash8|action|field|rows   ------> |
+        Q|mid   (hello if mid=0)             ------> |
+        C|mid                                ------> |
+        <------ A|mid|n    R|mid|why    E|mid|...    H|hash8|state
+                                                     |
+              +--------------------+-----------------+----+
+              v                    v                      v
+        +-----------+        +-----------+          +-----------+
+        | ROBOT 1   |        | ROBOT 2   |   ...    | ROBOT 10  |
+        | radio     |        | radio     |          | radio     |
+        | intake +  |        | intake +  |          | intake +  |
+        | missions  |        | missions  |          | missions  |
+        +-----+-----+        +-----+-----+          +-----+-----+
+              ^                    ^                      ^
+              +--------------------+----------------------+
+                 avoid frames: channel, zero-hop, no acks
+                 (robot to robot, same radio, only while on a mission)
+```
+
+
+
+
 
 ### 2. One mission store
 
