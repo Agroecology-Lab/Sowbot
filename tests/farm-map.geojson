@@ -1,0 +1,335 @@
+{
+  "type": "FeatureCollection",
+  "properties": {
+    "version": 1,
+    "generator": "litefarm",
+    "multi_field": true,
+    "farm_map_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "farm_map_version": 2,
+    "farm_map_name": "Map 2027",
+    "season": "2027",
+    "status": "published",
+    "previous_farm_map_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "content_hash": "c50f60d85849c514ef0cab4dc65b2417cd03ccb0acf624d2387c35cc77212eb8",
+    "published_at": "2027-02-01T09:00:00.000Z",
+    "fields": [
+      {
+        "generator": "litefarm-row-planner",
+        "source": "in_app",
+        "origin": [
+          48.004066,
+          3.661831
+        ],
+        "tool_width": 5,
+        "angle": 0,
+        "headland": 0,
+        "snake": true,
+        "contour": true,
+        "field_location_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "row_plan_id": "11111111-1111-4111-8111-111111111111",
+        "field_number": 1,
+        "field_name": "North field",
+        "row_count": 3
+      },
+      {
+        "generator": "litefarm-row-planner",
+        "source": "in_app",
+        "origin": [
+          48.005924,
+          3.66394
+        ],
+        "tool_width": 25,
+        "angle": 90,
+        "headland": 0,
+        "snake": true,
+        "contour": false,
+        "field_location_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "row_plan_id": "22222222-2222-4222-8222-222222222222",
+        "field_number": 2,
+        "field_name": "South field",
+        "row_count": 2
+      }
+    ],
+    "field_numbers": {
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": 1,
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb": 2
+    },
+    "next_field_number": 3
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "role": "field",
+        "field": 1,
+        "location_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "field_name": "North field"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              3.6618,
+              48.004
+            ],
+            [
+              3.6637999999999997,
+              48.004
+            ],
+            [
+              3.6637999999999997,
+              48.004999999999995
+            ],
+            [
+              3.6618,
+              48.004999999999995
+            ],
+            [
+              3.6618,
+              48.004
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "role": "row",
+        "row": 0,
+        "frag": 0,
+        "row_id": "f1000000-0000-4000-8000-000000000000",
+        "name": "F1R0",
+        "field": 1,
+        "location_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "farm_map_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "node_start": 0,
+        "node_names": [
+          "F1R0N0",
+          "F1R0N1"
+        ],
+        "length_m": 10
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.6619,
+            48.0041
+          ],
+          [
+            3.6624,
+            48.0041
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "role": "row",
+        "row": 1,
+        "frag": 0,
+        "row_id": "f1000000-0000-4000-8000-000000000001",
+        "name": "F1R1",
+        "field": 1,
+        "location_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "farm_map_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "node_start": 0,
+        "node_names": [
+          "F1R1N0",
+          "F1R1N1"
+        ],
+        "length_m": 10
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.6624,
+            48.00415
+          ],
+          [
+            3.6621,
+            48.00415
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "role": "row",
+        "row": 1,
+        "frag": 1,
+        "row_id": "f1000000-0000-4000-8000-000000000002",
+        "name": "F1R1",
+        "field": 1,
+        "location_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "farm_map_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "node_start": 2,
+        "node_names": [
+          "F1R1N2",
+          "F1R1N3"
+        ],
+        "length_m": 10
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.662,
+            48.00415
+          ],
+          [
+            3.6619,
+            48.00415
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "role": "row",
+        "row": 2,
+        "frag": 0,
+        "row_id": "f1000000-0000-4000-8000-000000000003",
+        "name": "F1R2",
+        "field": 1,
+        "location_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "farm_map_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "node_start": 0,
+        "node_names": [
+          "F1R2N0",
+          "F1R2N1",
+          "F1R2N2",
+          "F1R2N3"
+        ],
+        "length_m": 10
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.6619,
+            48.0042
+          ],
+          [
+            3.6621,
+            48.00422
+          ],
+          [
+            3.6623,
+            48.00421
+          ],
+          [
+            3.6624,
+            48.0042
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "role": "field",
+        "field": 2,
+        "location_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "field_name": "South field"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              3.6639,
+              48.0059
+            ],
+            [
+              3.6658999999999997,
+              48.0059
+            ],
+            [
+              3.6658999999999997,
+              48.006899999999995
+            ],
+            [
+              3.6639,
+              48.006899999999995
+            ],
+            [
+              3.6639,
+              48.0059
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "role": "row",
+        "row": 0,
+        "frag": 0,
+        "row_id": "f2000000-0000-4000-8000-000000000000",
+        "name": "F2R0",
+        "field": 2,
+        "location_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "farm_map_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "node_start": 0,
+        "node_names": [
+          "F2R0N0",
+          "F2R0N1"
+        ],
+        "length_m": 10
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.664,
+            48.006
+          ],
+          [
+            3.6645,
+            48.006
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "role": "row",
+        "row": 1,
+        "frag": 0,
+        "row_id": "f2000000-0000-4000-8000-000000000001",
+        "name": "F2R1",
+        "field": 2,
+        "location_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "farm_map_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "node_start": 0,
+        "node_names": [
+          "F2R1N0",
+          "F2R1N1"
+        ],
+        "length_m": 10
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.6645,
+            48.00605
+          ],
+          [
+            3.664,
+            48.00605
+          ]
+        ]
+      }
+    }
+  ]
+}

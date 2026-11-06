@@ -97,8 +97,8 @@ def _make_node(name: str, x: float, y: float, role: str, lat: float, lon: float,
         ),
         verts=list(_NODE_VERTS),
         # row_id and row_role must also live in .meta: topo_renderer.build_svg()
-        # reads nd.meta.get('row_role') for the in-circle label, and without it
-        # every row node is drawn as '?'.
+        # reads them to style row nodes and to place one label per row at its
+        # entry node.
         meta={'map': settings.map_name, 'node': name, 'row_id': row_id, 'row_role': role},
     )
     node.add_metadata(dropped_by='webui_f2c', timestamp=settings.timestamp,
