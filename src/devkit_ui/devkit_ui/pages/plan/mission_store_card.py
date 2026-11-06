@@ -59,6 +59,13 @@ class MissionStoreCard(ui.column):
         repeat = int(self._repeat.value) if self._repeat.value else None
         self._vm.save_queue(self._queue.items, self._name.value or '', repeat)
 
+    def _run_saved(self, mission_id: str) -> None:
+        """Run a saved mission now, showing its status under the list."""
+        def show(_level: str, text: str) -> None:
+            self._status_lbl.set_text(text)
+            self._status_lbl.style(RED if text.startswith('ERROR') else GREEN)
+        self._vm.run_saved(mission_id, show)
+
     def _refresh(self) -> None:
         """Show status and Run button state; rebuild the saved list if the store changed."""
         status = self._vm.status
@@ -102,6 +109,10 @@ class MissionStoreCard(ui.column):
             ui.label('✓' if last_ok is True else '✗' if last_ok is False else '—').classes(
                 'text-xs font-mono').style(GREEN if last_ok is True else
                                            RED if last_ok is False else MUTED)
+            if mission.get('source') != 'remote':  # the station starts remote missions
+                run = ui.button('▶', on_click=lambda _, m=mission_id: self._run_saved(m))
+                run.props('flat dense').classes('text-xs').style(GREEN)
+                run.tooltip('Run this saved mission now')
             active = ui.checkbox('', value=mission.get('active', False)).props('dense')
             active.tooltip('Active — included in today_queue()')
             active.on_value_change(lambda e, m=mission_id: self._vm.set_active(m, e.value))

@@ -283,7 +283,7 @@ class TestMissionStoreCard(unittest.TestCase):
         """Verify the controls carry the mission's id."""
         row = self.card._missions_col.children[1]
         checkbox = next(e for e in row.children if e.kind == 'checkbox')
-        delete = next(e for e in row.children if e.kind == 'button')
+        delete = next(e for e in row.children if e.kind == 'button' and e.text == '✕')
 
         self.assertFalse(checkbox.value)
         checkbox.handlers['value'](SimpleNamespace(value=True))
@@ -291,6 +291,28 @@ class TestMissionStoreCard(unittest.TestCase):
 
         self.vm.set_active.assert_called_once_with('M2', True)
         self.vm.delete.assert_called_once_with('M2')
+
+    def test_the_run_button_runs_that_saved_mission_and_shows_its_status(self) -> None:
+        """Verify the play button starts the mission by id and reports through the card."""
+        row = self.card._missions_col.children[1]
+        run = next(e for e in row.children if e.kind == 'button' and e.text == '▶')
+
+        run.click(None)
+
+        self.vm.run_saved.assert_called_once()
+        self.assertEqual(self.vm.run_saved.call_args.args[0], 'M2')
+        on_status = self.vm.run_saved.call_args.args[1]
+        on_status('ERROR', 'ERROR: boom')
+        self.assertEqual(self.card._status_lbl.text, 'ERROR: boom')
+
+    def test_remote_missions_have_no_run_button(self) -> None:
+        """Verify the station alone starts a remote mission."""
+        self.vm.missions = [dict(mission, source='remote') for mission in MISSIONS]
+        self.vm.version = 2
+        self.tick()
+
+        for row in self.card._missions_col.children:
+            self.assertFalse([e for e in row.children if e.kind == 'button' and e.text == '▶'])
 
     def test_no_saved_missions_shows_the_placeholder(self) -> None:
         """Verify an empty store shows its hint and no rows."""

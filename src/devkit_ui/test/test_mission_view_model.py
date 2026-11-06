@@ -147,6 +147,14 @@ class TestMissionViewModelRun(unittest.TestCase):
 
         self.app.start.assert_called_once_with(queue, on_status, self.on_nav_update)
 
+    def test_run_saved_starts_the_mission_and_routes_navigation_updates(self) -> None:
+        """Verify a saved mission runs through the application service with the nav callback."""
+        on_status = Mock()
+
+        self.vm.run_saved('MISSION_1', on_status)
+
+        self.app.run_saved.assert_called_once_with('MISSION_1', on_status, self.on_nav_update)
+
     def test_cancel_cancels_through_the_application_service(self) -> None:
         """Verify cancelling reaches the application service once."""
         self.vm.cancel()

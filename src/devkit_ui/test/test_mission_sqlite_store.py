@@ -1,5 +1,6 @@
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from typing import cast
@@ -190,6 +191,34 @@ class TestMissionSqliteSchema(unittest.TestCase):
         self.assertEqual(
             (mission['source'], mission['external_id'], mission['groups']),
             ('remote', '1.1', [4]))
+
+    def test_update_rejects_an_unknown_state_and_changes_nothing(self) -> None:
+        mid = cast(str, self._store.add(rows=[1], action='drive'))
+        with self.assertRaises(ValueError):
+            self._store.update(mid, state='paused', reason='x')
+        mission = cast(dict, self._store.find(mid))
+        self.assertEqual((mission['state'], mission['reason']), ('idle', None))
+
+    def test_concurrent_reads_and_writes_do_not_corrupt_the_connection(self) -> None:
+        errors: list[Exception] = []
+
+        def worker(tag: int) -> None:
+            try:
+                for n in range(50):
+                    mid = cast(str, self._store.add(rows=[1], action='drive', name=f'{tag}-{n}'))
+                    self._store.update(mid, state='running')
+                    self.assertIsNotNone(self._store.find(mid))
+                    self.assertGreater(len(self._store.missions), 0)
+            except Exception as exc:  # pylint: disable=broad-except
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(self._store.missions), 200)
 
     def test_epoch_counter_only_rises(self) -> None:
         self.assertIsNone(self._store.max_counter('7'))

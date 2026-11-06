@@ -1,6 +1,6 @@
 # Robot mission intake spec 
 
-Status: draft. Nothing here is built. Read from Sowbot caatinga-dev at cdbb668 (PR #213 merge, 6 Nov 2026). Neither the tests nor any hardware were run. Companion: Station service spec (rev 3), which defines the messages.
+Status: draft. Built so far: the SQLite schema and migration, the intake epoch table, `run_saved`, name-based `resolve_steps`, locked store reads, and the Run button for saved missions. Not built: outcome recording, intake, the radio link and the station. Originally read from Sowbot caatinga-dev at cdbb668 (PR #213 merge, 6 Nov 2026); the built parts were checked against mission-refactor with the mission unit tests. Nothing ran on hardware. Companion: Station service spec (rev 3), which defines the messages.
 
 Messages are named in plain words here: mission, cancel, status query, accepted, rejected, end report and hello. The [station spec gives the exact formats.](https://github.com/Agroecology-Lab/Sowbot_Station/blob/main/README.md)
 
@@ -88,8 +88,8 @@ lf_frag sorted by row_id), so the station never needs robot row ids.
 ## What exists (checked at cdbb668)
 
 - MissionStore keeps missions in SQLite (`/workspace/maps/missions.db`), with a YAML backend for older files. A mission is a list of entry node names, one action, and `last_run_at` and `last_run_success`. The UI can save, activate and delete missions.
-- Nothing runs a saved mission. `today_queue()` and `record_run()` have no callers, and the Run button runs the browser session's queue, not a saved mission.
-- The store and the runner do not fit together. The store holds entry node names. `start()` wants integer row ids.
+- A saved local mission runs from its own play button through `run_saved`. `today_queue()` and `record_run()` still have no callers, so nothing schedules a mission or records its outcome. The main Run Mission button still runs the browser session's queue.
+- The store holds entry node names and `start()` wants integer row ids. `resolve_steps` now accepts both.
 - `MissionApplicationService.start(queue, on_status, on_nav_update)` reports every failure through `on_status(ERROR, ...)` and returns normally.
 - `MissionDomainService` runs one mission on a thread. Per row: go to the entry, enable the tool, go to the exit, disable the tool. It stops at the first failure. Progress is text only.
 - `navigate_and_wait` gives each goal a fixed 300 s (`NAV_TIMEOUT_SEC`) and returns only true or false. `NavUpdate` carries a status and an outcome, with no measure of progress.
@@ -200,7 +200,7 @@ Rules:
 - A remote mission is inactive once it ends, whatever the result.
 - A small table `intake_epoch(epoch, max_counter)` holds the highest counter per epoch, so pruning old records cannot reopen replay. Keep the last 20 remote missions.
 - The YAML backend either gets the same fields or is retired for missions. Decide before migrating.
-- The SQLite `missions` property queries on every read, on one connection shared by several threads. The store lock covers writes only. A radio thread adds a writer, so reads should take the lock too.
+- The SQLite store holds one reentrant lock around every method, reads included, because its connection is shared by several threads. `update()` rejects an unknown `state`, as `add()` does.
 
 ### 3. One start path
 

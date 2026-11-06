@@ -1,5 +1,7 @@
+import functools
 import json
 import sqlite3
+import threading
 from collections.abc import Callable
 
 from devkit_ui.time_utils import now_utc_str
@@ -32,18 +34,32 @@ _ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
 SOURCES = frozenset({'local', 'remote'})
 STATES = frozenset({'idle', 'running', 'ended'})
 
+
+def _locked(method):
+    """Run a store method holding the connection lock, so threads never share the cursor state."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:  # pylint: disable=protected-access
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class MissionSqliteStore:
     """Owns the mission list and its SQLite persistence."""
 
     def __init__(self, path: str, on_write_done: Callable[[str], None] | None = None) -> None:
         self._path     = path
         self._on_write_done = on_write_done or (lambda _: None)
-        # We can disable same-thread check because we use locks to synchronize access.
+        # Every public method holds this lock, reads included, because the connection is shared
+        # by the UI, the mission worker and (later) the radio thread. It is reentrant so a method
+        # may call another, and so an on_write_done callback may read the store.
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._ensure_schema()
 
     @property
+    @_locked
     def missions(self) -> tuple[dict, ...]:
         """Fetches the list of missions."""
         cursor = self._conn.cursor()
@@ -57,12 +73,14 @@ class MissionSqliteStore:
         """Attaches the store to a node."""
         # Nothing needed here.
 
+    @_locked
     def close(self) -> None:
         """Closes the store."""
         self._conn.close()
 
     # ── public API ────────────────────────────────────────────────────────
 
+    @_locked
     def add(self,
             rows: list,
             action: str,
@@ -141,6 +159,7 @@ class MissionSqliteStore:
         self._on_write_done(f'{mid} created')
         return mid
 
+    @_locked
     def delete(self, mid: str) -> bool:
         """Deletes a mission."""
         cursor = self._conn.cursor()
@@ -149,6 +168,7 @@ class MissionSqliteStore:
         self._on_write_done(f'{mid} deleted')
         return True
 
+    @_locked
     def update(self, mid: str, **fields) -> bool:
         """Updates mutable fields on a mission.
 
@@ -156,7 +176,11 @@ class MissionSqliteStore:
         last_run_at, last_run_success, and the run result (state, steps_done, stage, reason,
         started_at, ended_at, result_sent). Other keys are ignored, including the identity of a
         remote mission (source, external_id, task_id, map_hash, groups), which is set once.
+        ValueError for an unknown state, as in add().
         """
+
+        if 'state' in fields and fields['state'] not in STATES:
+            raise ValueError(f"unknown state {fields['state']!r}")
 
         serialized_fields = self._serialize_row(fields)
 
@@ -182,6 +206,7 @@ class MissionSqliteStore:
         self._on_write_done(f'{mid} updated')
         return True
 
+    @_locked
     def find(self, mid: str) -> dict | None:
         """Finds a mission by id."""
         cursor = self._conn.cursor()
@@ -191,6 +216,7 @@ class MissionSqliteStore:
             return None
         return self._deserialize_row(result)
 
+    @_locked
     def find_by_name(self, name: str) -> dict | None:
         """Finds a mission by name."""
         cursor = self._conn.cursor()
@@ -239,6 +265,7 @@ class MissionSqliteStore:
 
     # ── remote intake ─────────────────────────────────────────────────────
 
+    @_locked
     def max_counter(self, epoch: str) -> int | None:
         """Return the highest counter accepted for an epoch, or None if none was."""
         cursor = self._conn.cursor()
@@ -246,6 +273,7 @@ class MissionSqliteStore:
         result = cursor.fetchone()
         return None if result is None else int(result[0])
 
+    @_locked
     def record_counter(self, epoch: str, counter: int) -> None:
         """Raise an epoch's highest accepted counter to `counter`; never lowers it."""
         cursor = self._conn.cursor()
@@ -255,6 +283,7 @@ class MissionSqliteStore:
         """, (epoch, int(counter)))
         self._conn.commit()
 
+    @_locked
     def prune_remote(self, keep: int = 20) -> int:
         """Delete all but the newest `keep` remote missions and return how many went.
 
