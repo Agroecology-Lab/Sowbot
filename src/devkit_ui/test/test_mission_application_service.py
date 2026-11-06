@@ -110,6 +110,24 @@ class TestRunSaved(unittest.TestCase):
         self.on_status.assert_called_once_with(mds.ERROR, "ERROR: 'MISSION_9' not found")
         self.executor.start.assert_not_called()
 
+    def test_saved_fallback_row_starts_at_the_live_entry(self) -> None:
+        """Resolve saved fallback rows after the live map gains a named entry."""
+        self.store.find.return_value = {**self.store.find.return_value, 'rows': ['ROW_3_IN']}
+
+        self.service.run_saved('MISSION_1', self.on_status)
+
+        self.assertEqual(self.executor.start.call_args.args[0],
+                         [(3, 'E', 'X', 'weed', {'depth': 0.4})])
+
+    def test_ambiguous_saved_row_does_not_start(self) -> None:
+        """Report duplicate entries before starting a saved mission worker."""
+        self.topology.get_doc.return_value.nodes.append(node('another_entry', 3, 'entry'))
+
+        self.service.run_saved('MISSION_1', self.on_status)
+
+        self.executor.start.assert_not_called()
+        self.on_status.assert_called_once_with(mds.ERROR, 'ERROR: multiple entry nodes for row 3')
+
     def test_a_row_missing_from_the_map_is_reported_by_start(self) -> None:
         """Verify an entry name the live map lacks fails like any other start error."""
         self.store.find.return_value = {**self.store.find.return_value, 'rows': ['GONE']}

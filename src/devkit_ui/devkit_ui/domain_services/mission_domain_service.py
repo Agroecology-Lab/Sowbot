@@ -36,11 +36,12 @@ class MissionError(Exception):
 def resolve_steps(topo_doc, queue: list) -> list[MissionStep]:
     """Resolve queued (row, action, params) tuples to entry and exit nodes.
 
-    row is an integer row id, or the name of a row's entry node (as saved missions store it).
+    row is an integer row id, an entry node name, or a saved ROW_<id>_IN fallback.
     A name resolves through the entry's row_id, so its exit is found the same way.
     Return (row_id, entry_name, exit_name, action, params) tuples in queue order,
     preserving repeated rows; an empty queue returns an empty list when a map is loaded.
-    Map row IDs are converted to integers; the last node for each row and role wins.
+    Map row IDs are converted to integers; distinct entries for one row are rejected.
+    The last exit node for each row wins. Entry names take precedence over row ID aliases.
     Raises MissionError if there is no map, a name is not an entry node, or any queued row
     lacks an entry or exit node.
     """
@@ -59,14 +60,18 @@ def resolve_steps(topo_doc, queue: list) -> list[MissionStep]:
         except (TypeError, ValueError):
             continue
         if role == 'entry':
+            if rid_int in row_entry and row_entry[rid_int] != node.name:
+                raise MissionError(f'multiple entry nodes for row {rid_int}')
             row_entry[rid_int] = node.name
             entry_row[node.name] = rid_int
         elif role == 'exit':
             row_exit[rid_int] = node.name
-    unknown = [row for row, _, _ in queue if isinstance(row, str) and row not in entry_row]
+    row_aliases = {alias: rid for rid in row_entry for alias in (str(rid), f'ROW_{rid}_IN')}
+    row_aliases.update(entry_row)
+    unknown = [row for row, _, _ in queue if isinstance(row, str) and row not in row_aliases]
     if unknown:
         raise MissionError(f'unknown entry node(s) {unknown}')
-    resolved = [(entry_row[row] if isinstance(row, str) else row, act, params)
+    resolved = [(row_aliases[row] if isinstance(row, str) else row, act, params)
                 for row, act, params in queue]
     missing = sorted({rid for rid, _, _ in resolved if rid not in row_entry or rid not in row_exit})
     if missing:

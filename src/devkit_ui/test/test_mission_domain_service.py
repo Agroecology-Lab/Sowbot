@@ -49,6 +49,31 @@ def doc(*nodes):
 
 
 class TestResolveSteps(unittest.TestCase):
+    def test_distinct_entries_for_the_same_row_are_rejected(self) -> None:
+        """Reject ambiguous entries regardless of which saved name is queued."""
+        topo = doc(node('A', 9, 'entry'), node('B', '9', 'entry'), node('X', 9, 'exit'))
+        for row in ('A', 'B', 'ROW_9_IN', 9):
+            with self.subTest(row=row), self.assertRaisesRegex(MissionError, 'multiple entry nodes for row 9'):
+                resolve_steps(topo, [(row, 'drive', None)])
+
+    def test_repeated_same_entry_is_unambiguous(self) -> None:
+        """Repeated metadata for the same entry name preserves resolution."""
+        topo = doc(node('A', 9, 'entry'), node('A', '9', 'entry'), node('X', 9, 'exit'))
+        self.assertEqual(resolve_steps(topo, [('A', 'drive', None)]), [(9, 'A', 'X', 'drive', None)])
+
+    def test_saved_row_aliases_resolve_to_the_live_entry(self) -> None:
+        """Fallback names and string row IDs survive an entry rename."""
+        topo = doc(node('new_entry', 9, 'entry'), node('X', 9, 'exit'))
+        self.assertEqual(resolve_steps(topo, [('ROW_9_IN', 'drive', None), ('9', 'drive', None)]),
+                         [(9, 'new_entry', 'X', 'drive', None)] * 2)
+
+    def test_entry_name_takes_precedence_over_row_alias(self) -> None:
+        """Existing entry names keep their identity even when they look like fallbacks."""
+        topo = doc(node('ROW_9_IN', 1, 'entry'), node('X', 1, 'exit'),
+                   node('E9', 9, 'entry'), node('X9', 9, 'exit'))
+        self.assertEqual(resolve_steps(topo, [('ROW_9_IN', 'drive', None)]),
+                         [(1, 'ROW_9_IN', 'X', 'drive', None)])
+
     def test_resolves_entry_and_exit(self) -> None:
         """Verify each queued row maps to its entry and exit node names."""
         topo = doc(node('A_1', 1, 'entry'), node('A_2', 1, 'exit'), node('B_1', '2', 'entry'),

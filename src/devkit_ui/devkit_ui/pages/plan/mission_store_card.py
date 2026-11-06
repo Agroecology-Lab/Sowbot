@@ -83,7 +83,9 @@ class MissionStoreCard(ui.column):
         mission_id = mission.get('id', '?')
         action = ACTIONS.get(mission.get('action', '—'))
         due = self._vm.next_due_in_hours(mission_id)
-        if due is None:
+        if mission.get('source') == 'remote':
+            due_text, due_style = 'station-controlled', MUTED
+        elif due is None:
             due_text, due_style = 'done', MUTED
         elif due == 0.0:
             due_text, due_style = 'due now', GREEN

@@ -271,6 +271,14 @@ class TestMissionStoreCard(unittest.TestCase):
 
         self.assertEqual(styles, [GREEN, 'color:#8c959f', 'color:#9a6700'])
 
+    def test_remote_missions_show_station_control_instead_of_due_times(self) -> None:
+        """Station control is shown for never-run, ended and recurring remote missions."""
+        self.vm.missions = [dict(mission, source='remote') for mission in MISSIONS]
+        self.vm.version = 2
+        self.tick()
+
+        self.assertEqual([row[2] for row in self.rows()], ['station-controlled'] * 3)
+
     def test_the_active_box_and_delete_button_act_on_that_mission(self) -> None:
         """Verify the controls carry the mission's id."""
         row = self.card._missions_col.children[1]

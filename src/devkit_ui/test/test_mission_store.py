@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 import yaml
 
+from devkit_ui.missions.sqlite import MissionSqliteStore
 from devkit_ui.missions.store import DUE_FAILED, DUE_NOW, MissionStore, validate_mission
 from devkit_ui.time_utils import parse_ts
 
@@ -341,8 +342,9 @@ class TestRemoteMissionsAreNotScheduled(unittest.TestCase):
         self.addCleanup(store.close)
         store.attach(Mock())
         local = cast(str, store.add(rows=['R1'], action='drive'))
-        remote = cast(str, store._store.add(  # pylint: disable=protected-access
-            ['R2'], 'drive', source='remote', external_id='1.1'))
+        backend = cast(MissionSqliteStore, store._store)  # pylint: disable=protected-access
+        remote = cast(str, MissionSqliteStore.add(
+            backend, ['R2'], 'drive', source='remote', external_id='1.1'))
         store.record_run(remote, False)
 
         self.assertEqual([entry[0] for entry in store.today_queue()], [local])
