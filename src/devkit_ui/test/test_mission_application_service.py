@@ -1,7 +1,8 @@
 """Test starting and cancelling a mission through MissionApplicationService."""
 # pylint: disable=protected-access,attribute-defined-outside-init
+import sqlite3
 import unittest
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
 
 import test_mission_domain_service as fixtures
 from devkit_ui.application_services.mission_application_service import MissionApplicationService
@@ -154,6 +155,11 @@ class TestRunSavedRecordsTheOutcome(unittest.TestCase):
             self.store, self.executor, self.topology, Mock(available=True),
             Mock(soft_estop_active=False))
         self.on_status = Mock()
+        self.real_executor = mds.MissionDomainService(Mock())
+        self.executor.start.side_effect = self.real_executor.start
+        thread_patch = patch.object(mds.threading.Thread, 'start')
+        self.thread_start = thread_patch.start()
+        self.addCleanup(thread_patch.stop)
 
     def callbacks(self):
         """Return the on_result and on_step_done callbacks the executor was given."""
@@ -214,9 +220,67 @@ class TestRunSavedRecordsTheOutcome(unittest.TestCase):
         self.assertFalse(self.service.run_saved('MISSION_1', self.on_status))
 
         self.executor.start.assert_not_called()
+        self.store.record_result.assert_not_called()
+
+    def test_busy_executor_never_changes_results(self) -> None:
+        self.real_executor._running = True
+        self.assertFalse(self.service.run_saved('MISSION_1', self.on_status))
+        self.store.record_result.assert_not_called()
+
+    def test_thread_start_failure_restores_result_and_original_error(self) -> None:
+        error = OSError('no thread')
+        self.thread_start.side_effect = error
+        with self.assertRaises(OSError) as raised:
+            self.service.run_saved('MISSION_1', self.on_status)
+        self.assertIs(raised.exception, error)
         self.assertEqual(self.store.record_result.call_args.kwargs, {
-            'state': 'ended', 'steps_done': 4, 'stage': 'row', 'reason': 'nav',
-            'started_at': 'then', 'ended_at': 'later'})
+            key: self.mission[key] for key in
+            ('state', 'steps_done', 'stage', 'reason', 'started_at', 'ended_at')})
+        self.assertFalse(self.real_executor.running)
+
+    def test_fast_worker_result_is_never_restored(self) -> None:
+        def finish():
+            on_result, _ = self.callbacks()
+            on_result(mds.MissionResult(True, 1))
+        self.thread_start.side_effect = finish
+        self.assertTrue(self.service.run_saved('MISSION_1', self.on_status))
+        self.assertEqual(self.store.record_result.call_args.kwargs['state'], 'ended')
+        self.assertEqual(self.store.record_result.call_args.kwargs['steps_done'], 1)
+
+    def test_status_failure_restores_result(self) -> None:
+        self.on_status.side_effect = RuntimeError('status failed')
+        with self.assertRaisesRegex(RuntimeError, 'status failed'):
+            self.service.run_saved('MISSION_1', self.on_status)
+        self.assertEqual(self.store.record_result.call_args.kwargs['state'], 'ended')
+        self.thread_start.assert_not_called()
+
+    def test_initialization_failure_does_not_start_worker(self) -> None:
+        self.store.record_result.side_effect = [sqlite3.OperationalError('locked'), True]
+        with self.assertRaises(sqlite3.OperationalError):
+            self.service.run_saved('MISSION_1', self.on_status)
+        self.thread_start.assert_not_called()
+        self.assertEqual(self.store.record_result.call_args.kwargs['steps_done'], 4)
+
+    def test_completion_retries_the_whole_operation(self) -> None:
+        self.mission['source'] = 'remote'
+        self.service.run_saved('MISSION_1', self.on_status)
+        on_result, _ = self.callbacks()
+        self.store.set_active.side_effect = [sqlite3.OperationalError('locked'), None]
+        with patch('devkit_ui.application_services.mission_application_service.time.sleep'):
+            on_result(mds.MissionResult(False, 1, 'row', 'cancel'))
+        self.assertEqual(self.store.record_run.call_count, 2)
+        self.assertEqual(self.store.set_active.call_count, 2)
+        self.assertEqual(self.store.record_result.call_args.kwargs['state'], 'ended')
+
+    def test_persistent_completion_failure_is_reported(self) -> None:
+        self.service.run_saved('MISSION_1', self.on_status)
+        on_result, _ = self.callbacks()
+        self.store.record_result.side_effect = sqlite3.OperationalError('locked')
+        with patch('devkit_ui.application_services.mission_application_service.time.sleep'):
+            with self.assertRaises(sqlite3.OperationalError):
+                on_result(mds.MissionResult(True, 1))
+        self.assertIn('completion could not be saved', self.on_status.call_args.args[1])
+        self.store.set_status.assert_called_once()
 
     def test_an_unknown_mission_records_nothing(self) -> None:
         self.store.find.return_value = None

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -145,7 +146,8 @@ class MissionDomainService:
     def start(self, steps: list[MissionStep], navigate: Callable[[str], bool | str],
               on_status: StatusCallback, estop_active: Callable[[], bool],
               on_result: Callable[[MissionResult], None] | None = None,
-              on_step_done: Callable[[int], None] | None = None) -> None:
+              on_step_done: Callable[[int], None] | None = None,
+              *, prepare_run: Callable[[], AbstractContextManager] | None = None) -> None:
         """Start executing steps on a daemon thread.
 
         steps contains (row_id, entry_node, exit_node, action_key, action_params) tuples.
@@ -162,6 +164,7 @@ class MissionDomainService:
         Empty steps report completion without navigating.
 
         Raises MissionError if a mission is already running.
+        prepare_run supplies a context entered after admission, around pre-worker startup.
         Initial status callback and thread startup errors propagate after clearing running.
         """
         with self._lock:
@@ -170,11 +173,12 @@ class MissionDomainService:
             self._running = True
             self._cancel = False
         try:
-            on_status(INFO, f'Starting {len(steps)} step(s)…')
-            threading.Thread(
-                target=self._execute,
-                args=(steps, navigate, on_status, estop_active, on_result, on_step_done),
-                daemon=True).start()
+            with prepare_run() if prepare_run is not None else nullcontext():
+                on_status(INFO, f'Starting {len(steps)} step(s)…')
+                threading.Thread(
+                    target=self._execute,
+                    args=(steps, navigate, on_status, estop_active, on_result, on_step_done),
+                    daemon=True).start()
         except BaseException:
             with self._lock:
                 self._running = False

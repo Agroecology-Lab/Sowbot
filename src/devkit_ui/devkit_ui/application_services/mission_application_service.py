@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import sqlite3
+import time
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING
 
 from devkit_ui.domain_services.mission_domain_service import (
@@ -129,7 +132,8 @@ class MissionApplicationService:
     def start(self, queue: list, on_status: StatusCallback,
               on_nav_update: Callable[[NavUpdate], None] | None = None,
               on_result: Callable[[MissionResult], None] | None = None,
-              on_step_done: Callable[[int], None] | None = None) -> bool:
+              on_step_done: Callable[[int], None] | None = None,
+              prepare_run: Callable[[], AbstractContextManager] | None = None) -> bool:
         """Run the queued (row_id, action_key, action_params) steps on a worker thread.
 
         Return True if the mission started. Report an empty queue, a running mission,
@@ -139,6 +143,7 @@ class MissionApplicationService:
         then on the worker. on_nav_update receives each navigation update, on the worker.
         on_step_done(n) and on_result(MissionResult) run on the worker; see
         MissionDomainService.start.
+        prepare_run is entered after admission and before the worker starts.
         Other startup errors propagate.
         """
         if not queue:
@@ -154,7 +159,8 @@ class MissionApplicationService:
             steps = resolve_steps(self._topology.get_doc(), queue)
             self._mission_service.start(
                 steps, lambda target: self._navigate(target, on_nav_update), on_status,
-                lambda: self._drive.soft_estop_active, on_result, on_step_done)
+                lambda: self._drive.soft_estop_active, on_result, on_step_done,
+                **({'prepare_run': prepare_run} if prepare_run is not None else {}))
         except MissionError as exc:
             on_status(ERROR, f'ERROR: {exc}')
             return False
@@ -183,11 +189,26 @@ class MissionApplicationService:
         action, params = mission['action'], mission.get('action_params') or {}
         queue = [(row, action, params) for row in mission.get('rows', ())]
 
-        fields = ('state', 'steps_done', 'stage', 'reason', 'started_at', 'ended_at')
-        before = {name: mission.get(name) for name in fields if name in mission}
-        self._store.record_result(
-            mission_id, state='running', steps_done=0, stage=None, reason=None,
-            started_at=now_utc_str(), ended_at=None)
+        @contextmanager
+        def prepare_run() -> Iterator[None]:
+            """Initialize after admission; roll back only before the worker starts."""
+            fields = ('state', 'steps_done', 'stage', 'reason', 'started_at', 'ended_at')
+            current = self._store.find(mission_id)
+            if current is None:
+                raise MissionError(f'{mission_id!r} not found')
+            before = {name: current.get(name) for name in fields if name in current}
+            try:
+                if self._store.record_result(
+                        mission_id, state='running', steps_done=0, stage=None, reason=None,
+                        started_at=now_utc_str(), ended_at=None) is False:
+                    raise RuntimeError(self._store.status)
+                yield
+            except BaseException:
+                try:
+                    self._store.record_result(mission_id, **before)
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._store.set_status(f'ERROR: restoring {mission_id} failed: {exc}')
+                raise
 
         def on_step_done(count: int) -> None:
             """Store the steps finished so far, so a restart reports a true count."""
@@ -195,18 +216,35 @@ class MissionApplicationService:
 
         def on_result(result: MissionResult) -> None:
             """Store how the mission ended and re-arm its schedule."""
-            self._store.record_result(
-                mission_id, state='ended', steps_done=result.steps_done, stage=result.stage,
-                reason=result.reason, ended_at=now_utc_str())
-            self._store.record_run(mission_id, result.ok)
-            if mission.get('source') == 'remote':
-                self._store.set_active(mission_id, False)
+            ended_at = now_utc_str()
 
-        if self.start(queue, on_status, on_nav_update, on_result, on_step_done):
-            return True
-        if before:
-            self._store.record_result(mission_id, **before)
-        return False
+            def complete() -> None:
+                if self._store.record_result(
+                        mission_id, state='ended', steps_done=result.steps_done, stage=result.stage,
+                        reason=result.reason, ended_at=ended_at) is False:
+                    raise RuntimeError(self._store.status)
+                if self._store.record_run(mission_id, result.ok) is False:
+                    raise RuntimeError(self._store.status)
+                if mission.get('source') == 'remote':
+                    self._store.set_active(mission_id, False)
+
+            try:
+                for attempt in range(3):
+                    try:
+                        complete()
+                        break
+                    except sqlite3.OperationalError:
+                        if attempt == 2:
+                            raise
+                        time.sleep(0.1)
+            except Exception as exc:  # pylint: disable=broad-except
+                text = f'ERROR: mission {mission_id} completion could not be saved: {exc}'
+                self._store.set_status(text)
+                on_status(ERROR, text)
+                raise
+
+        return self.start(queue, on_status, on_nav_update, on_result, on_step_done,
+                          prepare_run=prepare_run)
 
     def cancel(self) -> None:
         """Stop the mission before its next goal, then cancel the goal in flight.
