@@ -1,8 +1,8 @@
 # Robot mission intake spec 
 
-Status: draft. Built so far: the SQLite schema and migration, including the remote-mission columns; the `intake_epoch` table with its counter and pruning methods on the SQLite store; `run_saved` with outcome recording; name-based `resolve_steps`; locked store reads; the structured mission result; `today_queue()` skipping remote missions; and the Run button for saved missions. Not built: the stall watchdog, the farm map import into the topo map (field, row and fragment metadata, `hash8`, the edit hook), the intake, the radio link and the station. `MissionStore` does not yet expose the remote arguments of `add()`, the epoch methods or `prune_remote`, which exist only on `MissionSqliteStore`, so nothing can create a remote mission yet.
+Status: draft. Built so far: the SQLite schema and migration, including the remote-mission columns; `MissionStore.add_remote` and the epoch, lookup and pruning methods on `MissionStore`; ending any mission left running by a restart; `run_saved` with outcome recording; name-based `resolve_steps`; locked store reads; the structured mission result; ids that are never reused; `today_queue()` skipping remote missions; and the Run button and a result line for saved missions. Not built: the stall watchdog, the farm map import into the topo map (field, row and fragment metadata, `hash8`, the edit hook), the intake, the radio link and the station. Nothing calls `add_remote` yet.
 
-Originally read from Sowbot caatinga-dev at cdbb668 (PR #213 merge, 6 Nov 2026). Updated on 6 Nov 2026 against mission-refactor at 980b2fb by reading the code. The mission, store, farm map import and plan import tests pass (191 tests) with `std_msgs` stubbed, because ROS is not installed in that environment. Nothing ran under ROS or on hardware. Companion: Station service spec (rev 3), which defines the messages.
+Originally read from Sowbot caatinga-dev at cdbb668 (PR #213 merge, 6 Nov 2026). Updated on 6 Nov 2026 against mission-refactor at 980b2fb by reading the code, then with the store changes made after that commit. The mission, store, farm map import and plan import tests pass (211 tests) with `std_msgs` stubbed, because ROS is not installed in that environment. Nothing ran under ROS or on hardware. Companion: Station service spec (rev 3), which defines the messages.
 
 Messages are named in plain words here: mission, cancel, status query, accepted, rejected, end report and hello. The [station spec gives the exact formats.](https://github.com/Agroecology-Lab/Sowbot_Station/blob/main/README.md)
 
@@ -94,9 +94,11 @@ This resolution is not built. Today `resolve_steps` resolves integer row ids and
 
 ## What exists (checked at 980b2fb)
 
-- MissionStore keeps missions in SQLite (`/workspace/maps/missions.db`). A `.yaml` path selects the YAML backend, which has none of the new fields. A mission is a list of entry node names, one action, `last_run_at` and `last_run_success`. On SQLite it also has the remote-mission columns and the run result (`state`, `steps_done`, `stage`, `reason`, `started_at`, `ended_at`, `result_sent`). A database from before these columns gains them when opened, with `source` local and `state` idle. The UI can save, activate, delete and run saved missions. It shows only the last-run tick or cross, not the stored result.
-- `MissionStore.add()` takes the local fields only. The remote arguments (`source`, `external_id`, `task_id`, `map_hash`, `groups`, `state`), `max_counter`, `record_counter` and `prune_remote` exist on `MissionSqliteStore` only, and `MissionStore` does not expose them. Nothing calls `prune_remote` or `record_counter`. `MissionStore.record_result()` writes the run result and does nothing for YAML.
-- A saved local mission runs from its play button through `run_saved`, which records state, steps done, stage and reason and calls `record_run()`. Remote missions get no play button and are labelled "station-controlled". `today_queue()` skips remote missions and still has no caller, so nothing schedules a mission. The main Run Mission button still runs the browser session's queue through `start()` with no result callbacks and records nothing.
+- MissionStore keeps missions in SQLite (`/workspace/maps/missions.db`). A `.yaml` path selects the YAML backend, which has none of the new fields. A mission is a list of entry node names, one action, `last_run_at` and `last_run_success`. On SQLite it also has the remote-mission columns and the run result (`state`, `steps_done`, `stage`, `reason`, `started_at`, `ended_at`, `result_sent`). A database from before these columns gains them when opened, with `source` local and `state` idle. The UI can save, activate, delete and run saved missions. It shows the last-run tick or cross and a result line (`result_text`): running with steps so far, done, or why it stopped, the stage and the steps finished.
+- `MissionStore.add()` takes the local fields only. `MissionStore.add_remote()` stores a station mission idle and active, and refuses a YAML store, an empty id or map hash, rows and groups of different lengths, a validation error and a repeated `external_id`. `find_by_external_id`, `max_counter`, `record_counter` and `prune_remote` are on `MissionStore` too, and raise `RuntimeError` for YAML, which cannot keep replay protection. Nothing outside the tests calls any of them. `MissionStore.record_result()` writes the run result and does nothing for YAML.
+- Mission ids are allocated by SQLite (the column is `AUTOINCREMENT`), so a deleted mission's id is not reused. `MissionStore.delete()` refuses a mission that is running, because its run still has to write a result.
+- `MissionStore.attach()` ends every mission stored as running, with the reason `reboot`, because a restart does not resume a run. `steps_done` and `stage` keep their last values. A remote mission also becomes inactive and its end report is marked unsent. `last_run_at` and `last_run_success` are left alone, because the run did not finish.
+- A saved local mission runs from its play button through `run_saved`, which records state, steps done, stage and reason and calls `record_run()`. Remote missions get no play button and are labelled "station-controlled". `today_queue()` skips remote missions and still has no caller, so nothing schedules a mission. The main Run Mission button runs the browser session's queue through `start()` with no result callbacks and records nothing. That is deliberate: a queue run is not a saved mission, and a record per run would fill the store.
 - The store holds entry node names and `start()` wants integer row ids. `resolve_steps` accepts integer ids, entry node names, bare id strings and the saved `ROW_<id>_IN` fallback. It rejects an unknown name and two entry nodes for one row.
 - `MissionApplicationService.start(queue, on_status, on_nav_update, on_result, on_step_done)` reports every failure through `on_status(ERROR, ...)` and returns False. It returns True once the worker has started.
 - `MissionDomainService` runs one mission on a thread. Per row: go to the entry, enable the tool, go to the exit, disable the tool. It checks cancel and the soft e-stop before each leg and stops at the first failure. It reports text progress through `on_status`, the count of finished steps through `on_step_done` and one `MissionResult` through `on_result`.
@@ -206,13 +208,13 @@ Built in `MissionSqliteStore`. `_ensure_schema` adds each column of `_ADDED_COLU
 
 Rules:
 
-- Remote missions store `rows` as entry node names with every fragment expanded, so the record matches what ran even if the map changes later. Not built: nothing creates a remote mission, because `MissionStore.add()` has no remote arguments.
+- Remote missions store `rows` as entry node names with every fragment expanded, so the record matches what ran even if the map changes later. `add_remote` stores the rows it is given, so intake does the expansion. Nothing calls it yet.
 - `today_queue()` skips remote missions. Without this, a failed remote mission would count as due for retry, which the current rule does for local ones. Built and tested.
 - A remote mission is inactive once it ends, whatever the result. Built in `run_saved`.
-- `intake_epoch(epoch, max_counter)` holds the highest counter per epoch, so pruning old records cannot reopen replay. `record_counter` only raises it. `prune_remote(keep=20)` deletes all but the newest 20 remote missions and leaves local missions and `intake_epoch` alone. Built on `MissionSqliteStore`, tested there, not exposed by `MissionStore`, and nothing calls it.
+- `intake_epoch(epoch, max_counter)` holds the highest counter per epoch, so pruning old records cannot reopen replay. `record_counter` raises it only when the new counter is higher, and returns whether it did. The check and the write are one statement, so two callers cannot both succeed with the same counter. `prune_remote(keep=20)` deletes all but the newest 20 remote missions, except a running one, and leaves local missions and `intake_epoch` alone. Built and tested.
 - The YAML backend gets none of the fields, and `record_result` does nothing for it. Remote missions cannot work on YAML. Still to decide: retire YAML for missions, or give it the fields. The default path is the `.db` file.
 - The SQLite store holds one reentrant lock around every method, reads included, because its connection is shared by several threads. `update()` rejects an unknown `state`, as `add()` does. Built and tested.
-- Mission ids come from `MAX(id) + 1`, so deleting the newest mission, which pruning can do, lets its id be reused. Remote records are identified by `external_id`, so this does not affect them.
+- A mission left running by a restart is ended with the reason `reboot` when the store is attached (see "What exists"). Intake reports the remote ones.
 
 ### 3. One start path
 
@@ -278,7 +280,7 @@ Checks run in this order, each with its own rejection reason:
 5. row: a (field, row) is missing from the map, is duplicated, or lacks an entry or exit node. Run the same resolution as `resolve_steps` here.
 6. nav: navigation is unavailable.
 
-Then write the mission to the store (source remote, state running) and call `run_saved`. If `start()` delivers an ERROR on the calling thread, delete the record and reject the mission with the reason `nav` (or `busy` for "mission already running"). Otherwise accept it, reporting no rows done. The highest counter moves only for accepted missions.
+Then write the mission with `add_remote` (stored idle) and call `run_saved`, which marks it running. If `start()` delivers an ERROR on the calling thread, delete the record and reject the mission with the reason `nav` (or `busy` for "mission already running"). The record is idle again by then, so `delete` allows it. Otherwise accept it, reporting no rows done, and call `record_counter`. The highest counter moves only for accepted missions. A repeated mission id is found with `find_by_external_id` before any of this.
 
 The domain service takes its own lock when starting, so a simultaneous start from the web UI loses cleanly and shows up as that ERROR.
 
@@ -297,7 +299,7 @@ The result is already in the store when the executor finishes. Send the end repo
 
 ### Boot
 
-A mission stored as running is marked ended with the reason `reboot` and its stored `steps_done`. Send a hello message (map hash, state idle), then the end report for that mission. The robot does not resume after a restart. A status query for mission 0 gets a hello reply.
+The store already ended any mission stored as running, with the reason `reboot` and its stored `steps_done`, when it was attached. Built. Intake then sends a hello message (map hash, state idle), then an end report for each remote mission whose `result_sent` is false. The robot does not resume after a restart. A status query for mission 0 gets a hello reply.
 
 ## Limits
 
@@ -311,15 +313,15 @@ None of these is enforced yet, because there is no intake.
 
 The tests are in `src/devkit_ui/test`: `test_mission_store`, `test_mission_sqlite_store`, `test_mission_yaml_store`, `test_mission_domain_service`, `test_mission_application_service`, `test_mission_boundaries`, `test_mission_view_model`, `test_farm_map_import` and `test_plan_import`.
 
-Written and passing (191 tests on 6 Nov 2026, with `std_msgs` stubbed, not run under colcon):
+Written and passing (211 tests on 6 Nov 2026, with `std_msgs` stubbed, not run under colcon):
 
-- Store: schema migration of an existing database, remote missions excluded from `today_queue` even after a failed run, the epoch counter only rising, pruning keeping the newest remote missions, all local missions and the counter, concurrent reads and writes, and result storage (nothing written for YAML).
+- Store: `add_remote` and its refusals, YAML refusing remote missions, ids not reused after a delete, no delete of a running mission, `attach` ending a mission left running, pruning sparing a running mission, `record_counter` reporting whether it raised the counter, `result_text`, schema migration of an existing database, remote missions excluded from `today_queue` even after a failed run, the epoch counter only rising, pruning keeping the newest remote missions, all local missions and the counter, concurrent reads and writes, and result storage (nothing written for YAML).
 - Run path: `run_saved` marks the mission running, stores the result and re-arms the schedule, makes a remote mission inactive, and keeps the previous result when the start is refused. `cancel` against `estop` is reported correctly, as is a failing result callback and an executor exception.
 - Import: `parse_farm_map` and its hash check, including `hash8`.
 
 Not written yet:
 
-- Unit: message parser and bad input, check ordering, mission id replay and idempotency, result mapping for reboot, whole-row counting across fragments.
+- Unit: message parser and bad input, check ordering, mission id replay and idempotency, whole-row counting across fragments.
 - Import: a farm map with a split row gives distinct row ids and keeps field, row and fragment in node metadata. This needs the import path to be built first.
 - Simulation: sowbot_avoid's `LoopBus` and `LoopRadio` as a fake radio for intake, then the Gazebo multi-row mission, including a failed transit and a cancel.
 - On the real session before relying on it: intake and avoid on one meshcore_py connection, contact provisioning, `CONTACT_MSG_RECV` delivery with auto fetching on.
@@ -333,6 +335,4 @@ Not written yet:
 4. The avoid route (node ids) must be derived from the nodes along each row (entry, waypoints, exit). Not designed.
 5. Station and robot clocks are not trusted. The station records its own receive time as `completed_at`.
 6. Radio ownership (section 6).
-7. `MissionStore` needs `add()` with the remote arguments and wrappers for the epoch methods and `prune_remote` before intake can use them.
-8. YAML backend for missions: retire it or give it the fields (section 2).
-9. The main Run Mission button records nothing. Decide whether it should go through the same result recording.
+7. YAML backend for missions: retire it or give it the fields (section 2). Remote missions cannot use it.
