@@ -1,6 +1,7 @@
 """Plan tab mission queue, mission store and page composition, over a small fake UI."""
 # pylint: disable=protected-access,attribute-defined-outside-init,no-member
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -303,7 +304,44 @@ class TestMissionStoreCard(unittest.TestCase):
         self.assertEqual(self.vm.run_saved.call_args.args[0], 'M2')
         on_status = self.vm.run_saved.call_args.args[1]
         on_status('ERROR', 'ERROR: boom')
-        self.assertEqual(self.card._status_lbl.text, 'ERROR: boom')
+        self.tick()
+        self.assertEqual(self.card._run_status_lbl.text, 'ERROR: boom')
+        self.assertEqual(self.card._run_status_lbl.styles[-1], RED)
+
+    def test_run_status_survives_refresh_and_store_actions(self) -> None:
+        """Keep the latest run message alongside independently styled store feedback."""
+        self.card._run_saved('M1')
+        on_status = self.vm.run_saved.call_args.args[1]
+        for message, colour in (('ERROR: boom', RED), ('Mission complete', GREEN)):
+            on_status('INFO', message)
+            for version in (1, 2):
+                self.vm.version = version
+                self.vm.status = 'saved M4'
+                self.tick()
+                self.assertEqual(self.card._run_status_lbl.text, message)
+                self.assertEqual(self.card._run_status_lbl.styles[-1], colour)
+                self.assertEqual(self.card._status_lbl.text, 'saved M4')
+                self.assertEqual(self.card._status_lbl.styles[-1], GREEN)
+
+    def test_concurrent_run_callback_leaves_widget_updates_to_refresh(self) -> None:
+        """A worker can report during rendering; its newest message appears next tick."""
+        self.card._run_saved('M1')
+        on_status = self.vm.run_saved.call_args.args[1]
+        on_status('INFO', 'Running')
+        label = self.card._run_status_lbl
+        set_text = label.set_text
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            def report_during_render(text):
+                worker.submit(on_status, 'ERROR', 'ERROR: failed').result(timeout=2)
+                return set_text(text)
+
+            with patch.object(label, 'set_text', side_effect=report_during_render) as render:
+                self.tick()
+                render.assert_called_once_with('Running')
+
+        self.tick()
+        self.assertEqual(label.text, 'ERROR: failed')
+        self.assertEqual(label.styles[-1], RED)
 
     def test_remote_missions_have_no_run_button(self) -> None:
         """Verify the station alone starts a remote mission."""

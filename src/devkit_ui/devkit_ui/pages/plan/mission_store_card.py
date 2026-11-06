@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from threading import Lock
 
 from nicegui import ui
 
@@ -28,6 +29,8 @@ class MissionStoreCard(ui.column):
         self._queue = queue
         self._set_run_enabled = set_run_enabled
         self._version = -1
+        self._run_status = ''
+        self._run_status_lock = Lock()
 
         with self:
             with ui.row().classes('items-baseline gap-2 mb-2'):
@@ -50,6 +53,7 @@ class MissionStoreCard(ui.column):
                 ui.button('Save', on_click=self._save).props('color=primary no-caps dense')
 
             self._status_lbl = ui.label('').classes('text-xs font-mono mt-1').style(GREY)
+            self._run_status_lbl = ui.label('').classes('text-xs font-mono mt-1').style(GREY)
 
         self._refresh()
         ui.timer(0.5, self._refresh)
@@ -60,10 +64,10 @@ class MissionStoreCard(ui.column):
         self._vm.save_queue(self._queue.items, self._name.value or '', repeat)
 
     def _run_saved(self, mission_id: str) -> None:
-        """Run a saved mission now, showing its status under the list."""
+        """Run a saved mission, recording worker messages for the UI timer to render."""
         def show(_level: str, text: str) -> None:
-            self._status_lbl.set_text(text)
-            self._status_lbl.style(RED if text.startswith('ERROR') else GREEN)
+            with self._run_status_lock:
+                self._run_status = text
         self._vm.run_saved(mission_id, show)
 
     def _refresh(self) -> None:
@@ -71,6 +75,11 @@ class MissionStoreCard(ui.column):
         status = self._vm.status
         self._status_lbl.set_text(status)
         self._status_lbl.style(RED if status.startswith('ERROR') else GREEN if status else GREY)
+        with self._run_status_lock:
+            run_status = self._run_status
+        self._run_status_lbl.set_text(run_status)
+        self._run_status_lbl.style(
+            RED if run_status.startswith('ERROR') else GREEN if run_status else GREY)
         self._set_run_enabled(not self._vm.running)
 
         version = self._vm.version
