@@ -1,6 +1,8 @@
 # Robot mission intake spec 
 
-Status: draft. Built so far: the SQLite schema and migration, the intake epoch table, `run_saved` with outcome recording, name-based `resolve_steps`, locked store reads, the structured mission result, and the Run button for saved missions. Not built: the stall watchdog, intake, the radio link and the station. Originally read from Sowbot caatinga-dev at cdbb668 (PR #213 merge, 6 Nov 2026); the built parts were checked against mission-refactor with the mission unit tests. Nothing ran on hardware. Companion: Station service spec (rev 3), which defines the messages.
+Status: draft. Built so far: the SQLite schema and migration, including the remote-mission columns; the `intake_epoch` table with its counter and pruning methods on the SQLite store; `run_saved` with outcome recording; name-based `resolve_steps`; locked store reads; the structured mission result; `today_queue()` skipping remote missions; and the Run button for saved missions. Not built: the stall watchdog, the farm map import into the topo map (field, row and fragment metadata, `hash8`, the edit hook), the intake, the radio link and the station. `MissionStore` does not yet expose the remote arguments of `add()`, the epoch methods or `prune_remote`, which exist only on `MissionSqliteStore`, so nothing can create a remote mission yet.
+
+Originally read from Sowbot caatinga-dev at cdbb668 (PR #213 merge, 6 Nov 2026). Updated on 6 Nov 2026 against mission-refactor at 980b2fb by reading the code. The mission, store, farm map import and plan import tests pass (191 tests) with `std_msgs` stubbed, because ROS is not installed in that environment. Nothing ran under ROS or on hardware. Companion: Station service spec (rev 3), which defines the messages.
 
 Messages are named in plain words here: mission, cancel, status query, accepted, rejected, end report and hello. The [station spec gives the exact formats.](https://github.com/Agroecology-Lab/Sowbot_Station/blob/main/README.md)
 
@@ -19,7 +21,10 @@ This is not a safety function. E-stop and the independent safety subsystem are u
 - Up to 10 robots over about 1 mile square. Slow robots, long rows, missions lasting hours.
 - The robot sends nothing unprompted except a reply to a mission message (accepted or rejected), an end report when a mission ends, and a hello message on boot.
 
-## Map generation 
+## Map generation
+
+In the diagram, `[new]` marks what is not built. `built:` marks what exists on mission-refactor.
+
 ```
 
 LiteFarm: published farm map (GeoJSON, content_hash)
@@ -54,14 +59,14 @@ LiteFarm: published farm map (GeoJSON, content_hash)
 |                                                                      |
 |  WRITES: missions.db (SQLite, /workspace/maps/missions.db)           |
 |  +----------------------------------------------------------------+  |
-|  | existing: id name rows(entry node names) action action_params  |  |
+|  | original: id name rows(entry node names) action action_params  |  |
 |  |           repeat_every_hours active created_at                 |  |
 |  |           last_run_at last_run_success                         |  |
-|  | [new]:    source(local|remote) external_id task_id map_hash    |  |
+|  | built:    source(local|remote) external_id task_id map_hash    |  |
 |  |           groups(lf row per entry) state(idle|running|ended)   |  |
 |  |           steps_done stage reason started_at ended_at          |  |
 |  |           result_sent                                          |  |
-|  | [new] table intake_epoch(epoch, max_counter)                   |  |
+|  | built: table intake_epoch(epoch, max_counter)                  |  |
 |  +----------------------------------------------------------------+  |
 +==========================+===========================================+
                            |
@@ -84,19 +89,22 @@ LiteFarm: published farm map (GeoJSON, content_hash)
 Each robot resolves (field,row) by scanning node meta (lf_field, lf_row,
 lf_frag sorted by row_id), so the station never needs robot row ids.
 
+This resolution is not built. Today `resolve_steps` resolves integer row ids and entry node names only. The copy to the other robots is not built either. The sim page has "Save copy as" and archive for the local map, and the system page exports a LiteFarm row plan. No robot-to-robot copy exists in the UI.
 
-## What exists (checked at cdbb668)
 
-- MissionStore keeps missions in SQLite (`/workspace/maps/missions.db`), with a YAML backend for older files. A mission is a list of entry node names, one action, and `last_run_at` and `last_run_success`. The UI can save, activate and delete missions.
-- A saved local mission runs from its own play button through `run_saved`, which records its state, steps done, stage and reason, and calls `record_run()`. `today_queue()` still has no caller, so nothing schedules a mission. The main Run Mission button still runs the browser session's queue and records nothing.
-- The store holds entry node names and `start()` wants integer row ids. `resolve_steps` now accepts both.
-- `MissionApplicationService.start(queue, on_status, on_nav_update)` reports every failure through `on_status(ERROR, ...)` and returns normally.
-- `MissionDomainService` runs one mission on a thread. Per row: go to the entry, enable the tool, go to the exit, disable the tool. It stops at the first failure. Progress is text only.
-- `navigate_and_wait` gives each goal a fixed 300 s (`NAV_TIMEOUT_SEC`) and returns only true or false. `NavUpdate` carries a status and an outcome, with no measure of progress.
-- Row nodes carry `row_id` and `row_role` in their metadata and nothing else. Row ids are per swath (`row_id_start + i`). The LiteFarm field and row number are lost on import, because `parse_plan` discards them.
-- `farm_map_import` (PR #213) parses and hash-checks the published farm map, but nothing calls it. `robot_row_id` has no fragment term, while `FarmMap.row_ids` lists one id per fragment, so a split row gives duplicate ids. Read from source, not run.
-- `TopoDoc` has a document-level `meta` dict.
-- sowbot_avoid is a separate package with its own process. Its `MeshRadio` opens the serial port, requires a channel, subscribes to channel data, starts auto message fetching and sends zero-hop. `devkit_ui` does not import it. Simulation only.
+## What exists (checked at 980b2fb)
+
+- MissionStore keeps missions in SQLite (`/workspace/maps/missions.db`). A `.yaml` path selects the YAML backend, which has none of the new fields. A mission is a list of entry node names, one action, `last_run_at` and `last_run_success`. On SQLite it also has the remote-mission columns and the run result (`state`, `steps_done`, `stage`, `reason`, `started_at`, `ended_at`, `result_sent`). A database from before these columns gains them when opened, with `source` local and `state` idle. The UI can save, activate, delete and run saved missions. It shows only the last-run tick or cross, not the stored result.
+- `MissionStore.add()` takes the local fields only. The remote arguments (`source`, `external_id`, `task_id`, `map_hash`, `groups`, `state`), `max_counter`, `record_counter` and `prune_remote` exist on `MissionSqliteStore` only, and `MissionStore` does not expose them. Nothing calls `prune_remote` or `record_counter`. `MissionStore.record_result()` writes the run result and does nothing for YAML.
+- A saved local mission runs from its play button through `run_saved`, which records state, steps done, stage and reason and calls `record_run()`. Remote missions get no play button and are labelled "station-controlled". `today_queue()` skips remote missions and still has no caller, so nothing schedules a mission. The main Run Mission button still runs the browser session's queue through `start()` with no result callbacks and records nothing.
+- The store holds entry node names and `start()` wants integer row ids. `resolve_steps` accepts integer ids, entry node names, bare id strings and the saved `ROW_<id>_IN` fallback. It rejects an unknown name and two entry nodes for one row.
+- `MissionApplicationService.start(queue, on_status, on_nav_update, on_result, on_step_done)` reports every failure through `on_status(ERROR, ...)` and returns False. It returns True once the worker has started.
+- `MissionDomainService` runs one mission on a thread. Per row: go to the entry, enable the tool, go to the exit, disable the tool. It checks cancel and the soft e-stop before each leg and stops at the first failure. It reports text progress through `on_status`, the count of finished steps through `on_step_done` and one `MissionResult` through `on_result`.
+- `navigate_and_wait_result` returns `arrived` or a reason. `MissionApplicationService._navigate` gives each goal a fixed 300 s (`NAV_TIMEOUT_SEC`). `navigate_and_wait` is a bool wrapper used by the Run tab. `NavUpdate` carries a status, a `navigating` flag and an outcome, with no measure of progress.
+- Row nodes carry `row_id` and `row_role` in their metadata and nothing else. Row ids are per swath (`row_id_start + i`). The LiteFarm field and row number are lost on import, because `parse_plan` returns only the swaths, the origin, `break_after` and the plan parameters. For a multi-field plan `_merge_fields` offsets the row numbers so that each field continues after the largest number so far.
+- `farm_map_import` (PR #213) parses and hash-checks the published farm map, but nothing outside its tests calls `parse_farm_map`. `FarmMap.hash8` exists, and nothing writes it to the map. `robot_row_id` has no fragment term, while `FarmMap.row_ids` lists one id per fragment, so a split row gives duplicate ids. Read from source, not run.
+- `TopoDoc` has a document-level `meta` dict. The loader (`parse._topo_from_dict`) reads it and `to_dict` writes it. `clone_empty` and `renamed` copy it. Node metadata is read and written the same way.
+- sowbot_avoid (`src/devkit-meshcore-avoid/pkg/sowbot_avoid`) is a separate package with its own process. Its `MeshRadio` opens the serial port and requires the configured channel (it raises if the radio has none). It subscribes to channel data, starts auto message fetching and sends zero-hop by default (`--flood` allows repeaters). `LoopBus` and `LoopRadio` are an in-process fake radio. `devkit_ui` does not import it, and no code subscribes to contact messages. Simulation only.
 
 ## Changes from rev 2
 
@@ -108,15 +116,18 @@ lf_frag sorted by row_id), so the station never needs robot row ids.
 
 ### 1. The map holds the row identity
 
+Not built. Nothing in this section is in the code yet.
+
 - The farm map is built once per season in LiteFarm and exported to one robot, which builds the topo map. On import, `parse_plan` keeps each swath's field, row and fragment numbers, and they are written to the row node metadata as `lf_field`, `lf_row` and `lf_frag`. The document meta gets `hash8`, the first 8 characters of the farm map's content hash, checked once at import with `parse_farm_map`. The finished topo map is then shared to every other robot, which never sees the farm map.
 - Row ids stay per swath. Drop `robot_row_id` (field × 10000 + row). Nothing derives an id from field and row. The map is searched instead. Ids are assigned once, at import, and copied with the map, so they match on every robot.
 - To resolve a (field, row), scan the node metadata and sort its fragments by row id.
-- A robot's map counts as edited once a node is dropped, moved or removed. The robot then rejects remote missions with the reason `map` and reports `-` as its map hash in its hello message. This keeps "identical on every robot" true. Hook point is `topology_edit_service`, not yet read in detail.
+- A robot's map counts as edited once a node is dropped, moved or removed. The robot then rejects remote missions with the reason `map` and reports `-` as its map hash in its hello message. This keeps "identical on every robot" true. The edits are `stage_drop`, `stage_f2c_save`, `stage_repair`, `stage_delete_node` and `stage_delete_row` in `TopologyEditService`, and none sets `hash8`. They are written by `PlanApplicationService._start_write` and `MapAuthoringViewModel._persist_deletion`. The hook belongs where a staged edit is written. That path was not read in detail.
 - A new season means a new farm map, a new `hash8` and a new topo map on every robot. Until a robot has it, it rejects remote missions with the reason `map`.
-- Check before relying on it: document meta is written by `TopoDoc.to_dict` and kept by its clone method, but the file loader and the way the map is copied between robots were not read. Meta and node metadata must survive save, load, copy to another robot and node-drop edits.
-
+- Checked in source: document meta and node metadata survive load, `to_dict`, `clone_empty` and `renamed`. Not checked: the external map manager's copy of the map (the live `/topological_map_2` republish goes through the same loader), whether node-drop and f2c-save edits keep document meta, and how the map reaches another robot, since no copy mechanism exists. Meta and node metadata must survive save, load, copy to another robot and node edits.
 
 ### Robot comms
+
+Not built. No code reads or sends any of these messages.
 
 ```
 +==================== FARMHOUSE SBC =====================================+
@@ -179,7 +190,7 @@ lf_frag sorted by row_id), so the station never needs robot row ids.
 
 ### 2. One mission store
 
-Extend the `missions` table. `_ensure_schema` only does `CREATE TABLE IF NOT EXISTS`, so adding columns needs a migration step. New columns:
+Built in `MissionSqliteStore`. `_ensure_schema` adds each column of `_ADDED_COLUMNS` that the `missions` table lacks, so an older database keeps its rows. `external_id` has a unique index that ignores nulls. New columns:
 
 | Column | Meaning |
 | --- | --- |
@@ -195,18 +206,21 @@ Extend the `missions` table. `_ensure_schema` only does `CREATE TABLE IF NOT EXI
 
 Rules:
 
-- Remote missions store `rows` as entry node names with every fragment expanded, so the record matches what ran even if the map changes later.
-- `today_queue()` skips remote missions. Without this, a failed remote mission would count as due for retry, which the current rule does for local ones.
-- A remote mission is inactive once it ends, whatever the result.
-- A small table `intake_epoch(epoch, max_counter)` holds the highest counter per epoch, so pruning old records cannot reopen replay. Keep the last 20 remote missions.
-- The YAML backend either gets the same fields or is retired for missions. Decide before migrating.
-- The SQLite store holds one reentrant lock around every method, reads included, because its connection is shared by several threads. `update()` rejects an unknown `state`, as `add()` does.
+- Remote missions store `rows` as entry node names with every fragment expanded, so the record matches what ran even if the map changes later. Not built: nothing creates a remote mission, because `MissionStore.add()` has no remote arguments.
+- `today_queue()` skips remote missions. Without this, a failed remote mission would count as due for retry, which the current rule does for local ones. Built and tested.
+- A remote mission is inactive once it ends, whatever the result. Built in `run_saved`.
+- `intake_epoch(epoch, max_counter)` holds the highest counter per epoch, so pruning old records cannot reopen replay. `record_counter` only raises it. `prune_remote(keep=20)` deletes all but the newest 20 remote missions and leaves local missions and `intake_epoch` alone. Built on `MissionSqliteStore`, tested there, not exposed by `MissionStore`, and nothing calls it.
+- The YAML backend gets none of the fields, and `record_result` does nothing for it. Remote missions cannot work on YAML. Still to decide: retire YAML for missions, or give it the fields. The default path is the `.db` file.
+- The SQLite store holds one reentrant lock around every method, reads included, because its connection is shared by several threads. `update()` rejects an unknown `state`, as `add()` does. Built and tested.
+- Mission ids come from `MAX(id) + 1`, so deleting the newest mission, which pruning can do, lets its id be reused. Remote records are identified by `external_id`, so this does not affect them.
 
 ### 3. One start path
 
-- Add `MissionApplicationService.run_saved(mid, on_status)`. It loads the mission, resolves its entry names to steps and calls `start()`. The Run button for saved missions, a future scheduler and intake all use it.
-- `resolve_steps` also accepts entry node names, and finds the exit through the entry's `row_id`. The integer path stays for the browser queue.
-- When the executor finishes it calls `on_result`. The application service writes the result to the store, then tells intake.
+Built, except the call to intake.
+
+- `MissionApplicationService.run_saved(mission_id, on_status, on_nav_update=None)` loads the mission, builds the queue from its `rows`, action and params, and calls `start()`. The Run button for saved missions uses it, through `MissionViewModel.run_saved`. A future scheduler and intake are meant to use it too. An inactive mission still runs, because `active` only controls scheduling.
+- `resolve_steps` accepts entry node names and finds the exit through the entry's `row_id`. The integer path stays for the browser queue.
+- When the executor finishes it calls `on_result`. The application service writes the result to the store, re-arms the schedule through `record_run` and, for a remote mission, makes it inactive. Telling intake is not built.
 
 ### 4. Structured result
 
@@ -217,16 +231,19 @@ Built. The mission service ends every run with a `MissionResult(ok, steps_done, 
 - stage is `transit` (the entry was not reached, or the mission stopped between steps) or `row` (the tool was enabled).
 - `steps_done` counts steps, and a step is one entry-to-exit traverse. It is written as each step completes, so a reboot reports a true count. A row counts as done only when its last fragment finishes, so the station turns steps into LiteFarm rows through `groups`. That conversion is not built.
 - An exception in the executor is reported as a failure with the reason `nav` in the stage it was in. The spec has no separate reason for it.
+- The reasons the code produces are `nav`, `timeout`, `cancel` and `estop`. `reboot` is set at boot by intake, which is not built.
 - A failing `on_result` or `on_step_done` is logged and swallowed, so a store error cannot leave a mission marked running.
 - `run_saved` writes `state=running` with `started_at` before starting, and puts the old result back if the start is refused. The YAML backend records no result fields.
 
 ### 5. Goal budget
 
-Replace the fixed 300 s with a stall watchdog: fail a goal only when there has been no progress toward it for a set time. The stall time is a parameter. `NavUpdate` has no progress data, so the signal has to come from odometry or Nav2 feedback (distance remaining). Neither is wired into the mission path yet. An overrun is reported as `timeout`, not `nav`. At slow speeds a long row exceeds 300 s routinely, so this comes before any remote mission is useful.
+Not built. Each goal still has a fixed 300 s budget (`NAV_TIMEOUT_SEC`, passed by `MissionApplicationService._navigate`). `navigate_and_wait_result` counts it down in 0.25 s steps after the goal is sent, excluding the wait of up to 10 s for the action server. When it runs out it cancels the goal and returns `timeout`, so an overrun is now reported as `timeout` and not `nav`.
+
+Replace the fixed budget with a stall watchdog: fail a goal only when there has been no progress toward it for a set time. The stall time is a parameter. `NavUpdate` has no progress data, so the signal has to come from odometry or Nav2 feedback (distance remaining). Neither is wired into the mission path. At slow speeds a long row exceeds 300 s routinely, so this comes before any remote mission is useful.
 
 ### 6. Radio ownership
 
-Only one process can open the serial port. `devkit_ui` and sowbot_avoid are separate processes. Two options:
+Not decided and not built. Only one process can open the serial port. `devkit_ui` and sowbot_avoid are separate processes. Two options:
 
 - The avoid process owns the radio and runs intake. It calls `devkit_ui` through a small local interface (start, cancel, status). Recommended, because it is the process that already owns the port and has been run in simulation.
 - A third small process owns the radio, and both use it.
@@ -241,6 +258,8 @@ Whichever is chosen:
 - Check that avoid's `get_channel` requirement and intake both still work when the station contact is added or removed.
 
 ## Intake behaviour
+
+Not built. This section is the design.
 
 ### Receiving
 
@@ -282,17 +301,26 @@ A mission stored as running is marked ended with the reason `reboot` and its sto
 
 ## Limits
 
+None of these is enforced yet, because there is no intake.
+
 - Messages are at most 158 bytes. `rows` holds integers and ascending ranges only, at most 200 rows per mission (tune after testing).
 - One mission at a time, as the domain service enforces.
 - A mission carries one action and its default params. Per-row actions are not supported.
 
 ## Test plan
 
-Extend the existing tests in `src/devkit_ui/test` (`test_mission_store`, `test_mission_domain_service`, `test_mission_application_service`, `test_farm_map_import`).
+The tests are in `src/devkit_ui/test`: `test_mission_store`, `test_mission_sqlite_store`, `test_mission_yaml_store`, `test_mission_domain_service`, `test_mission_application_service`, `test_mission_boundaries`, `test_mission_view_model`, `test_farm_map_import` and `test_plan_import`.
 
-- Unit: message parser and bad input, check ordering, mission id replay and idempotency, result mapping (ok, fail/row, fail/transit, cancel, reboot), whole-row counting across fragments.
-- Store: schema migration on an existing database, remote missions excluded from `today_queue`, `run_saved` for a local mission, epoch counter survives pruning.
-- Import: a farm map with a split row gives distinct row ids and keeps field, row and fragment in node metadata.
+Written and passing (191 tests on 6 Nov 2026, with `std_msgs` stubbed, not run under colcon):
+
+- Store: schema migration of an existing database, remote missions excluded from `today_queue` even after a failed run, the epoch counter only rising, pruning keeping the newest remote missions, all local missions and the counter, concurrent reads and writes, and result storage (nothing written for YAML).
+- Run path: `run_saved` marks the mission running, stores the result and re-arms the schedule, makes a remote mission inactive, and keeps the previous result when the start is refused. `cancel` against `estop` is reported correctly, as is a failing result callback and an executor exception.
+- Import: `parse_farm_map` and its hash check, including `hash8`.
+
+Not written yet:
+
+- Unit: message parser and bad input, check ordering, mission id replay and idempotency, result mapping for reboot, whole-row counting across fragments.
+- Import: a farm map with a split row gives distinct row ids and keeps field, row and fragment in node metadata. This needs the import path to be built first.
 - Simulation: sowbot_avoid's `LoopBus` and `LoopRadio` as a fake radio for intake, then the Gazebo multi-row mission, including a failed transit and a cancel.
 - On the real session before relying on it: intake and avoid on one meshcore_py connection, contact provisioning, `CONTACT_MSG_RECV` delivery with auto fetching on.
 - No claim is made about behaviour on a radio until it has run on one.
@@ -305,3 +333,6 @@ Extend the existing tests in `src/devkit_ui/test` (`test_mission_store`, `test_m
 4. The avoid route (node ids) must be derived from the nodes along each row (entry, waypoints, exit). Not designed.
 5. Station and robot clocks are not trusted. The station records its own receive time as `completed_at`.
 6. Radio ownership (section 6).
+7. `MissionStore` needs `add()` with the remote arguments and wrappers for the epoch methods and `prune_remote` before intake can use them.
+8. YAML backend for missions: retire it or give it the fields (section 2).
+9. The main Run Mission button records nothing. Decide whether it should go through the same result recording.
