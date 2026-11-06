@@ -69,7 +69,7 @@ class MissionSqliteStore:
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     @_locked
-    def attach(self, node) -> None:
+    def attach(self, _node) -> None:
         """Attaches the store to a node and ends every mission left running.
 
         A restart does not resume a run, so a mission still stored as running is ended with the
