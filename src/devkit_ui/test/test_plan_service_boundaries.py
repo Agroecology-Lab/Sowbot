@@ -196,7 +196,7 @@ class TestStagedWrites(PlanServiceCase):
 
         self.edits.stage_f2c_save.assert_called_once_with(
             'crop', 7, True, swaths=SWATHS, origin_ll=CORNERS[0], contour_used=True,
-            break_after=frozenset({0}), is_sim=False, odom_xy=(12.0, -4.0),
+            break_after=frozenset({0}), lf_rows=(), is_sim=False, odom_xy=(12.0, -4.0),
             gps=self.telemetry.latest_gps, row_action='row_follow',
             current_node='HOME', selected_node='SELECTED')
         self.assertEqual(self.statuses, ['saving rows'])

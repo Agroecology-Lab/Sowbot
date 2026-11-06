@@ -1,6 +1,6 @@
 # Robot mission intake spec 
 
-Status: draft. Built so far: the SQLite store with the remote-mission columns, `MissionStore.add_remote` and `find_by_external_id`, SQLite-assigned ids that are never reused, ending any mission left running by a restart, no delete of a running mission, `run_saved` with outcome recording, name-based `resolve_steps`, locked store reads, the structured mission result, and `today_queue()` skipping remote missions. Not built: the stall watchdog, the farm map import into the topo map (field, row and fragment metadata, `hash8`, the edit hook), the intake, the radio link and the station. Nothing calls `add_remote` yet.
+Status: draft. Built so far: the SQLite store with the remote-mission columns, `MissionStore.add_remote` and `find_by_external_id`, SQLite-assigned ids that are never reused, ending any mission left running by a restart, no delete of a running mission, `run_saved` with outcome recording, name-based `resolve_steps`, locked store reads, the structured mission result, and `today_queue()` skipping remote missions. Not built: the stall watchdog, `hash8` in the topo map and the edit hook, resolving a (field, row) from node metadata, the intake, the radio link and the station. Nothing calls `add_remote` yet.
 
 Read from Sowbot mission-refactor at e10a8e1 (6 Nov 2026). The store was then simplified: YAML backend removed, no epochs, no `task_id`, random station-chosen mission ids. The mission, farm map import and plan import tests pass (179 tests) with pytest. Nothing ran under colcon, under ROS or on hardware. Companion: Station service spec, which defines the messages and must change with the mission id (see "Robot comms").
 
@@ -39,7 +39,7 @@ LiteFarm: published farm map (GeoJSON, content_hash)
 |                                                                      |
 |  import path                                                         |
 |    parse_plan -> topo_row_builder                                    |
-|    [new] keep field/row/frag per swath (today: dropped)             |
+|    built: keep field/row/frag per swath (multi-field files only)     |
 |    [new] drop robot_row_id (field*10000+row)                         |
 |                                                                      |
 |  WRITES: topo map (YAML)                                             |
@@ -49,9 +49,9 @@ LiteFarm: published farm map (GeoJSON, content_hash)
 |  | nodes (entry / exit / waypoints per swath)                     |  |
 |  |   meta.row_id    = row_id_start + i   (per swath, set once)    |  |
 |  |   meta.row_role  = entry | exit                                |  |
-|  |   meta.lf_field  [new]                                         |  |
-|  |   meta.lf_row    [new]                                         |  |
-|  |   meta.lf_frag   [new]                                         |  |
+|  |   meta.lf_field  built (multi-field files only)                |  |
+|  |   meta.lf_row    built (multi-field files only)                |  |
+|  |   meta.lf_frag   built (multi-field files only)                |  |
 |  |   edges: in-row + headland (no headland across field/frag)    |  |
 |  +----------------------------------------------------------------+  |
 |  edit service: add/delete node/row, f2c save, repair                 |
@@ -102,7 +102,7 @@ This resolution is not built. Today `resolve_steps` resolves integer row ids and
 - `MissionApplicationService.start(queue, on_status, on_nav_update, on_result, on_step_done)` reports every failure through `on_status(ERROR, ...)` and returns False. It returns True once the worker has started.
 - `MissionDomainService` runs one mission on a thread. Per row: go to the entry, enable the tool, go to the exit, disable the tool. It checks cancel and the soft e-stop before each leg and stops at the first failure. It reports text progress through `on_status`, the count of finished steps through `on_step_done` and one `MissionResult` through `on_result`.
 - `navigate_and_wait_result` returns `arrived` or a reason. `MissionApplicationService._navigate` gives each goal a fixed 300 s (`NAV_TIMEOUT_SEC`). `navigate_and_wait` is a bool wrapper used by the Run tab. `NavUpdate` carries a status, a `navigating` flag and an outcome, with no measure of progress.
-- Row nodes carry `row_id` and `row_role` in their metadata and nothing else. Row ids are per swath (`row_id_start + i`). The LiteFarm field and row number are lost on import, because `parse_plan` returns only the swaths, the origin, `break_after` and the plan parameters. For a multi-field plan `_merge_fields` offsets the row numbers so that each field continues after the largest number so far.
+- Row nodes carry `row_id` and `row_role` in their metadata. Row ids are per swath (`row_id_start + i`, with `row_id_start` chosen at save time). `parse_plan` returns `Plan.lf_rows`, each swath's LiteFarm `(field, row, frag)` as the file gives it, before `_merge_fields` offsets the row numbers. It passes through `PlannedRows`, `stage_f2c_save` and `RowBuildSettings` to `build_row_nodes`, which writes `lf_field`, `lf_row` and `lf_frag` to the metadata of every node of the swath, and refuses a count that differs from the swaths. Only multi-field files carry a field number. For any other file `lf_rows` is empty and the nodes have no `lf_*` keys. A missing `frag` is 0. The metadata survives a YAML write and read (tested).
 - `farm_map_import` (PR #213) parses and hash-checks the published farm map, but nothing outside its tests calls `parse_farm_map`. `FarmMap.hash8` exists, and nothing writes it to the map. `robot_row_id` has no fragment term, while `FarmMap.row_ids` lists one id per fragment, so a split row gives duplicate ids. Read from source, not run.
 - `TopoDoc` has a document-level `meta` dict. The loader (`parse._topo_from_dict`) reads it and `to_dict` writes it. `clone_empty` and `renamed` copy it. Node metadata is read and written the same way.
 - sowbot_avoid (`src/devkit-meshcore-avoid/pkg/sowbot_avoid`) is a separate package with its own process. Its `MeshRadio` opens the serial port and requires the configured channel (it raises if the radio has none). It subscribes to channel data, starts auto message fetching and sends zero-hop by default (`--flood` allows repeaters). `LoopBus` and `LoopRadio` are an in-process fake radio. `devkit_ui` does not import it, and no code subscribes to contact messages. Simulation only.
@@ -120,7 +120,7 @@ This resolution is not built. Today `resolve_steps` resolves integer row ids and
 
 ### 1. The map holds the row identity
 
-Not built. Nothing in this section is in the code yet.
+Partly built. The `lf_*` node metadata (first bullet) is built and tested for multi-field plan files. `hash8`, dropping `robot_row_id`, the edit hook and the (field, row) lookup are not built.
 
 - The farm map is built once per season in LiteFarm and exported to one robot, which builds the topo map. On import, `parse_plan` keeps each swath's field, row and fragment numbers, and they are written to the row node metadata as `lf_field`, `lf_row` and `lf_frag`. The document meta gets `hash8`, the first 8 characters of the farm map's content hash, checked once at import with `parse_farm_map`. The finished topo map is then shared to every other robot, which never sees the farm map.
 - Row ids stay per swath. Drop `robot_row_id` (field × 10000 + row). Nothing derives an id from field and row. The map is searched instead. Ids are assigned once, at import, and copied with the map, so they match on every robot.

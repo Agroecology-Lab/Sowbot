@@ -137,12 +137,14 @@ class TopologyEditService:
     def stage_f2c_save(self, prefix: str, row_id_start: int, overwrite: bool, *,
                        swaths: list, origin_ll: tuple[float, float] | None,
                        contour_used: bool, break_after: set | frozenset,
-                       is_sim: bool, odom_xy: tuple[float, float] | None, gps: Any,
+                       lf_rows: tuple = (), is_sim: bool, odom_xy: tuple[float, float] | None, gps: Any,
                        row_action: str, current_node: str | None,
                        selected_node: str | None) -> StagedEdit:
         """Turn planned F2C swaths into row nodes and describe how to save them.
 
         Nothing is added to the live map; the edit is applied when it is persisted.
+        lf_rows, if given, holds one LiteFarm (field, row, frag) per swath and is written to
+        the row nodes' metadata.
         Hardware anchors rows to the GPS fix and odometry position (odom_xy). Simulation
         anchors them to origin_ll at (0, 0), because the sim GPS fix is a datum that is
         not where the field was drawn. A GPS status below zero only logs a warning.
@@ -213,6 +215,7 @@ class TopologyEditService:
             overwrite=overwrite,
             contour_used=contour_used,
             break_after=frozenset(break_after),
+            lf_rows=tuple(lf_rows),
             connect_to=connect_to,
         ))
         if not build.added:

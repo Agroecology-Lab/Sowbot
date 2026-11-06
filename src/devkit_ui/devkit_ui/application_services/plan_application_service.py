@@ -130,7 +130,7 @@ class PlanApplicationService:
             return ImportOutcome(error=str(exc))
         return ImportOutcome(planned=PlannedRows(
             plan.swaths, plan.origin_ll, bool(plan.params.get('contour')),
-            frozenset(plan.break_after)))
+            frozenset(plan.break_after), tuple(plan.lf_rows)))
 
     def save_rows(self, planned: PlannedRows | None, prefix: str, row_id_start: int,
                   overwrite: bool, *, row_action: str, current_node: str | None,
@@ -165,6 +165,7 @@ class PlanApplicationService:
                 prefix, row_id_start, overwrite,
                 swaths=planned.swaths, origin_ll=planned.origin_ll,
                 contour_used=planned.contour_used, break_after=planned.break_after,
+                lf_rows=planned.lf_rows,
                 is_sim=self._is_sim,
                 odom_xy=(odom.pose.pose.position.x, odom.pose.pose.position.y) if odom else None,
                 gps=self._telemetry.latest_gps, row_action=row_action,

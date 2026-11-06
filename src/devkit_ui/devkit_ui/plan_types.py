@@ -102,9 +102,11 @@ class PlannedRows:
     """Swaths waiting to be saved as topology rows, with what saving needs to know about them.
 
     origin_ll is the (lat, lon) the swaths were projected from. break_after lists the swath
-    indices that must not get a headland edge to the next swath.
+    indices that must not get a headland edge to the next swath. lf_rows holds each swath's
+    LiteFarm (field, row, frag), or is empty when the rows have no LiteFarm identity.
     """
     swaths: list
     origin_ll: tuple[float, float] | None
     contour_used: bool = False
     break_after: frozenset[int] = frozenset()
+    lf_rows: tuple = ()

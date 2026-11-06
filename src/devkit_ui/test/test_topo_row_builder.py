@@ -1,9 +1,12 @@
 import unittest
 from itertools import pairwise
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from devkit_f2c_planner.f2c_planner import f2c_xy_to_latlon
 from devkit_ui.constants import NAV_ACTION, ROW_ACTION
 from devkit_ui.models import TopoDoc
+from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_row_builder import (
     RowAnchor,
     RowBuildSettings,
@@ -55,6 +58,43 @@ class TestBuildRowNodes(unittest.TestCase):
         self.assertEqual(entry.meta['row_id'], 1)
         self.assertEqual(entry.meta['row_role'], 'entry')
         self.assertEqual(build.nodes['FIELD_R1_OUT'].meta['row_role'], 'exit')
+
+    def test_litefarm_identity_is_written_to_every_node_of_the_row(self) -> None:
+        """Verify entry, waypoint and exit nodes carry lf_field, lf_row and lf_frag."""
+        build = build_row_nodes(straight_rows(2), ANCHOR, settings(
+            contour_used=True, lf_rows=((3, 12, 0), (3, 12, 1))))
+
+        for name, lf in (('FIELD_R1_IN', (3, 12, 0)), ('FIELD_R1_W1', (3, 12, 0)),
+                         ('FIELD_R1_OUT', (3, 12, 0)), ('FIELD_R2_IN', (3, 12, 1)),
+                         ('FIELD_R2_OUT', (3, 12, 1))):
+            with self.subTest(name):
+                meta = build.nodes[name].meta
+                self.assertEqual((meta['lf_field'], meta['lf_row'], meta['lf_frag']), lf)
+
+    def test_nodes_have_no_litefarm_keys_without_lf_rows(self) -> None:
+        """Verify a plan with no LiteFarm identity adds no lf_* metadata."""
+        build = build_row_nodes(straight_rows(1), ANCHOR, settings())
+
+        self.assertFalse([key for key in build.nodes['FIELD_R1_IN'].meta if key.startswith('lf_')])
+
+    def test_lf_rows_must_match_the_swaths(self) -> None:
+        """Verify a different count of LiteFarm rows and swaths is refused."""
+        with self.assertRaisesRegex(ValueError, '1 LiteFarm rows for 2 swaths'):
+            build_row_nodes(straight_rows(2), ANCHOR, settings(lf_rows=((1, 0, 0),)))
+
+    def test_litefarm_identity_survives_a_yaml_round_trip(self) -> None:
+        """Verify lf_* metadata is kept when the map is written and read back."""
+        build = build_row_nodes(straight_rows(1), ANCHOR, settings(lf_rows=((3, 12, 1),)))
+        doc = TopoDoc(name='field')
+        apply_row_nodes(doc, build, 'FIELD', False)
+
+        with TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / 'topo.yaml')
+            dump_topo_yaml(doc, path)
+            restored = parse_topo_yaml(path)
+
+        meta = next(n for n in restored.nodes if n.name == 'FIELD_R1_IN').meta
+        self.assertEqual((meta['lf_field'], meta['lf_row'], meta['lf_frag']), (3, 12, 1))
 
     def test_positions_are_offset_by_the_anchor_pose(self) -> None:
         """Verify local xy is added to the anchor's map position and rounded to millimetres."""
