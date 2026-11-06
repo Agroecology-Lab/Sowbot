@@ -8,7 +8,29 @@ _MUTABLE_COLUMNS = frozenset[str]((
     'name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active',
     # Run history: written by MissionStore.record_run()/reset(), not by operator edits.
     'last_run_at', 'last_run_success',
+    # Run result: written by the run path and intake, never by operator edits.
+    'state', 'steps_done', 'stage', 'reason', 'started_at', 'ended_at', 'result_sent',
 ))
+
+# Columns added after the first release. _ensure_schema adds any that are missing, because
+# CREATE TABLE IF NOT EXISTS does nothing for a database that already has the table.
+_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ('source',      "TEXT NOT NULL DEFAULT 'local'"),   # local | remote
+    ('external_id', 'TEXT'),                            # remote only, unique
+    ('task_id',     'TEXT'),                            # remote only, the LiteFarm task
+    ('map_hash',    'TEXT'),                            # hash8 the mission was made against
+    ('groups',      'TEXT'),                            # JSON, LiteFarm row per entry; null if local
+    ('state',       "TEXT NOT NULL DEFAULT 'idle'"),    # idle | running | ended
+    ('steps_done',  'INTEGER'),
+    ('stage',       'TEXT'),
+    ('reason',      'TEXT'),
+    ('started_at',  'TEXT'),
+    ('ended_at',    'TEXT'),
+    ('result_sent', 'INTEGER'),                         # remote only
+)
+
+SOURCES = frozenset({'local', 'remote'})
+STATES = frozenset({'idle', 'running', 'ended'})
 
 class MissionSqliteStore:
     """Owns the mission list and its SQLite persistence."""
@@ -47,9 +69,24 @@ class MissionSqliteStore:
             action_params: dict | None = None,
             name: str = '',
             repeat_every_hours: int | None = None,
-            active: bool = True) -> str | None:
+            active: bool = True,
+            *,
+            source: str = 'local',
+            external_id: str | None = None,
+            task_id: str | None = None,
+            map_hash: str | None = None,
+            groups: list | None = None,
+            state: str = 'idle') -> str | None:
         """Add a mission. Returns its allocated id, or None on failure.
-        Status carries the reason either way."""
+        Status carries the reason either way.
+
+        The keyword-only arguments are for remote missions. A repeated external_id raises
+        sqlite3.IntegrityError. ValueError for an unknown source or state."""
+
+        if source not in SOURCES:
+            raise ValueError(f'unknown source {source!r}')
+        if state not in STATES:
+            raise ValueError(f'unknown state {state!r}')
 
         ts = now_utc_str()
 
@@ -67,13 +104,21 @@ class MissionSqliteStore:
             'created_at':         ts,
             'last_run_at':        None,
             'last_run_success':   None,
+            'source':             source,
+            'external_id':        external_id,
+            'task_id':            task_id,
+            'map_hash':           map_hash,
+            'groups':             groups,
+            'state':              state,
         })
 
         cursor = self._conn.cursor()
         cursor.execute("""
         INSERT INTO missions
-            (id, name, rows, action, action_params, repeat_every_hours, active, created_at, last_run_at, last_run_success)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, name, rows, action, action_params, repeat_every_hours, active, created_at,
+             last_run_at, last_run_success,
+             source, external_id, task_id, map_hash, groups, state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             mission['id'],
             mission['name'],
@@ -85,6 +130,12 @@ class MissionSqliteStore:
             mission['created_at'],
             mission['last_run_at'],
             mission['last_run_success'],
+            mission['source'],
+            mission['external_id'],
+            mission['task_id'],
+            mission['map_hash'],
+            mission['groups'],
+            mission['state'],
         ))
         self._conn.commit()
         self._on_write_done(f'{mid} created')
@@ -102,7 +153,9 @@ class MissionSqliteStore:
         """Updates mutable fields on a mission.
 
         Allowed fields: name, rows, action, action_params, repeat_every_hours, active,
-        last_run_at, last_run_success. Other keys are ignored.
+        last_run_at, last_run_success, and the run result (state, steps_done, stage, reason,
+        started_at, ended_at, result_sent). Other keys are ignored, including the identity of a
+        remote mission (source, external_id, task_id, map_hash, groups), which is set once.
         """
 
         serialized_fields = self._serialize_row(fields)
@@ -148,7 +201,11 @@ class MissionSqliteStore:
         return self._deserialize_row(result)
 
     def _ensure_schema(self) -> None:
-        """Ensures the schema in the database is up to date."""
+        """Create the tables and bring an older database up to date.
+
+        Adds each column of _ADDED_COLUMNS the missions table lacks, so a database written
+        by an earlier version keeps its rows (source becomes local, state becomes idle).
+        """
         cursor = self._conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS missions (
@@ -164,7 +221,55 @@ class MissionSqliteStore:
                 last_run_success INTEGER
             )
         """)
+        have = {row['name'] for row in cursor.execute("PRAGMA table_info(missions)")}
+        for column, ddl in _ADDED_COLUMNS:
+            if column not in have:
+                cursor.execute(f"ALTER TABLE missions ADD COLUMN {column} {ddl}")
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS missions_external_id
+            ON missions(external_id) WHERE external_id IS NOT NULL
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS intake_epoch (
+                epoch TEXT PRIMARY KEY,
+                max_counter INTEGER NOT NULL
+            )
+        """)
         self._conn.commit()
+
+    # ── remote intake ─────────────────────────────────────────────────────
+
+    def max_counter(self, epoch: str) -> int | None:
+        """Return the highest counter accepted for an epoch, or None if none was."""
+        cursor = self._conn.cursor()
+        cursor.execute("SELECT max_counter FROM intake_epoch WHERE epoch = ?", (epoch,))
+        result = cursor.fetchone()
+        return None if result is None else int(result[0])
+
+    def record_counter(self, epoch: str, counter: int) -> None:
+        """Raise an epoch's highest accepted counter to `counter`; never lowers it."""
+        cursor = self._conn.cursor()
+        cursor.execute("""
+            INSERT INTO intake_epoch (epoch, max_counter) VALUES (?, ?)
+            ON CONFLICT(epoch) DO UPDATE SET max_counter = MAX(max_counter, excluded.max_counter)
+        """, (epoch, int(counter)))
+        self._conn.commit()
+
+    def prune_remote(self, keep: int = 20) -> int:
+        """Delete all but the newest `keep` remote missions and return how many went.
+
+        Local missions are untouched. intake_epoch is not pruned, so replay protection
+        outlives the records.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute("""
+            DELETE FROM missions
+            WHERE source = 'remote' AND id NOT IN (
+                SELECT id FROM missions WHERE source = 'remote' ORDER BY id DESC LIMIT ?
+            )
+        """, (int(keep),))
+        self._conn.commit()
+        return cursor.rowcount
 
     def _next_id(self) -> int:
         """Gets the next ID."""
@@ -193,6 +298,10 @@ class MissionSqliteStore:
             serialized['action_params'] = json.dumps(serialized['action_params'] or {})
         if 'active' in serialized:
             serialized['active'] = 1 if serialized['active'] else 0
+        if 'groups' in serialized and serialized['groups'] is not None:
+            serialized['groups'] = json.dumps(serialized['groups'])
+        if serialized.get('result_sent') is not None:
+            serialized['result_sent'] = 1 if serialized['result_sent'] else 0
         return serialized
 
     def _db_id(self, mission_id: str | int) -> int:
@@ -212,4 +321,7 @@ class MissionSqliteStore:
             'active': row.get('active', 1) == 1,
             'last_run_success': (
                 None if row.get('last_run_success') is None else bool(row['last_run_success'])),
+            'groups': None if row.get('groups') is None else json.loads(row['groups']),
+            'result_sent': (
+                None if row.get('result_sent') is None else bool(row['result_sent'])),
         }

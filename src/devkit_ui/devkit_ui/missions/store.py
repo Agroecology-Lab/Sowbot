@@ -146,6 +146,10 @@ class MissionStore:
         created_at:          str           (ISO 8601 UTC)
         last_run_at:         str  | None
         last_run_success:    bool | None
+
+    SQLite records also carry source, external_id, task_id, map_hash, groups, state,
+    steps_done, stage, reason, started_at, ended_at and result_sent (see missions.md).
+    The YAML backend does not; a record without `source` is local.
     """
 
     _MUTABLE_FIELDS = frozenset(
@@ -364,6 +368,8 @@ class MissionStore:
         for m in self._store.missions:
             if not m.get('active'):
                 continue
+            if m.get('source') == 'remote':
+                continue  # the station decides when a remote mission runs, never the scheduler
             if not self._is_due(m, now):
                 continue
             action = m.get('action')

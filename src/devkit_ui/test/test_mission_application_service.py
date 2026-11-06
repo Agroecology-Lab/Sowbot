@@ -76,6 +76,50 @@ class TestMissionRun(unittest.TestCase):
         self.on_status.assert_not_called()
 
 
+class TestRunSaved(unittest.TestCase):
+    def setUp(self) -> None:
+        """Build a service over a store holding one saved mission for row 3."""
+        self.executor = Mock(running=False, cancel_requested=False)
+        self.topology = Mock()
+        self.topology.get_doc.return_value = doc(node('E', 3, 'entry'), node('X', 3, 'exit'))
+        self.store = Mock()
+        self.store.find.return_value = {
+            'id': 'MISSION_1', 'rows': ['E'], 'action': 'weed', 'action_params': {'depth': 0.4},
+            'active': False}
+        self.service = MissionApplicationService(
+            self.store, self.executor, self.topology, Mock(available=True),
+            Mock(soft_estop_active=False))
+        self.on_status = Mock()
+
+    def test_a_saved_mission_starts_with_its_resolved_steps(self) -> None:
+        """Verify entry names become steps, and an inactive mission still runs."""
+        self.service.run_saved('MISSION_1', self.on_status)
+
+        self.store.find.assert_called_once_with('MISSION_1')
+        self.executor.start.assert_called_once()
+        self.assertEqual(self.executor.start.call_args.args[0],
+                         [(3, 'E', 'X', 'weed', {'depth': 0.4})])
+        self.assertIs(self.executor.start.call_args.args[2], self.on_status)
+
+    def test_an_unknown_mission_reports_an_error_without_starting(self) -> None:
+        """Verify a missing mission is an ERROR status and never reaches the executor."""
+        self.store.find.return_value = None
+
+        self.service.run_saved('MISSION_9', self.on_status)
+
+        self.on_status.assert_called_once_with(mds.ERROR, "ERROR: 'MISSION_9' not found")
+        self.executor.start.assert_not_called()
+
+    def test_a_row_missing_from_the_map_is_reported_by_start(self) -> None:
+        """Verify an entry name the live map lacks fails like any other start error."""
+        self.store.find.return_value = {**self.store.find.return_value, 'rows': ['GONE']}
+
+        self.service.run_saved('MISSION_1', self.on_status)
+
+        self.on_status.assert_called_once_with(mds.ERROR, "ERROR: unknown entry node(s) ['GONE']")
+        self.executor.start.assert_not_called()
+
+
 class TestMissionNavigation(unittest.TestCase):
     def setUp(self) -> None:
         """Start a mission and capture the navigate callback the executor receives."""

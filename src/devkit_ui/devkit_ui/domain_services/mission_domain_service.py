@@ -34,17 +34,21 @@ class MissionError(Exception):
 
 
 def resolve_steps(topo_doc, queue: list) -> list[MissionStep]:
-    """Resolve queued (row_id, action, params) tuples to entry and exit nodes.
+    """Resolve queued (row, action, params) tuples to entry and exit nodes.
 
+    row is an integer row id, or the name of a row's entry node (as saved missions store it).
+    A name resolves through the entry's row_id, so its exit is found the same way.
     Return (row_id, entry_name, exit_name, action, params) tuples in queue order,
     preserving repeated rows; an empty queue returns an empty list when a map is loaded.
     Map row IDs are converted to integers; the last node for each row and role wins.
-    Raises MissionError if there is no map or any queued row lacks an entry or exit node.
+    Raises MissionError if there is no map, a name is not an entry node, or any queued row
+    lacks an entry or exit node.
     """
     if not topo_doc:
         raise MissionError('no topology map loaded')
     row_entry: dict[int, str] = {}
     row_exit: dict[int, str] = {}
+    entry_row: dict[str, int] = {}
     for node in topo_doc.nodes:
         rid = node.meta.get('row_id')
         role = node.meta.get('row_role', '')
@@ -56,12 +60,18 @@ def resolve_steps(topo_doc, queue: list) -> list[MissionStep]:
             continue
         if role == 'entry':
             row_entry[rid_int] = node.name
+            entry_row[node.name] = rid_int
         elif role == 'exit':
             row_exit[rid_int] = node.name
-    missing = sorted({rid for rid, _, _ in queue if rid not in row_entry or rid not in row_exit})
+    unknown = [row for row, _, _ in queue if isinstance(row, str) and row not in entry_row]
+    if unknown:
+        raise MissionError(f'unknown entry node(s) {unknown}')
+    resolved = [(entry_row[row] if isinstance(row, str) else row, act, params)
+                for row, act, params in queue]
+    missing = sorted({rid for rid, _, _ in resolved if rid not in row_entry or rid not in row_exit})
     if missing:
         raise MissionError(f'incomplete row nodes for row(s) {missing}')
-    return [(rid, row_entry[rid], row_exit[rid], act, params) for rid, act, params in queue]
+    return [(rid, row_entry[rid], row_exit[rid], act, params) for rid, act, params in resolved]
 
 
 class MissionDomainService:

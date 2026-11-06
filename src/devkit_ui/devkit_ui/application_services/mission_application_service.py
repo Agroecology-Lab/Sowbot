@@ -151,6 +151,24 @@ class MissionApplicationService:
         except MissionError as exc:
             on_status(ERROR, f'ERROR: {exc}')
 
+    def run_saved(self, mission_id: str, on_status: StatusCallback,
+                  on_nav_update: Callable[[NavUpdate], None] | None = None) -> None:
+        """Run a saved mission: load it, resolve its entry nodes to steps and start().
+
+        The Run button for saved missions, a future scheduler and remote intake share this
+        path. An unknown mission id is reported through on_status(ERROR, 'ERROR: ... not found').
+        A mission that is inactive still runs, because active only controls scheduling.
+        Every other failure is reported as in start(). This does not yet record the outcome.
+        SQLite lookup errors propagate, including ValueError for malformed IDs.
+        """
+        mission = self._store.find(mission_id)
+        if mission is None:
+            on_status(ERROR, f'ERROR: {mission_id!r} not found')
+            return
+        action, params = mission['action'], mission.get('action_params') or {}
+        queue = [(row, action, params) for row in mission.get('rows', ())]
+        self.start(queue, on_status, on_nav_update)
+
     def cancel(self) -> None:
         """Stop the mission before its next goal, then cancel the goal in flight.
 

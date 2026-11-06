@@ -334,5 +334,19 @@ class TestMissionStoreScheduling(unittest.TestCase):
         self.assertIsNone(self.store.next_due_in_hours('INACTIVE'))
 
 
+class TestRemoteMissionsAreNotScheduled(unittest.TestCase):
+    def test_today_queue_skips_remote_missions_even_after_a_failed_run(self) -> None:
+        tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
+        store = MissionStore(str(Path(tmp) / 'missions.db'))
+        self.addCleanup(store.close)
+        store.attach(Mock())
+        local = cast(str, store.add(rows=['R1'], action='drive'))
+        remote = cast(str, store._store.add(  # pylint: disable=protected-access
+            ['R2'], 'drive', source='remote', external_id='1.1'))
+        store.record_run(remote, False)
+
+        self.assertEqual([entry[0] for entry in store.today_queue()], [local])
+
+
 if __name__ == '__main__':
     unittest.main()

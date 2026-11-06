@@ -57,6 +57,21 @@ class TestResolveSteps(unittest.TestCase):
         self.assertEqual(steps, [(2, 'B_1', 'B_2', 'drive', None),
                                  (1, 'A_1', 'A_2', 'drive', {'x': 1})])
 
+    def test_resolves_entry_node_names_through_the_row_id(self) -> None:
+        """Verify a saved mission's entry names find their exits and mix with row ids."""
+        topo = doc(node('A_1', 1, 'entry'), node('A_2', 1, 'exit'), node('B_1', '2', 'entry'),
+                   node('B_2', '2', 'exit'))
+        steps = resolve_steps(topo, [('B_1', 'drive', None), (1, 'drive', None),
+                                     ('B_1', 'drive', None)])
+        self.assertEqual([step[:3] for step in steps],
+                         [(2, 'B_1', 'B_2'), (1, 'A_1', 'A_2'), (2, 'B_1', 'B_2')])
+
+    def test_a_name_that_is_not_an_entry_node_is_rejected(self) -> None:
+        """Verify exit nodes and unknown names do not resolve as entries."""
+        topo = doc(node('A_1', 1, 'entry'), node('A_2', 1, 'exit'))
+        with self.assertRaisesRegex(MissionError, r"unknown entry node\(s\) \['A_2', 'ROW_9_IN'\]"):
+            resolve_steps(topo, [('A_2', 'drive', None), ('ROW_9_IN', 'drive', None)])
+
     def test_no_map(self) -> None:
         """Verify a missing map raises MissionError."""
         with self.assertRaisesRegex(MissionError, 'no topology map'):

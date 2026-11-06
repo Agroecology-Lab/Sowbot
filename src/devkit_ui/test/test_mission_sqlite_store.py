@@ -1,4 +1,7 @@
+import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 from typing import cast
 
 from devkit_ui.missions.sqlite import MissionSqliteStore
@@ -131,6 +134,110 @@ class TestMissionSqliteStore(unittest.TestCase):
         deleted = self._store.delete(mission_id)
         self.assertTrue(deleted)
         self.assertIsNone(self._store.find(mission_id))
+
+
+
+class TestMissionSqliteSchema(unittest.TestCase):
+    def setUp(self) -> None:
+        self._store = MissionSqliteStore(':memory:')
+
+    def tearDown(self) -> None:
+        self._store.close()
+
+    def test_local_mission_defaults(self) -> None:
+        mission = cast(dict, self._store.find(cast(str, self._store.add(rows=['E1'], action='drive'))))
+        self.assertEqual(mission['source'], 'local')
+        self.assertEqual(mission['state'], 'idle')
+        for key in ('external_id', 'task_id', 'map_hash', 'groups', 'steps_done', 'stage',
+                    'reason', 'started_at', 'ended_at', 'result_sent'):
+            self.assertIsNone(mission[key], key)
+
+    def test_remote_mission_round_trip(self) -> None:
+        mid = cast(str, self._store.add(
+            rows=['E1', 'E2', 'E3'], action='drive', source='remote', external_id='7.3',
+            task_id='task-9', map_hash='c50f60d8', groups=[1, 1, 2], state='running'))
+        mission = cast(dict, self._store.find(mid))
+        self.assertEqual(
+            (mission['source'], mission['external_id'], mission['task_id'],
+             mission['map_hash'], mission['groups'], mission['state']),
+            ('remote', '7.3', 'task-9', 'c50f60d8', [1, 1, 2], 'running'))
+
+    def test_external_id_is_unique_but_nulls_are_not(self) -> None:
+        self._store.add(rows=[1], action='drive')
+        self._store.add(rows=[1], action='drive')
+        self._store.add(rows=[1], action='drive', source='remote', external_id='1.1')
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._store.add(rows=[1], action='drive', source='remote', external_id='1.1')
+
+    def test_unknown_source_or_state_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            self._store.add(rows=[1], action='drive', source='cloud')
+        with self.assertRaises(ValueError):
+            self._store.add(rows=[1], action='drive', state='paused')
+
+    def test_run_result_is_updatable_and_identity_is_not(self) -> None:
+        mid = cast(str, self._store.add(
+            rows=[1], action='drive', source='remote', external_id='1.1', groups=[4]))
+        self._store.update(
+            mid, state='ended', steps_done=2, stage='row', reason='nav',
+            started_at='2026-11-06T09:00:00Z', ended_at='2026-11-06T10:00:00Z',
+            result_sent=True, source='local', external_id='9.9', groups=[8])
+        mission = cast(dict, self._store.find(mid))
+        self.assertEqual(
+            (mission['state'], mission['steps_done'], mission['stage'], mission['reason'],
+             mission['ended_at'], mission['result_sent']),
+            ('ended', 2, 'row', 'nav', '2026-11-06T10:00:00Z', True))
+        self.assertEqual(
+            (mission['source'], mission['external_id'], mission['groups']),
+            ('remote', '1.1', [4]))
+
+    def test_epoch_counter_only_rises(self) -> None:
+        self.assertIsNone(self._store.max_counter('7'))
+        self._store.record_counter('7', 5)
+        self._store.record_counter('7', 3)
+        self._store.record_counter('8', 1)
+        self.assertEqual(self._store.max_counter('7'), 5)
+        self.assertEqual(self._store.max_counter('8'), 1)
+
+    def test_prune_keeps_newest_remote_and_all_local_and_the_counter(self) -> None:
+        self._store.add(rows=[1], action='drive', name='LOCAL')
+        for n in range(1, 26):
+            self._store.add(rows=[1], action='drive', source='remote', external_id=f'1.{n}')
+            self._store.record_counter('1', n)
+        self.assertEqual(self._store.prune_remote(keep=20), 5)
+        remote = [m for m in self._store.missions if m['source'] == 'remote']
+        self.assertEqual(remote[0]['external_id'], '1.6')
+        self.assertEqual(len(remote), 20)
+        self.assertEqual(len(self._store.missions), 21)
+        self.assertEqual(self._store.max_counter('1'), 25)
+
+
+class TestMissionSqliteMigration(unittest.TestCase):
+    def test_database_from_before_the_new_columns_keeps_its_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / 'missions.db')
+            old = sqlite3.connect(path)
+            old.execute("""CREATE TABLE missions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, rows TEXT, action TEXT,
+                action_params TEXT, repeat_every_hours INTEGER, active INTEGER,
+                created_at TEXT, last_run_at TEXT, last_run_success INTEGER)""")
+            old.execute("INSERT INTO missions (name, rows, action, action_params, active) "
+                        "VALUES ('OLD', '[\"E1\"]', 'drive', '{}', 1)")
+            old.commit()
+            old.close()
+
+            store = MissionSqliteStore(path)
+            try:
+                mission = cast(dict, store.find('MISSION_1'))
+                self.assertEqual((mission['name'], mission['rows']), ('OLD', ['E1']))
+                self.assertEqual((mission['source'], mission['state']), ('local', 'idle'))
+                self.assertIsNone(mission['groups'])
+                self.assertIsNotNone(store.add(
+                    rows=['E2'], action='drive', source='remote', external_id='1.1'))
+            finally:
+                store.close()
+            # Opening it again must not try to add the columns twice.
+            MissionSqliteStore(path).close()
 
 
 if __name__ == '__main__':
