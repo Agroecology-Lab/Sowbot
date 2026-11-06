@@ -149,26 +149,26 @@ class TestMissionSqliteSchema(unittest.TestCase):
         mission = cast(dict, self._store.find(cast(str, self._store.add(rows=['E1'], action='drive'))))
         self.assertEqual(mission['source'], 'local')
         self.assertEqual(mission['state'], 'idle')
-        for key in ('external_id', 'task_id', 'map_hash', 'groups', 'steps_done', 'stage',
+        for key in ('external_id', 'map_hash', 'groups', 'steps_done', 'stage',
                     'reason', 'started_at', 'ended_at', 'result_sent'):
             self.assertIsNone(mission[key], key)
 
     def test_remote_mission_round_trip(self) -> None:
         mid = cast(str, self._store.add(
-            rows=['E1', 'E2', 'E3'], action='drive', source='remote', external_id='7.3',
-            task_id='task-9', map_hash='c50f60d8', groups=[1, 1, 2], state='running'))
+            rows=['E1', 'E2', 'E3'], action='drive', source='remote', external_id='a7',
+            map_hash='c50f60d8', groups=[1, 1, 2], state='running'))
         mission = cast(dict, self._store.find(mid))
         self.assertEqual(
-            (mission['source'], mission['external_id'], mission['task_id'],
+            (mission['source'], mission['external_id'],
              mission['map_hash'], mission['groups'], mission['state']),
-            ('remote', '7.3', 'task-9', 'c50f60d8', [1, 1, 2], 'running'))
+            ('remote', 'a7', 'c50f60d8', [1, 1, 2], 'running'))
 
     def test_external_id_is_unique_but_nulls_are_not(self) -> None:
         self._store.add(rows=[1], action='drive')
         self._store.add(rows=[1], action='drive')
-        self._store.add(rows=[1], action='drive', source='remote', external_id='1.1')
+        self._store.add(rows=[1], action='drive', source='remote', external_id='a1')
         with self.assertRaises(sqlite3.IntegrityError):
-            self._store.add(rows=[1], action='drive', source='remote', external_id='1.1')
+            self._store.add(rows=[1], action='drive', source='remote', external_id='a1')
 
     def test_unknown_source_or_state_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -178,11 +178,11 @@ class TestMissionSqliteSchema(unittest.TestCase):
 
     def test_run_result_is_updatable_and_identity_is_not(self) -> None:
         mid = cast(str, self._store.add(
-            rows=[1], action='drive', source='remote', external_id='1.1', groups=[4]))
+            rows=[1], action='drive', source='remote', external_id='a1', groups=[4]))
         self._store.update(
             mid, state='ended', steps_done=2, stage='row', reason='nav',
             started_at='2026-11-06T09:00:00Z', ended_at='2026-11-06T10:00:00Z',
-            result_sent=True, source='local', external_id='9.9', groups=[8])
+            result_sent=True, source='local', external_id='b2', groups=[8])
         mission = cast(dict, self._store.find(mid))
         self.assertEqual(
             (mission['state'], mission['steps_done'], mission['stage'], mission['reason'],
@@ -190,7 +190,7 @@ class TestMissionSqliteSchema(unittest.TestCase):
             ('ended', 2, 'row', 'nav', '2026-11-06T10:00:00Z', True))
         self.assertEqual(
             (mission['source'], mission['external_id'], mission['groups']),
-            ('remote', '1.1', [4]))
+            ('remote', 'a1', [4]))
 
     def test_update_rejects_an_unknown_state_and_changes_nothing(self) -> None:
         mid = cast(str, self._store.add(rows=[1], action='drive'))
@@ -220,25 +220,41 @@ class TestMissionSqliteSchema(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(len(self._store.missions), 200)
 
-    def test_epoch_counter_only_rises(self) -> None:
-        self.assertIsNone(self._store.max_counter('7'))
-        self._store.record_counter('7', 5)
-        self._store.record_counter('7', 3)
-        self._store.record_counter('8', 1)
-        self.assertEqual(self._store.max_counter('7'), 5)
-        self.assertEqual(self._store.max_counter('8'), 1)
+    def test_find_by_external_id(self) -> None:
+        mid = self._store.add(rows=[1], action='drive', source='remote', external_id='a1')
+        self.assertEqual(cast(dict, self._store.find_by_external_id('a1'))['id'], mid)
+        self.assertIsNone(self._store.find_by_external_id('zz'))
 
-    def test_prune_keeps_newest_remote_and_all_local_and_the_counter(self) -> None:
-        self._store.add(rows=[1], action='drive', name='LOCAL')
-        for n in range(1, 26):
-            self._store.add(rows=[1], action='drive', source='remote', external_id=f'1.{n}')
-            self._store.record_counter('1', n)
-        self.assertEqual(self._store.prune_remote(keep=20), 5)
-        remote = [m for m in self._store.missions if m['source'] == 'remote']
-        self.assertEqual(remote[0]['external_id'], '1.6')
-        self.assertEqual(len(remote), 20)
-        self.assertEqual(len(self._store.missions), 21)
-        self.assertEqual(self._store.max_counter('1'), 25)
+    def test_ids_are_not_reused_after_a_delete(self) -> None:
+        self._store.add(rows=[1], action='drive')
+        last = cast(str, self._store.add(rows=[1], action='drive'))
+        self.assertTrue(self._store.delete(last))
+        self.assertEqual(self._store.add(rows=[1], action='drive'), 'MISSION_3')
+
+    def test_delete_refuses_a_running_mission(self) -> None:
+        mid = cast(str, self._store.add(rows=[1], action='drive', state='running'))
+        self.assertFalse(self._store.delete(mid))
+        self.assertIsNotNone(self._store.find(mid))
+        self.assertFalse(self._store.delete('MISSION_99'))
+
+    def test_attach_ends_missions_left_running(self) -> None:
+        local = cast(str, self._store.add(rows=[1], action='drive', state='running'))
+        remote = cast(str, self._store.add(
+            rows=[1], action='drive', source='remote', external_id='a1', state='running'))
+        self._store.update(remote, steps_done=2, stage='row', result_sent=True)
+        idle = cast(str, self._store.add(rows=[1], action='drive'))
+
+        self._store.attach(None)
+
+        local_m, remote_m, idle_m = (cast(dict, self._store.find(m)) for m in (local, remote, idle))
+        self.assertEqual((local_m['state'], local_m['reason'], local_m['active']),
+                         ('ended', 'reboot', True))
+        self.assertTrue(local_m['ended_at'])
+        self.assertIsNone(local_m['last_run_success'])
+        self.assertEqual((remote_m['state'], remote_m['reason'], remote_m['active'],
+                          remote_m['result_sent'], remote_m['steps_done'], remote_m['stage']),
+                         ('ended', 'reboot', False, False, 2, 'row'))
+        self.assertEqual((idle_m['state'], idle_m['reason']), ('idle', None))
 
 
 class TestMissionSqliteMigration(unittest.TestCase):
@@ -262,7 +278,8 @@ class TestMissionSqliteMigration(unittest.TestCase):
                 self.assertEqual((mission['source'], mission['state']), ('local', 'idle'))
                 self.assertIsNone(mission['groups'])
                 self.assertIsNotNone(store.add(
-                    rows=['E2'], action='drive', source='remote', external_id='1.1'))
+                    rows=['E2'], action='drive', source='remote', external_id='a1'))
+                self.assertEqual(store.add(rows=['E3'], action='drive'), 'MISSION_3')
             finally:
                 store.close()
             # Opening it again must not try to add the columns twice.

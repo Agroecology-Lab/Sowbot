@@ -15,7 +15,7 @@ from nicegui import app, ui, ui_run
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
-# MISSION: store owns missions.yaml, scheduling, and run recording.
+# MISSION: store owns missions.db, scheduling, and run recording.
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
 from devkit_ui.application_services.mission_application_service import MissionApplicationService
 from devkit_ui.application_services.navigation_application_service import (
@@ -168,7 +168,7 @@ class NiceGuiNode:
             ObstacleApplicationService(self._obstacle_mgr, self._telemetry_app_service))
         self._obstacle_mgr.start()
 
-        # MISSION: store owns missions.yaml, scheduling, and run recording.
+        # MISSION: store owns missions.db, scheduling, and run recording.
         self._mission_store = MissionStore()
         self._mission_store.attach(self._ros)
 

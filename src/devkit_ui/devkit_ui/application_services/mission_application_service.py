@@ -169,7 +169,7 @@ class MissionApplicationService:
         on_status(ERROR, 'ERROR: ... not found'). A mission that is inactive still runs,
         because active only controls scheduling. Every other failure is reported as in start().
 
-        The outcome is recorded in the store (SQLite only): state running with started_at when
+        The outcome is recorded in the store: state running with started_at when
         it starts, steps_done as each step finishes, then state ended with stage, reason and
         ended_at, and record_run for the repeat schedule. A remote mission is also made
         inactive when it ends, whatever the result. A mission that fails to start keeps the

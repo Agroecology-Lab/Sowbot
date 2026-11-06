@@ -19,7 +19,6 @@ _MUTABLE_COLUMNS = frozenset[str]((
 _ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ('source',      "TEXT NOT NULL DEFAULT 'local'"),   # local | remote
     ('external_id', 'TEXT'),                            # remote only, unique
-    ('task_id',     'TEXT'),                            # remote only, the LiteFarm task
     ('map_hash',    'TEXT'),                            # hash8 the mission was made against
     ('groups',      'TEXT'),                            # JSON, LiteFarm row per entry; null if local
     ('state',       "TEXT NOT NULL DEFAULT 'idle'"),    # idle | running | ended
@@ -69,9 +68,25 @@ class MissionSqliteStore:
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
+    @_locked
     def attach(self, node) -> None:
-        """Attaches the store to a node."""
-        # Nothing needed here.
+        """Attaches the store to a node and ends every mission left running.
+
+        A restart does not resume a run, so a mission still stored as running is ended with the
+        reason reboot. Its steps_done and stage keep their last values and last_run_* are left
+        alone, because the run did not finish. A remote mission also becomes inactive and its end
+        report is marked unsent. Only one process may attach to a database: a second one would
+        end a mission that is really running.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute("""
+            UPDATE missions
+            SET state = 'ended', reason = 'reboot', ended_at = ?,
+                active = CASE WHEN source = 'remote' THEN 0 ELSE active END,
+                result_sent = CASE WHEN source = 'remote' THEN 0 ELSE result_sent END
+            WHERE state = 'running'
+        """, (now_utc_str(),))
+        self._conn.commit()
 
     @_locked
     def close(self) -> None:
@@ -91,7 +106,6 @@ class MissionSqliteStore:
             *,
             source: str = 'local',
             external_id: str | None = None,
-            task_id: str | None = None,
             map_hash: str | None = None,
             groups: list | None = None,
             state: str = 'idle') -> str | None:
@@ -108,11 +122,8 @@ class MissionSqliteStore:
 
         ts = now_utc_str()
 
-        mid = f"MISSION_{self._next_id()}"
-
         mission = self._serialize_row({
-            'id':                 mid,
-            'name':               name or mid,
+            'name':               name,
             'rows':               list(rows),
             'action':             action,
             'action_params':      action_params or {},
@@ -124,7 +135,6 @@ class MissionSqliteStore:
             'last_run_success':   None,
             'source':             source,
             'external_id':        external_id,
-            'task_id':            task_id,
             'map_hash':           map_hash,
             'groups':             groups,
             'state':              state,
@@ -133,12 +143,11 @@ class MissionSqliteStore:
         cursor = self._conn.cursor()
         cursor.execute("""
         INSERT INTO missions
-            (id, name, rows, action, action_params, repeat_every_hours, active, created_at,
+            (name, rows, action, action_params, repeat_every_hours, active, created_at,
              last_run_at, last_run_success,
-             source, external_id, task_id, map_hash, groups, state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             source, external_id, map_hash, groups, state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            mission['id'],
             mission['name'],
             mission['rows'],
             mission['action'],
@@ -150,21 +159,27 @@ class MissionSqliteStore:
             mission['last_run_success'],
             mission['source'],
             mission['external_id'],
-            mission['task_id'],
             mission['map_hash'],
             mission['groups'],
             mission['state'],
         ))
+        mid = f'MISSION_{cursor.lastrowid}'
+        if not name:
+            cursor.execute("UPDATE missions SET name = ? WHERE id = ?", (mid, cursor.lastrowid))
         self._conn.commit()
         self._on_write_done(f'{mid} created')
         return mid
 
     @_locked
     def delete(self, mid: str) -> bool:
-        """Deletes a mission."""
+        """Deletes a mission. Returns False, deleting nothing, if it is running or unknown:
+        a running mission's result still has to be written to it."""
         cursor = self._conn.cursor()
-        cursor.execute("DELETE FROM missions WHERE id = ?", (self._db_id(mid),))
+        cursor.execute("DELETE FROM missions WHERE id = ? AND state != 'running'",
+                       (self._db_id(mid),))
         self._conn.commit()
+        if cursor.rowcount == 0:
+            return False
         self._on_write_done(f'{mid} deleted')
         return True
 
@@ -175,7 +190,7 @@ class MissionSqliteStore:
         Allowed fields: name, rows, action, action_params, repeat_every_hours, active,
         last_run_at, last_run_success, and the run result (state, steps_done, stage, reason,
         started_at, ended_at, result_sent). Other keys are ignored, including the identity of a
-        remote mission (source, external_id, task_id, map_hash, groups), which is set once.
+        remote mission (source, external_id, map_hash, groups), which is set once.
         ValueError for an unknown state, as in add().
         """
 
@@ -255,59 +270,15 @@ class MissionSqliteStore:
             CREATE UNIQUE INDEX IF NOT EXISTS missions_external_id
             ON missions(external_id) WHERE external_id IS NOT NULL
         """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS intake_epoch (
-                epoch TEXT PRIMARY KEY,
-                max_counter INTEGER NOT NULL
-            )
-        """)
         self._conn.commit()
 
-    # ── remote intake ─────────────────────────────────────────────────────
-
     @_locked
-    def max_counter(self, epoch: str) -> int | None:
-        """Return the highest counter accepted for an epoch, or None if none was."""
+    def find_by_external_id(self, external_id: str) -> dict | None:
+        """Finds a remote mission by the id the station gave it."""
         cursor = self._conn.cursor()
-        cursor.execute("SELECT max_counter FROM intake_epoch WHERE epoch = ?", (epoch,))
+        cursor.execute("SELECT * FROM missions WHERE external_id = ?", (external_id,))
         result = cursor.fetchone()
-        return None if result is None else int(result[0])
-
-    @_locked
-    def record_counter(self, epoch: str, counter: int) -> None:
-        """Raise an epoch's highest accepted counter to `counter`; never lowers it."""
-        cursor = self._conn.cursor()
-        cursor.execute("""
-            INSERT INTO intake_epoch (epoch, max_counter) VALUES (?, ?)
-            ON CONFLICT(epoch) DO UPDATE SET max_counter = MAX(max_counter, excluded.max_counter)
-        """, (epoch, int(counter)))
-        self._conn.commit()
-
-    @_locked
-    def prune_remote(self, keep: int = 20) -> int:
-        """Delete all but the newest `keep` remote missions and return how many went.
-
-        Local missions are untouched. intake_epoch is not pruned, so replay protection
-        outlives the records.
-        """
-        cursor = self._conn.cursor()
-        cursor.execute("""
-            DELETE FROM missions
-            WHERE source = 'remote' AND id NOT IN (
-                SELECT id FROM missions WHERE source = 'remote' ORDER BY id DESC LIMIT ?
-            )
-        """, (int(keep),))
-        self._conn.commit()
-        return cursor.rowcount
-
-    def _next_id(self) -> int:
-        """Gets the next ID."""
-        cursor = self._conn.cursor()
-        cursor.execute("SELECT MAX(id) FROM missions")
-        result = cursor.fetchone()
-        if result is None or result[0] is None:
-            return 1
-        return int(result[0]) + 1
+        return None if result is None else self._deserialize_row(result)
 
     def _serialize_row(self, row: dict) -> dict:
         """

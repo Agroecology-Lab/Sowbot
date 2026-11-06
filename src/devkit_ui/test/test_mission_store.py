@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import Mock, patch
 
-import yaml
-
 from devkit_ui.missions.sqlite import MissionSqliteStore
 from devkit_ui.missions.store import DUE_FAILED, DUE_NOW, MissionStore, validate_mission
 from devkit_ui.time_utils import parse_ts
@@ -50,18 +48,11 @@ class TestMissionStoreEditing(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.store.attach(self.ros)
 
-    def test_unsupported_file_extension_is_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            MissionStore('/tmp/missions.txt')
-
     def test_close_releases_the_sqlite_connection(self) -> None:
         self.store.close()
 
         with self.assertRaises(sqlite3.ProgrammingError):
             self.store.find('MISSION_1')
-
-    def test_close_is_a_no_op_for_the_yaml_backend(self) -> None:
-        MissionStore(str(Path(self.tmp) / 'missions.yaml')).close()
 
     def test_attach_initialises_state(self) -> None:
         self.assertEqual(self.store.missions, ())
@@ -272,31 +263,32 @@ class TestMissionStoreRunHistory(unittest.TestCase):
 
 
 class TestMissionStoreScheduling(unittest.TestCase):
-    """Scheduling reads last_run_* fields, so the missions are loaded from a prepared YAML file."""
+    """Scheduling reads last_run_* fields, so the missions are prepared in a SQLite file."""
 
     def setUp(self) -> None:
         tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
-        path = Path(tmp) / 'missions.yaml'
-        path.write_text(yaml.safe_dump({'missions': [
-            {'id': 'NEVER_RAN', 'rows': ['R1', 'R2'], 'action': 'weed', 'action_params': {'rpm': 3},
-             'repeat_every_hours': 6},
-            {'id': 'FAILED', 'rows': ['R3'], 'action': 'drive',
-             'last_run_at': '2026-01-01T11:00:00Z', 'last_run_success': False,
-             'repeat_every_hours': 6},
-            {'id': 'RECURRING_WAITING', 'rows': ['R4'], 'action': 'drive', 'repeat_every_hours': 6,
-             'last_run_at': '2026-01-01T10:00:00Z', 'last_run_success': True},
-            {'id': 'RECURRING_ELAPSED', 'rows': ['R5'], 'action': 'drive', 'repeat_every_hours': 6,
-             'last_run_at': '2026-01-01T05:00:00Z', 'last_run_success': True},
-            {'id': 'MALFORMED_TIMESTAMP', 'rows': ['R9'], 'action': 'drive',
-             'last_run_at': {'timestamp': '2026-01-01T05:00:00Z'}, 'last_run_success': True},
-            {'id': 'ONE_SHOT_DONE', 'rows': ['R6'], 'action': 'drive',
-             'last_run_at': '2026-01-01T09:00:00Z', 'last_run_success': True},
-            {'id': 'INACTIVE', 'rows': ['R7'], 'action': 'drive', 'active': False},
-            {'id': 'BAD_ACTION', 'rows': ['R8'], 'action': 'teleport'},
-        ]}), encoding='utf-8')
-        self.store = MissionStore(str(path))
+        self.store = MissionStore(str(Path(tmp) / 'missions.db'))
         self.addCleanup(self.store.close)
-        self.store.attach(Mock())  # the YAML store logs load results through ros.get_logger()
+        self.store.attach(Mock())
+        backend = cast(MissionSqliteStore, self.store._store)  # pylint: disable=protected-access
+        self.ids: dict[str, str] = {}
+
+        def make(name: str, rows: list, action: str, params: dict | None = None,
+                 repeat: int | None = None, active: bool = True, ran: str | None = None,
+                 ok: bool | None = None) -> None:
+            mid = cast(str, backend.add(rows, action, params, name, repeat, active))
+            if ran is not None:
+                backend.update(mid, last_run_at=ran, last_run_success=ok)
+            self.ids[name] = mid
+
+        make('NEVER_RAN', ['R1', 'R2'], 'weed', {'rpm': 3}, repeat=6)
+        make('FAILED', ['R3'], 'drive', repeat=6, ran='2026-01-01T11:00:00Z', ok=False)
+        make('RECURRING_WAITING', ['R4'], 'drive', repeat=6, ran='2026-01-01T10:00:00Z', ok=True)
+        make('RECURRING_ELAPSED', ['R5'], 'drive', repeat=6, ran='2026-01-01T05:00:00Z', ok=True)
+        make('MALFORMED_TIMESTAMP', ['R9'], 'drive', ran='not a timestamp', ok=True)
+        make('ONE_SHOT_DONE', ['R6'], 'drive', ran='2026-01-01T09:00:00Z', ok=True)
+        make('INACTIVE', ['R7'], 'drive', active=False)
+        make('BAD_ACTION', ['R8'], 'teleport')
         patcher = patch('devkit_ui.missions.store.now_utc', return_value=NOW)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -305,34 +297,34 @@ class TestMissionStoreScheduling(unittest.TestCase):
         queue = self.store.today_queue()
 
         self.assertEqual(queue, [
-            ('NEVER_RAN', 'R1', 'weed', {'rpm': 3}),
-            ('NEVER_RAN', 'R2', 'weed', {'rpm': 3}),
-            ('FAILED', 'R3', 'drive', {}),
-            ('RECURRING_ELAPSED', 'R5', 'drive', {}),
-            ('MALFORMED_TIMESTAMP', 'R9', 'drive', {}),
+            (self.ids['NEVER_RAN'], 'R1', 'weed', {'rpm': 3}),
+            (self.ids['NEVER_RAN'], 'R2', 'weed', {'rpm': 3}),
+            (self.ids['FAILED'], 'R3', 'drive', {}),
+            (self.ids['RECURRING_ELAPSED'], 'R5', 'drive', {}),
+            (self.ids['MALFORMED_TIMESTAMP'], 'R9', 'drive', {}),
         ])
 
     def test_never_run_mission_is_due_now(self) -> None:
-        self.assertEqual(self.store.next_due_in_hours('NEVER_RAN'), DUE_NOW)
+        self.assertEqual(self.store.next_due_in_hours(self.ids['NEVER_RAN']), DUE_NOW)
 
     def test_failed_mission_reports_the_retry_sentinel(self) -> None:
-        self.assertEqual(self.store.next_due_in_hours('FAILED'), DUE_FAILED)
+        self.assertEqual(self.store.next_due_in_hours(self.ids['FAILED']), DUE_FAILED)
 
     def test_recurring_mission_reports_hours_until_the_interval_elapses(self) -> None:
-        self.assertAlmostEqual(cast(float, self.store.next_due_in_hours('RECURRING_WAITING')), 4.0)
+        self.assertAlmostEqual(cast(float, self.store.next_due_in_hours(self.ids['RECURRING_WAITING'])), 4.0)
 
     def test_recurring_mission_past_its_interval_is_due_now(self) -> None:
-        self.assertEqual(self.store.next_due_in_hours('RECURRING_ELAPSED'), DUE_NOW)
+        self.assertEqual(self.store.next_due_in_hours(self.ids['RECURRING_ELAPSED']), DUE_NOW)
 
     def test_malformed_timestamp_is_treated_as_never_run(self) -> None:
-        self.assertIn(('MALFORMED_TIMESTAMP', 'R9', 'drive', {}), self.store.today_queue())
-        self.assertEqual(self.store.next_due_in_hours('MALFORMED_TIMESTAMP'), DUE_NOW)
+        self.assertIn((self.ids['MALFORMED_TIMESTAMP'], 'R9', 'drive', {}), self.store.today_queue())
+        self.assertEqual(self.store.next_due_in_hours(self.ids['MALFORMED_TIMESTAMP']), DUE_NOW)
 
     def test_completed_one_shot_has_no_due_time(self) -> None:
-        self.assertIsNone(self.store.next_due_in_hours('ONE_SHOT_DONE'))
+        self.assertIsNone(self.store.next_due_in_hours(self.ids['ONE_SHOT_DONE']))
 
     def test_inactive_mission_has_no_due_time(self) -> None:
-        self.assertIsNone(self.store.next_due_in_hours('INACTIVE'))
+        self.assertIsNone(self.store.next_due_in_hours(self.ids['INACTIVE']))
 
 
 class TestRecordResult(unittest.TestCase):
@@ -364,29 +356,61 @@ class TestRecordResult(unittest.TestCase):
         self.assertFalse(store.record_result('MISSION_99', state='ended'))
         self.assertIn('not found', store.status)
 
-    def test_yaml_has_no_result_fields_so_nothing_is_written(self) -> None:
+
+class TestRemoteMissions(unittest.TestCase):
+    def setUp(self) -> None:
         tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
-        store = MissionStore(str(Path(tmp) / 'missions.yaml'))
-        store.attach(Mock())
-        mid = cast(str, store.add(rows=['R1'], action='drive'))
+        self.store = MissionStore(str(Path(tmp) / 'missions.db'))
+        self.addCleanup(self.store.close)
+        self.store.attach(Mock())
 
-        self.assertFalse(store.record_result(mid, state='ended'))
-        self.assertNotIn('state', cast(dict, store.find(mid)))
+    def _add(self, external_id: str = 'a1b2c3d4e5', **overrides) -> str | None:
+        args = {'external_id': external_id, 'rows': ['E1', 'E2'], 'action': 'drive',
+                'map_hash': 'c50f60d8', 'groups': [1, 1], **overrides}
+        return self.store.add_remote(**args)
 
+    def test_add_remote_stores_an_idle_active_remote_mission(self) -> None:
+        mid = cast(str, self._add())
 
-class TestRemoteMissionsAreNotScheduled(unittest.TestCase):
+        mission = cast(dict, self.store.find(mid))
+        self.assertEqual(
+            (mission['source'], mission['external_id'], mission['state'], mission['active'],
+             mission['rows'], mission['groups'], mission['map_hash']),
+            ('remote', 'a1b2c3d4e5', 'idle', True, ['E1', 'E2'], [1, 1], 'c50f60d8'))
+        self.assertEqual(cast(dict, self.store.find_by_external_id('a1b2c3d4e5'))['id'], mid)
+        self.assertIsNone(self.store.find_by_external_id('other'))
+
+    def test_add_remote_refuses_bad_input_and_a_repeated_id(self) -> None:
+        self.assertIsNotNone(self._add())
+        for overrides, text in (
+                ({}, 'already stored'),
+                ({'external_id': ''}, 'empty external_id'),
+                ({'external_id': 'x', 'map_hash': ''}, 'empty map_hash'),
+                ({'external_id': 'x', 'groups': [1]}, 'differ in length'),
+                ({'external_id': 'x', 'action': 'teleport'}, 'unknown action'),
+                ({'external_id': 'x', 'rows': [], 'groups': []}, 'no rows')):
+            with self.subTest(text):
+                self.assertIsNone(self._add(**overrides))
+                self.assertIn(text, self.store.status)
+        self.assertEqual(len(self.store.missions), 1)
+
+    def test_delete_refuses_a_running_mission(self) -> None:
+        mid = cast(str, self._add())
+        self.store.record_result(mid, state='running')
+
+        self.assertFalse(self.store.delete(mid))
+        self.assertIn('is running', self.store.status)
+        self.assertIsNotNone(self.store.find(mid))
+
+        self.store.record_result(mid, state='ended')
+        self.assertTrue(self.store.delete(mid))
+
     def test_today_queue_skips_remote_missions_even_after_a_failed_run(self) -> None:
-        tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
-        store = MissionStore(str(Path(tmp) / 'missions.db'))
-        self.addCleanup(store.close)
-        store.attach(Mock())
-        local = cast(str, store.add(rows=['R1'], action='drive'))
-        backend = cast(MissionSqliteStore, store._store)  # pylint: disable=protected-access
-        remote = cast(str, MissionSqliteStore.add(
-            backend, ['R2'], 'drive', source='remote', external_id='1.1'))
-        store.record_run(remote, False)
+        local = cast(str, self.store.add(rows=['R1'], action='drive'))
+        remote = cast(str, self._add())
+        self.store.record_run(remote, False)
 
-        self.assertEqual([entry[0] for entry in store.today_queue()], [local])
+        self.assertEqual([entry[0] for entry in self.store.today_queue()], [local])
 
 
 if __name__ == '__main__':
