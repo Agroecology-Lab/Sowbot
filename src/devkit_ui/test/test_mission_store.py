@@ -335,6 +335,45 @@ class TestMissionStoreScheduling(unittest.TestCase):
         self.assertIsNone(self.store.next_due_in_hours('INACTIVE'))
 
 
+class TestRecordResult(unittest.TestCase):
+    def test_sqlite_stores_the_run_result_and_bumps_the_version(self) -> None:
+        tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
+        store = MissionStore(str(Path(tmp) / 'missions.db'))
+        self.addCleanup(store.close)
+        store.attach(Mock())
+        mid = cast(str, store.add(rows=['R1'], action='drive'))
+        version = store.version
+
+        self.assertTrue(store.record_result(mid, state='ended', steps_done=3, stage='row',
+                                            reason='timeout', ended_at='2026-11-06T10:00:00Z'))
+
+        mission = cast(dict, store.find(mid))
+        self.assertEqual((mission['state'], mission['steps_done'], mission['stage'],
+                          mission['reason']), ('ended', 3, 'row', 'timeout'))
+        self.assertGreater(store.version, version)
+
+    def test_it_rejects_other_fields_and_unknown_missions(self) -> None:
+        tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
+        store = MissionStore(str(Path(tmp) / 'missions.db'))
+        self.addCleanup(store.close)
+        store.attach(Mock())
+        mid = cast(str, store.add(rows=['R1'], action='drive'))
+
+        self.assertFalse(store.record_result(mid, source='remote'))
+        self.assertIn('cannot record', store.status)
+        self.assertFalse(store.record_result('MISSION_99', state='ended'))
+        self.assertIn('not found', store.status)
+
+    def test_yaml_has_no_result_fields_so_nothing_is_written(self) -> None:
+        tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
+        store = MissionStore(str(Path(tmp) / 'missions.yaml'))
+        store.attach(Mock())
+        mid = cast(str, store.add(rows=['R1'], action='drive'))
+
+        self.assertFalse(store.record_result(mid, state='ended'))
+        self.assertNotIn('state', cast(dict, store.find(mid)))
+
+
 class TestRemoteMissionsAreNotScheduled(unittest.TestCase):
     def test_today_queue_skips_remote_missions_even_after_a_failed_run(self) -> None:
         tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with

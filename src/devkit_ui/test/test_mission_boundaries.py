@@ -158,7 +158,7 @@ class TestExecutionBoundaries(unittest.TestCase):
             self.assertFalse(self.service.cancel_requested)
             worker.assert_called_once_with(
                 target=self.service._execute,
-                args=(self.steps, navigate, self.status, estop), daemon=True)
+                args=(self.steps, navigate, self.status, estop, None, None), daemon=True)
             worker.return_value.start.assert_called_once_with()
             self.status.assert_called_once_with(mds.INFO, 'Starting 2 step(s)…')
             navigate.assert_not_called()

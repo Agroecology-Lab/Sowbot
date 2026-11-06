@@ -1,6 +1,6 @@
 # Robot mission intake spec 
 
-Status: draft. Built so far: the SQLite schema and migration, the intake epoch table, `run_saved`, name-based `resolve_steps`, locked store reads, and the Run button for saved missions. Not built: outcome recording, intake, the radio link and the station. Originally read from Sowbot caatinga-dev at cdbb668 (PR #213 merge, 6 Nov 2026); the built parts were checked against mission-refactor with the mission unit tests. Nothing ran on hardware. Companion: Station service spec (rev 3), which defines the messages.
+Status: draft. Built so far: the SQLite schema and migration, the intake epoch table, `run_saved` with outcome recording, name-based `resolve_steps`, locked store reads, the structured mission result, and the Run button for saved missions. Not built: the stall watchdog, intake, the radio link and the station. Originally read from Sowbot caatinga-dev at cdbb668 (PR #213 merge, 6 Nov 2026); the built parts were checked against mission-refactor with the mission unit tests. Nothing ran on hardware. Companion: Station service spec (rev 3), which defines the messages.
 
 Messages are named in plain words here: mission, cancel, status query, accepted, rejected, end report and hello. The [station spec gives the exact formats.](https://github.com/Agroecology-Lab/Sowbot_Station/blob/main/README.md)
 
@@ -88,7 +88,7 @@ lf_frag sorted by row_id), so the station never needs robot row ids.
 ## What exists (checked at cdbb668)
 
 - MissionStore keeps missions in SQLite (`/workspace/maps/missions.db`), with a YAML backend for older files. A mission is a list of entry node names, one action, and `last_run_at` and `last_run_success`. The UI can save, activate and delete missions.
-- A saved local mission runs from its own play button through `run_saved`. `today_queue()` and `record_run()` still have no callers, so nothing schedules a mission or records its outcome. The main Run Mission button still runs the browser session's queue.
+- A saved local mission runs from its own play button through `run_saved`, which records its state, steps done, stage and reason, and calls `record_run()`. `today_queue()` still has no caller, so nothing schedules a mission. The main Run Mission button still runs the browser session's queue and records nothing.
 - The store holds entry node names and `start()` wants integer row ids. `resolve_steps` now accepts both.
 - `MissionApplicationService.start(queue, on_status, on_nav_update)` reports every failure through `on_status(ERROR, ...)` and returns normally.
 - `MissionDomainService` runs one mission on a thread. Per row: go to the entry, enable the tool, go to the exit, disable the tool. It stops at the first failure. Progress is text only.
@@ -210,10 +210,15 @@ Rules:
 
 ### 4. Structured result
 
-- `navigate` returns a reason instead of a bool. From `NavUpdate.outcome`: failed, rejected and unavailable map to `nav`. Cancelled maps to `cancel` or `estop`, depending on which flag was set. A spent budget maps to `timeout`.
-- stage is `transit` (the entry was not reached) or `row` (the tool was enabled).
-- A row counts as done only when its last fragment finishes. `groups` makes that countable.
-- `steps_done` is written as each whole row completes, not only at the end, so a reboot reports a true count.
+Built. The mission service ends every run with a `MissionResult(ok, steps_done, stage, reason)` and calls `on_result` once, then clears its running flag. `on_step_done(n)` runs as each step finishes.
+
+- `NavigationApplicationService.navigate_and_wait_result` returns `arrived` or a reason. Failed, rejected, unavailable and busy map to `nav`. A spent budget maps to `timeout`. An abort or a cancelled goal maps to `cancel`. `navigate_and_wait` stays as a bool wrapper for the Run tab.
+- `MissionApplicationService` turns `cancel` into `estop` when the soft estop, not a mission cancel, caused the stop. The mission service does the same check before each leg.
+- stage is `transit` (the entry was not reached, or the mission stopped between steps) or `row` (the tool was enabled).
+- `steps_done` counts steps, and a step is one entry-to-exit traverse. It is written as each step completes, so a reboot reports a true count. A row counts as done only when its last fragment finishes, so the station turns steps into LiteFarm rows through `groups`. That conversion is not built.
+- An exception in the executor is reported as a failure with the reason `nav` in the stage it was in. The spec has no separate reason for it.
+- A failing `on_result` or `on_step_done` is logged and swallowed, so a store error cannot leave a mission marked running.
+- `run_saved` writes `state=running` with `started_at` before starting, and puts the old result back if the start is refused. The YAML backend records no result fields.
 
 ### 5. Goal budget
 

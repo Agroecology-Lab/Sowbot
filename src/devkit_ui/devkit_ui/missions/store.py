@@ -89,6 +89,10 @@ MISSIONS_FILE = '/workspace/maps/missions.db'
 _NAME_RE    = re.compile(r'^[A-Z0-9_]+$')
 _NAME_CLEAN = re.compile(r'[^A-Z0-9_]')
 
+# Run-result fields, written by the run path through record_result (SQLite only).
+_RESULT_FIELDS = frozenset({
+    'state', 'steps_done', 'stage', 'reason', 'started_at', 'ended_at', 'result_sent'})
+
 _MUTABLE_FIELDS = frozenset({
     'name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active',
 })
@@ -329,6 +333,27 @@ class MissionStore:
                 return False
             self.set_status(f'{mid} re-armed — writing…')
             return self._write_run_state(mid, last_run_at=None, last_run_success=None, active=True)
+
+    def record_result(self, mid: str, **fields) -> bool:
+        """Persist the result of the current or last run: state, steps_done, stage, reason,
+        started_at, ended_at and result_sent.
+
+        These fields exist only in the SQLite backend. For YAML this does nothing and returns
+        False. Return False and set status for an unsupported field or an unknown ID, and
+        increment the version on success. SQLite lookup and write errors propagate, including
+        ValueError for an unknown state.
+        """
+        bad = set(fields) - _RESULT_FIELDS
+        if bad:
+            self.set_status(f'ERROR: cannot record field(s) {sorted(bad)}')
+            return False
+        if not isinstance(self._store, MissionSqliteStore):
+            return False
+        with self._lock:
+            if self.find(mid) is None:
+                self.set_status(f'ERROR: {mid!r} not found')
+                return False
+            return self._write_run_state(mid, **fields)
 
     def record_run(self, mid: str, success: bool) -> bool:
         """Record a run outcome. Called by the executor (and any 'Run now'

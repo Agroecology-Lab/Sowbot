@@ -11,6 +11,9 @@ if TYPE_CHECKING:
 _POLL_INTERVAL_S = 0.25
 _CANCEL_SETTLE_S = 2.0
 
+# NavUpdate.outcome -> reason. 'arrived' is success; anything not listed counts as 'nav'.
+_OUTCOME_REASONS = {'arrived': 'arrived', 'cancelled': 'cancel'}
+
 
 class NavigationApplicationService:
     """User-intent commands for navigating to topology nodes."""
@@ -36,12 +39,22 @@ class NavigationApplicationService:
     def navigate_and_wait(self, target: str, timeout_sec: float,
                           should_abort: Callable[[], bool],
                           on_update: Callable[[NavUpdate], None] | None = None) -> bool:
-        """Navigate to target and block until it ends. Call from a worker thread.
+        """Navigate to target and block until it ends; True only if the robot arrived.
 
-        Returns True only if the robot arrived. Returns False if the goal failed, was
-        rejected or cancelled, the action server was unavailable, another goal was
-        already running, timeout_sec ran out, or should_abort() became true (which
-        cancels the goal).
+        A wrapper over navigate_and_wait_result, which says why a goal did not arrive.
+        """
+        return self.navigate_and_wait_result(
+            target, timeout_sec, should_abort, on_update) == 'arrived'
+
+    def navigate_and_wait_result(self, target: str, timeout_sec: float,
+                                 should_abort: Callable[[], bool],
+                                 on_update: Callable[[NavUpdate], None] | None = None) -> str:
+        """Navigate to target and block until it ends, returning how it ended.
+
+        Returns 'arrived', or the reason it did not: 'nav' (the goal failed, was rejected, the
+        action server was unavailable, or another goal was already running), 'timeout'
+        (timeout_sec ran out) or 'cancel' (should_abort() became true, or the goal was cancelled).
+        The caller tells a cancel from an e-stop, because it owns those flags.
 
         The timeout budget starts after sending the goal, excluding the up-to-10-second
         server wait. Timeout and abort checks run after each 0.25-second wait without a
@@ -60,16 +73,16 @@ class NavigationApplicationService:
                 done.set()
 
         if not self._nav.send_goal(target, _on_update, server_timeout=10.0):
-            return False
+            return 'nav'
 
         remaining = timeout_sec
         while not done.wait(timeout=_POLL_INTERVAL_S):
             remaining -= _POLL_INTERVAL_S
             if remaining <= 0:
                 self._nav.cancel_goal(f'timeout waiting for {target}')
-                return False
+                return 'timeout'
             if should_abort():
                 self._nav.cancel_goal()
                 done.wait(timeout=_CANCEL_SETTLE_S)
-                return False
-        return outcome[0] == 'arrived'
+                return 'cancel'
+        return _OUTCOME_REASONS.get(outcome[0], 'nav')

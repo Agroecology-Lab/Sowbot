@@ -34,6 +34,7 @@ from devkit_ui.domain_services.mission_domain_service import (
     WARN,
     MissionDomainService,
     MissionError,
+    MissionResult,
     resolve_steps,
 )
 
@@ -122,11 +123,14 @@ class TestMissionExecution(unittest.TestCase):
         self.svc = MissionDomainService(self.ros)
         self.svc.publish_tool_msgs = Mock()
         self.events: list = []
+        self.results: list = []
 
-    def run_steps(self, steps, navigate, estop=lambda: False) -> None:
-        """Run the executor synchronously and capture status events."""
+    def run_steps(self, steps, navigate, estop=lambda: False, on_step_done=None) -> None:
+        """Run the executor synchronously, capturing status events and the final result."""
         self.svc._running = True
-        self.svc._execute(steps, navigate, lambda lvl, txt: self.events.append((lvl, txt)), estop)
+        self.results.clear()
+        self.svc._execute(steps, navigate, lambda lvl, txt: self.events.append((lvl, txt)), estop,
+                          self.results.append, on_step_done)
 
     def test_success_visits_entry_then_exit_with_tool_around_traversal(self) -> None:
         """Verify order: entry transit, tool on, exit traversal, tool off, then completion."""
@@ -136,6 +140,76 @@ class TestMissionExecution(unittest.TestCase):
         self.assertEqual(order, ['E', ('tool', True), 'X', ('tool', False)])
         self.assertEqual(self.events[-1][0], OK)
         self.assertFalse(self.svc.running)
+
+    def test_success_reports_every_step_done(self) -> None:
+        """Verify the result and the per-step callback on a clean run."""
+        counts: list = []
+        steps = [(1, 'E', 'X', 'drive', None), (2, 'E2', 'X2', 'drive', None)]
+
+        self.run_steps(steps, lambda n: 'arrived', on_step_done=counts.append)
+
+        self.assertEqual(self.results, [MissionResult(True, 2)])
+        self.assertEqual(counts, [1, 2])
+
+    def test_a_failed_transit_reports_stage_transit_and_the_navigation_reason(self) -> None:
+        steps = [(1, 'E', 'X', 'drive', None), (2, 'E2', 'X2', 'drive', None)]
+        outcomes = iter(['arrived', 'arrived', 'timeout'])
+
+        self.run_steps(steps, lambda n: next(outcomes))
+
+        self.assertEqual(self.results, [MissionResult(False, 1, 'transit', 'timeout')])
+
+    def test_a_failed_traverse_reports_stage_row(self) -> None:
+        outcomes = iter(['arrived', 'nav'])
+
+        self.run_steps([(1, 'E', 'X', 'drive', None)], lambda n: next(outcomes))
+
+        self.assertEqual(self.results, [MissionResult(False, 0, 'row', 'nav')])
+
+    def test_a_plain_false_from_navigate_is_a_nav_failure(self) -> None:
+        self.run_steps([(1, 'E', 'X', 'drive', None)], lambda n: False)
+
+        self.assertEqual(self.results, [MissionResult(False, 0, 'transit', 'nav')])
+
+    def test_a_cancel_or_estop_before_a_leg_is_reported_by_which_it_was(self) -> None:
+        for cancel, estop, reason in [(True, False, 'cancel'), (False, True, 'estop'),
+                                      (True, True, 'cancel')]:
+            with self.subTest(cancel=cancel, estop=estop):
+                self.svc._cancel = cancel
+                navigate = Mock()
+
+                self.run_steps([(1, 'E', 'X', 'drive', None)], navigate, lambda e=estop: e)
+
+                navigate.assert_not_called()
+                self.assertEqual(self.results, [MissionResult(False, 0, 'transit', reason)])
+
+    def test_an_estop_between_entry_and_exit_stops_before_the_tool_turns_on(self) -> None:
+        estops = iter([False, True])
+
+        self.run_steps([(1, 'E', 'X', 'drive', None)], lambda n: True, lambda: next(estops))
+
+        self.svc.publish_tool_msgs.assert_not_called()
+        self.assertEqual(self.results, [MissionResult(False, 0, 'transit', 'estop')])
+
+    def test_an_exception_is_reported_as_a_failed_result_in_the_current_stage(self) -> None:
+        def navigate(_target):
+            raise RuntimeError('boom')
+
+        self.run_steps([(1, 'E', 'X', 'drive', None)], navigate)
+
+        self.assertEqual(self.results, [MissionResult(False, 0, 'transit', 'nav')])
+        self.assertFalse(self.svc.running)
+
+    def test_a_failing_result_callback_cannot_leave_the_mission_running(self) -> None:
+        self.svc._running = True
+
+        def broken(_result):
+            raise RuntimeError('store down')
+
+        self.svc._execute([], Mock(), Mock(), lambda: False, broken)
+
+        self.assertFalse(self.svc.running)
+        self.ros.get_logger().error.assert_called()
 
     def test_transit_failure_stops_without_engaging_tool(self) -> None:
         """Verify a failed transit stops the mission and never engages the tool."""
