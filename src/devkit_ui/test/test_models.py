@@ -191,3 +191,13 @@ def test_renamed_copy_follows_new_name_and_leaves_original():
     assert d['nodes'][0]['node']['pointset'] == 'north_field'
     assert doc.to_dict()['name'] == 'live'
     assert doc.to_dict()['nodes'][0]['meta']['map'] == 'live'
+
+
+class PatchRoleTest(unittest.TestCase):
+    def test_patch_role_sets_the_property_and_the_meta(self):
+        """Track mode marks the last row node as the exit; both copies of the role change."""
+        node = TopoNode(name='A', x=0.0, y=0.0, meta={'row_role': 'entry'})
+        node.patch_role('exit')
+        self.assertEqual(node.properties.row_role, 'exit')
+        self.assertEqual(node.meta['row_role'], 'exit')
+        self.assertEqual(node.to_dict()['node']['properties']['row_role'], 'exit')

@@ -4,7 +4,6 @@ import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from devkit_ui.application_services.plan_application_service import PlanApplicationService
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
@@ -141,11 +140,11 @@ class EditTest(FarmMapSaveCase):
         self.assertEqual(self.domain.get_doc().map_hash8, MAP_EDITED)
 
     def test_patching_a_role(self) -> None:
-        # TopoNode.patch_role assigns into an immutable TopoProperties and raises on the
-        # current branch, so it is replaced here to reach the hook after it.
-        with patch.object(TopoNode, 'patch_role', lambda node, role: node.meta.update(row_role=role)):
-            self.app.patch_node_role('FARM_R1_OUT', 'exit')
-        self.assertEqual(self.saved().map_hash8, MAP_EDITED)
+        self.app.patch_node_role('FARM_R1_IN', 'exit')
+        saved = self.saved()
+        self.assertEqual(saved.map_hash8, MAP_EDITED)
+        node = saved.get_node('FARM_R1_IN')
+        self.assertEqual((node.meta['row_role'], node.properties.row_role), ('exit', 'exit'))
 
     def test_changing_the_row_action(self) -> None:
         self.app.persist_and_reload(lambda doc: doc.set_row_action({'row_follow'}, 'vision_row_follow'))

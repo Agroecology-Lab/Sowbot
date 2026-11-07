@@ -205,7 +205,7 @@ class TopoNode:
         }
 
     def patch_role(self, role: str) -> None:
-        self._properties['row_role'] = role
+        self._properties = self._properties._replace(row_role=role)
         self._meta['row_role'] = role
 
 # Document meta key holding the first 8 hex characters of the farm map the map was built from.
