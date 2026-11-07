@@ -104,9 +104,12 @@ class PlannedRows:
     origin_ll is the (lat, lon) the swaths were projected from. break_after lists the swath
     indices that must not get a headland edge to the next swath. lf_rows holds each swath's
     LiteFarm (field, row, frag), or is empty when the rows have no LiteFarm identity.
+    map_hash8 is the first 8 hex characters of the verified farm map the rows came from, or
+    None when they did not come from one.
     """
     swaths: list
     origin_ll: tuple[float, float] | None
     contour_used: bool = False
     break_after: frozenset[int] = frozenset()
     lf_rows: tuple = ()
+    map_hash8: str | None = None

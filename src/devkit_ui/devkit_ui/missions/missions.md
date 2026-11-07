@@ -1,8 +1,8 @@
 # Robot mission intake spec 
 
-Status: draft. Built so far: the SQLite store with the remote-mission columns, `MissionStore.add_remote` and `find_by_external_id`, SQLite-assigned ids that are never reused, ending any mission left running by a restart, no delete of a running mission, `run_saved` with outcome recording, name-based `resolve_steps`, locked store reads, the structured mission result, and `today_queue()` skipping remote missions. Not built: the stall watchdog, `hash8` in the topo map and the edit hook, resolving a (field, row) from node metadata, the intake, the radio link and the station. Nothing calls `add_remote` yet.
+Status: draft. Built so far: the SQLite store with the remote-mission columns, `MissionStore.add_remote` and `find_by_external_id`, SQLite-assigned ids that are never reused, ending any mission left running by a restart, no delete of a running mission, `run_saved` with outcome recording, name-based `resolve_steps`, locked store reads, the structured mission result, and `today_queue()` skipping remote missions. The farm map import into the topo map with `hash8`, the edit hook that clears it, and the (field, row) lookup are built. Not built: the stall watchdog, the intake, the radio link and the station. Nothing calls `add_remote` yet.
 
-Read from Sowbot mission-refactor at e10a8e1 (6 Nov 2026). The store was then simplified: YAML backend removed, no epochs, no `task_id`, random station-chosen mission ids. The mission, farm map import and plan import tests pass (179 tests) with pytest. Nothing ran under colcon, under ROS or on hardware. Companion: Station service spec, which defines the messages and must change with the mission id (see "Robot comms").
+Read from Sowbot mission-refactor at 1885cbb plus the farm map import change (7 Nov 2026). The store was simplified earlier: YAML backend removed, no epochs, no `task_id`, random station-chosen mission ids. The mission, farm map import, plan import and row lookup tests pass (217 tests) with pytest. Nothing ran under colcon, under ROS or on hardware. Companion: Station service spec, which defines the messages and must change with the mission id (see "Robot comms").
 
 Messages are named in plain words here: mission, cancel, status query, accepted, rejected, end report and hello. The [station spec gives the exact formats.](https://github.com/Agroecology-Lab/Sowbot_Station/blob/main/README.md)
 
@@ -33,19 +33,19 @@ LiteFarm: published farm map (GeoJSON, content_hash)
    v
 +==================== ROBOT 1 (imports map) ===========================+
 |                                                                      |
-|  parse_farm_map()            exists, nothing calls it                |
+|  parse_farm_map()            built, called by import_plan            |
 |    checks: published, F<f>R<r> names, content_hash recomputed        |
 |    -> FarmMap {fields, rows+frag, content_hash}                      |
 |                                                                      |
 |  import path                                                         |
 |    parse_plan -> topo_row_builder                                    |
 |    built: keep field/row/frag per swath (multi-field files only)     |
-|    [new] drop robot_row_id (field*10000+row)                         |
+|    built: robot_row_id (field*10000+row) removed                     |
 |                                                                      |
 |  WRITES: topo map (YAML)                                             |
 |  +----------------------------------------------------------------+  |
 |  | doc.meta                                                       |  |
-|  |   hash8: c50f60d8        [new] first 8 of content_hash         |  |
+|  |   hash8: c50f60d8        built: first 8 of content_hash        |  |
 |  | nodes (entry / exit / waypoints per swath)                     |  |
 |  |   meta.row_id    = row_id_start + i   (per swath, set once)    |  |
 |  |   meta.row_role  = entry | exit                                |  |
@@ -55,7 +55,7 @@ LiteFarm: published farm map (GeoJSON, content_hash)
 |  |   edges: in-row + headland (no headland across field/frag)    |  |
 |  +----------------------------------------------------------------+  |
 |  edit service: add/delete node/row, f2c save, repair                 |
-|     -> [new] any edit sets hash8 to "-"  (robot then rejects "map") |
+|     -> built: any edit sets hash8 to "-" (robot then rejects "map") |
 |                                                                      |
 |  WRITES: missions.db (SQLite, /workspace/maps/missions.db)           |
 |  +----------------------------------------------------------------+  |
@@ -88,10 +88,10 @@ LiteFarm: published farm map (GeoJSON, content_hash)
 Each robot resolves (field,row) by scanning node meta (lf_field, lf_row,
 lf_frag sorted by row_id), so the station never needs robot row ids.
 
-This resolution is not built. Today `resolve_steps` resolves integer row ids and entry node names only. The copy to the other robots is not built either. The sim page has "Save copy as" and archive for the local map, and the system page exports a LiteFarm row plan. No robot-to-robot copy exists in the UI.
+`resolve_lf_row` in `missions/lf_rows.py` does the lookup. Nothing calls it yet. `resolve_steps` still resolves integer row ids and entry node names only, so the intake has to turn a (field, row) into entry names first. The copy to the other robots is not built either. The sim page has "Save copy as" and archive for the local map, and the system page exports a LiteFarm row plan. No robot-to-robot copy exists in the UI.
 
 
-## What exists (checked at 980b2fb)
+## What exists (checked at 1885cbb)
 
 - MissionStore keeps missions in SQLite (`/workspace/maps/missions.db`) and has no other backend. A mission is a list of entry node names, one action, `last_run_at` and `last_run_success`. It also has the remote-mission columns and the run result (`state`, `steps_done`, `stage`, `reason`, `started_at`, `ended_at`, `result_sent`). A database from before these columns gains them when opened, with `source` local and `state` idle. The UI can save, activate, delete and run saved missions. It shows the last-run tick or cross. The run result is stored but the UI does not show it.
 - `MissionStore.add()` takes the local fields only. `MissionStore.add_remote(external_id, rows, action, map_hash, groups)` stores a station mission idle and active. It returns None and sets status for an empty id or map hash, rows and groups of different lengths, a validation error, or an `external_id` already stored. `find_by_external_id` looks a mission up by the station's id. Nothing outside the tests calls either. `MissionStore.record_result()` writes the run result.
@@ -103,7 +103,9 @@ This resolution is not built. Today `resolve_steps` resolves integer row ids and
 - `MissionDomainService` runs one mission on a thread. Per row: go to the entry, enable the tool, go to the exit, disable the tool. It checks cancel and the soft e-stop before each leg and stops at the first failure. It reports text progress through `on_status`, the count of finished steps through `on_step_done` and one `MissionResult` through `on_result`.
 - `navigate_and_wait_result` returns `arrived` or a reason. `MissionApplicationService._navigate` gives each goal a fixed 300 s (`NAV_TIMEOUT_SEC`). `navigate_and_wait` is a bool wrapper used by the Run tab. `NavUpdate` carries a status, a `navigating` flag and an outcome, with no measure of progress.
 - Row nodes carry `row_id` and `row_role` in their metadata. Row ids are per swath (`row_id_start + i`, with `row_id_start` chosen at save time). `parse_plan` returns `Plan.lf_rows`, each swath's LiteFarm `(field, row, frag)` as the file gives it, before `_merge_fields` offsets the row numbers. It passes through `PlannedRows`, `stage_f2c_save` and `RowBuildSettings` to `build_row_nodes`, which writes `lf_field`, `lf_row` and `lf_frag` to the metadata of every node of the swath, and refuses a count that differs from the swaths. Only multi-field files carry a field number. For any other file `lf_rows` is empty and the nodes have no `lf_*` keys. A missing `frag` is 0. The metadata survives a YAML write and read (tested).
-- `farm_map_import` (PR #213) parses and hash-checks the published farm map, but nothing outside its tests calls `parse_farm_map`. `FarmMap.hash8` exists, and nothing writes it to the map. `robot_row_id` has no fragment term, while `FarmMap.row_ids` lists one id per fragment, so a split row gives duplicate ids. Read from source, not run.
+- `farm_map_import` (PR #213) parses and hash-checks the published farm map. `PlanApplicationService.import_plan` calls it for any file that names a `farm_map_id`, so a retired, edited or unhashed map is refused. It then reads the same text with `parse_plan` and refuses the import if the two readers disagree on the rows. `PlannedRows.map_hash8` carries `FarmMap.hash8` to the save. A farm map import builds rows with waypoints if any field is a contour field. `robot_row_id`, `ROW_ID_STRIDE` and `FarmMap.row_ids` are removed.
+- `TopoDoc` has `map_hash8` (the document meta key `hash8`, or `-`), `stamp_map_hash8` and `mark_map_edited`. `persist_and_reload(modify, map_hash8=None)` stamps the hash when given one and otherwise marks the saved map edited. `drop_node` and `patch_node_role` mark it edited. `stage_drop` and `stage_repair` also mark the live map at once, because they change it before the write. A map with no `hash8` key (not built from a farm map) stays without one and reads as `-`.
+- `stage_f2c_save(map_hash8=...)` stamps only when the save leaves the map's row nodes exactly the farm map's rows: every swath built, none skipped, no built name already taken by a node that stays, no other row nodes in the map. Otherwise the map is marked edited and the status says remote missions are refused. A second import needs `overwrite` to keep the stamp.
 - `TopoDoc` has a document-level `meta` dict. The loader (`parse._topo_from_dict`) reads it and `to_dict` writes it. `clone_empty` and `renamed` copy it. Node metadata is read and written the same way.
 - sowbot_avoid (`src/devkit-meshcore-avoid/pkg/sowbot_avoid`) is a separate package with its own process. Its `MeshRadio` opens the serial port and requires the configured channel (it raises if the radio has none). It subscribes to channel data, starts auto message fetching and sends zero-hop by default (`--flood` allows repeaters). `LoopBus` and `LoopRadio` are an in-process fake radio. `devkit_ui` does not import it, and no code subscribes to contact messages. Simulation only.
 
@@ -120,14 +122,15 @@ This resolution is not built. Today `resolve_steps` resolves integer row ids and
 
 ### 1. The map holds the row identity
 
-Partly built. The `lf_*` node metadata (first bullet) is built and tested for multi-field plan files. `hash8`, dropping `robot_row_id`, the edit hook and the (field, row) lookup are not built.
+Built and tested against the repo's farm map fixture and a real LiteFarm export. Not built: copying the map to other robots, and anything that calls the lookup.
 
 - The farm map is built once per season in LiteFarm and exported to one robot, which builds the topo map. On import, `parse_plan` keeps each swath's field, row and fragment numbers, and they are written to the row node metadata as `lf_field`, `lf_row` and `lf_frag`. The document meta gets `hash8`, the first 8 characters of the farm map's content hash, checked once at import with `parse_farm_map`. The finished topo map is then shared to every other robot, which never sees the farm map.
-- Row ids stay per swath. Drop `robot_row_id` (field × 10000 + row). Nothing derives an id from field and row. The map is searched instead. Ids are assigned once, at import, and copied with the map, so they match on every robot.
+- Row ids stay per swath. `robot_row_id` (field × 10000 + row) is gone. Nothing derives an id from field and row. The map is searched instead. Ids are assigned once, at import, and copied with the map, so they match on every robot.
 - To resolve a (field, row), scan the node metadata and sort its fragments by row id.
-- A robot's map counts as edited once a node is dropped, moved or removed. The robot then rejects remote missions with the reason `map` and reports `-` as its map hash in its hello message. This keeps "identical on every robot" true. The edits are `stage_drop`, `stage_f2c_save`, `stage_repair`, `stage_delete_node` and `stage_delete_row` in `TopologyEditService`, and none sets `hash8`. They are written by `PlanApplicationService._start_write` and `MapAuthoringViewModel._persist_deletion`. The hook belongs where a staged edit is written. That path was not read in detail.
+- A robot's map counts as edited once a node is dropped, moved or removed. The robot then rejects remote missions with the reason `map` and reports `-` as its map hash in its hello message. This keeps "identical on every robot" true. The hook is in `TopologyApplicationService`, where every edit is written (`persist_and_reload`, `drop_node`, `patch_node_role`), so a new edit kind is marked without being listed. Changing the row action also counts as an edit. `TopoNode.patch_role` raises on this branch (it assigns into an immutable `TopoProperties`), so `patch_node_role` fails before it marks anything.
 - A new season means a new farm map, a new `hash8` and a new topo map on every robot. Until a robot has it, it rejects remote missions with the reason `map`.
-- Checked in source: document meta and node metadata survive load, `to_dict`, `clone_empty` and `renamed`. Not checked: the external map manager's copy of the map (the live `/topological_map_2` republish goes through the same loader), whether node-drop and f2c-save edits keep document meta, and how the map reaches another robot, since no copy mechanism exists. Meta and node metadata must survive save, load, copy to another robot and node edits.
+- Tested: document meta and node metadata survive save, load, `renamed` and `clone_empty`, and node-drop, f2c-save, repair and delete keep the document meta (they only change `hash8`). Not checked: the external map manager's copy of the map (the live `/topological_map_2` republish goes through the same loader), and how the map reaches another robot, since no copy mechanism exists.
+- A single-field plan file has no field number and no farm map, so it gets no `lf_*` and no `hash8`. A robot holding only such a map reports `-` and rejects every remote mission with `map`.
 
 ### Robot comms
 

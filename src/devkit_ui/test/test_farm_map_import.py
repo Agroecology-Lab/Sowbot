@@ -9,7 +9,6 @@ from devkit_ui.farm_map_import import (
     farm_map_hash,
     looks_like_farm_map,
     parse_farm_map,
-    robot_row_id,
 )
 
 FIXTURE = Path(__file__).resolve().parents[3] / 'tests' / 'farm-map.geojson'
@@ -47,13 +46,11 @@ class FarmMapImportTest(unittest.TestCase):
         self.assertEqual([f.name for f in farm_map.fields], ['North field', 'South field'])
         self.assertEqual(farm_map.row_count, 6)
 
-    def test_rows_are_numbered_by_field_and_row(self):
-        """Robot row ids come from the field and row number, so the station can work them out."""
+    def test_fragments_keep_their_row_and_frag_numbers(self):
+        """A split row stays two fragments of one row, so a (field, row) lookup can find both."""
         farm_map = parse(load())
-        self.assertEqual(farm_map.row_ids(), [10000, 10001, 10001, 10002, 20000, 20001])
-        self.assertEqual(robot_row_id(2, 17), 20017)
-        with self.assertRaises(FarmMapError):
-            robot_row_id(1, 10000)
+        self.assertEqual([(f.field_number, r.row, r.frag) for f in farm_map.fields for r in f.rows],
+                         [(1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 2, 0), (2, 0, 0), (2, 1, 0)])
 
     def test_swaths_are_lat_lon_in_mission_order(self):
         """GeoJSON [lon, lat] becomes (lat, lon), and the file order is kept."""

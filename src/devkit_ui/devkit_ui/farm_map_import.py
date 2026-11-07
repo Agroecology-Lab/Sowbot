@@ -33,8 +33,6 @@ from devkit_ui.row_plan_format import (
 
 HASH_PATTERN = re.compile(r'^[0-9a-f]{64}$')
 ID_PATTERN = re.compile(r'^[A-Za-z0-9._:-]{1,100}$')
-# A robot row id is field * ROW_ID_STRIDE + row, so the station can work it out from a task's field and row.
-ROW_ID_STRIDE = 10_000
 ACCEPTED_STATUSES = ('published',)
 
 
@@ -93,10 +91,6 @@ class FarmMap:
         """Return every row as (lat, lon) points, fields in number order, rows in mission order."""
         return [list(r.points) for f in self.fields for r in f.rows]
 
-    def row_ids(self) -> list[int]:
-        """Return the robot row id of each swath, in the order of ``swaths()``."""
-        return [robot_row_id(f.field_number, r.row) for f in self.fields for r in f.rows]
-
     def break_after(self) -> set[int]:
         """Return swath indices that must not get a headland edge to the next swath.
 
@@ -111,16 +105,6 @@ class FarmMap:
                 index += 1
         breaks.discard(index - 1)  # nothing follows the final swath
         return breaks
-
-
-def robot_row_id(field_number: int, row_number: int) -> int:
-    """Return the id a robot gives a LiteFarm row: ``field * 10000 + row``.
-
-    Raise FarmMapError when the row number does not fit under the stride.
-    """
-    if not 0 <= row_number < ROW_ID_STRIDE:
-        raise FarmMapError(f'row {row_number} of field {field_number}: row numbers must be below {ROW_ID_STRIDE}')
-    return field_number * ROW_ID_STRIDE + row_number
 
 
 def farm_map_hash(fields: list[FieldRows]) -> str:
@@ -254,7 +238,6 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
         last_field = number
         rows_by_field.setdefault(number, []).append(
             PlanRow(row, _points(geometry.get('coordinates'), what), frag))
-        robot_row_id(number, row)  # refuses a row number that does not fit the stride
     if not rows_by_field:
         raise FarmMapError('no rows in farm map')
     if list(rows_by_field) != sorted(rows_by_field):

@@ -20,6 +20,7 @@ from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties, Vector
 from devkit_ui.topo_results import StagedDrop, StagedEdit, TopologyEditError
 from devkit_ui.topo_row_builder import (
     RowAnchor,
+    RowBuild,
     RowBuildSettings,
     add_missing_edges,
     apply_row_nodes,
@@ -121,6 +122,7 @@ class TopologyEditService:
             ] if connect_to else [],
         )
         doc.add_node(new_node)
+        doc.mark_map_edited()
 
         conn_str = f' → {connect_to}' if connect_to else ''
         gps_str = (f' [{gps_meta["gps_lat"]:.5f},{gps_meta["gps_lon"]:.5f}]'
@@ -137,7 +139,8 @@ class TopologyEditService:
     def stage_f2c_save(self, prefix: str, row_id_start: int, overwrite: bool, *,
                        swaths: list, origin_ll: tuple[float, float] | None,
                        contour_used: bool, break_after: set | frozenset,
-                       lf_rows: tuple = (), is_sim: bool, odom_xy: tuple[float, float] | None, gps: Any,
+                       lf_rows: tuple = (), map_hash8: str | None = None,
+                       is_sim: bool, odom_xy: tuple[float, float] | None, gps: Any,
                        row_action: str, current_node: str | None,
                        selected_node: str | None) -> StagedEdit:
         """Turn planned F2C swaths into row nodes and describe how to save them.
@@ -145,6 +148,10 @@ class TopologyEditService:
         Nothing is added to the live map; the edit is applied when it is persisted.
         lf_rows, if given, holds one LiteFarm (field, row, frag) per swath and is written to
         the row nodes' metadata.
+        map_hash8, if given, is the hash8 of the farm map the swaths came from. It is stamped
+        into the saved map only when the save leaves the map holding exactly that farm map's
+        rows: no swath dropped or skipped, and no other row nodes left in the map. Otherwise
+        the map is marked as edited and the success text says so.
         Hardware anchors rows to the GPS fix and odometry position (odom_xy). Simulation
         anchors them to origin_ll at (0, 0), because the sim GPS fix is a datum that is
         not where the field was drawn. A GPS status below zero only logs a warning.
@@ -224,12 +231,19 @@ class TopologyEditService:
 
         skip_str = f' (skipped {len(build.skipped)} dup ids)' if build.skipped else ''
         splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
+        stamp, differs = None, ''
+        if map_hash8 is not None:
+            if self._holds_only_these_rows(doc, build, len(swaths), prefix, overwrite):
+                stamp = map_hash8
+            else:
+                differs = ' · map is not the farm map, remote missions are refused'
         return StagedEdit(
             pending=f'writing {len(build.added)} rows · {prefix}{splice_str}{skip_str}…',
-            success=f'saved {len(build.added)} rows · {prefix}{splice_str}{skip_str}',
+            success=f'saved {len(build.added)} rows · {prefix}{splice_str}{skip_str}{differs}',
             modify=lambda file_doc: apply_row_nodes(file_doc, build, prefix, overwrite),
             warnings=tuple(warnings),
             infos=infos,
+            map_hash8=stamp,
         )
 
     def stage_repair(self, row_action: str, connect_to: str | None = None) -> StagedEdit:
@@ -263,6 +277,7 @@ class TopologyEditService:
         if added_count == 0:
             raise TopologyEditError(
                 f'repair: already wired ({plan.row_count} rows)', tuple(warnings))
+        doc.mark_map_edited()
 
         target_str = f' @ {connect_to}' if connect_to else ' — NO SPLICE, chain still isolated'
         return StagedEdit(
@@ -306,6 +321,21 @@ class TopologyEditService:
             modify=lambda file_doc: file_doc.remove_nodes(set(targets)),
             affected=targets,
         )
+
+    @staticmethod
+    def _holds_only_these_rows(doc: TopoDoc, build: RowBuild, swath_count: int, prefix: str,
+                               overwrite: bool) -> bool:
+        """Return whether saving build leaves the map's row nodes exactly the built ones.
+
+        False when a swath was left out (too short, or skipped for a name clash), when a built
+        node name is already taken by a node that stays, or when other row nodes stay in the map.
+        """
+        if len(build.added) != swath_count or build.skipped:
+            return False
+        kept = [n for n in doc.nodes if not (overwrite and n.name.startswith(f'{prefix}_R'))]
+        if any(n.name in build.nodes for n in kept):
+            return False
+        return not any(n.meta.get('row_id') is not None for n in kept)
 
     def _require_loaded(self) -> TopoDoc:
         """Return the live map, or raise TopologyEditError if none is loaded."""

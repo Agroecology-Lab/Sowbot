@@ -114,8 +114,13 @@ class PlanHarness:
     def save_status(self) -> str:
         return self.page.save_status
 
-    def _apply(self, modify):
+    def _apply(self, modify, map_hash8=None):
+        """Apply the edit the way TopologyApplicationService.persist_and_reload does."""
         modify(self.doc)
+        if map_hash8 is not None:
+            self.doc.stamp_map_hash8(map_hash8)
+        else:
+            self.doc.mark_map_edited()
         return PersistResult('skipped')
 
     def _background(self, work) -> None:
@@ -130,7 +135,7 @@ class PlanHarness:
 
     def captured_modify(self):
         """Run the queued write without applying it to doc and return its map edit."""
-        self.topology.persist_and_reload.side_effect = lambda modify: PersistResult('skipped')
+        self.topology.persist_and_reload.side_effect = lambda modify, map_hash8=None: PersistResult('skipped')
         self.queued.pop()()
         return self.topology.persist_and_reload.call_args.args[0]
 
