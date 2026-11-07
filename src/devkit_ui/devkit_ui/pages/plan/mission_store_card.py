@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from threading import Lock
 
 from nicegui import ui
 
@@ -28,6 +29,8 @@ class MissionStoreCard(ui.column):
         self._queue = queue
         self._set_run_enabled = set_run_enabled
         self._version = -1
+        self._run_status = ''
+        self._run_status_lock = Lock()
 
         with self:
             with ui.row().classes('items-baseline gap-2 mb-2'):
@@ -50,6 +53,7 @@ class MissionStoreCard(ui.column):
                 ui.button('Save', on_click=self._save).props('color=primary no-caps dense')
 
             self._status_lbl = ui.label('').classes('text-xs font-mono mt-1').style(GREY)
+            self._run_status_lbl = ui.label('').classes('text-xs font-mono mt-1').style(GREY)
 
         self._refresh()
         ui.timer(0.5, self._refresh)
@@ -59,11 +63,23 @@ class MissionStoreCard(ui.column):
         repeat = int(self._repeat.value) if self._repeat.value else None
         self._vm.save_queue(self._queue.items, self._name.value or '', repeat)
 
+    def _run_saved(self, mission_id: str) -> None:
+        """Run a saved mission, recording worker messages for the UI timer to render."""
+        def show(_level: str, text: str) -> None:
+            with self._run_status_lock:
+                self._run_status = text
+        self._vm.run_saved(mission_id, show)
+
     def _refresh(self) -> None:
         """Show status and Run button state; rebuild the saved list if the store changed."""
         status = self._vm.status
         self._status_lbl.set_text(status)
         self._status_lbl.style(RED if status.startswith('ERROR') else GREEN if status else GREY)
+        with self._run_status_lock:
+            run_status = self._run_status
+        self._run_status_lbl.set_text(run_status)
+        self._run_status_lbl.style(
+            RED if run_status.startswith('ERROR') else GREEN if run_status else GREY)
         self._set_run_enabled(not self._vm.running)
 
         version = self._vm.version
@@ -83,13 +99,16 @@ class MissionStoreCard(ui.column):
         mission_id = mission.get('id', '?')
         action = ACTIONS.get(mission.get('action', '—'))
         due = self._vm.next_due_in_hours(mission_id)
-        if due is None:
+        if mission.get('source') == 'remote':
+            due_text, due_style = 'station-controlled', MUTED
+        elif due is None:
             due_text, due_style = 'done', MUTED
         elif due == 0.0:
             due_text, due_style = 'due now', GREEN
         else:
             due_text, due_style = f'in {due:.1f}h', AMBER
         last_ok = mission.get('last_run_success')
+        remote = mission.get('source') == 'remote'
 
         with ui.row().classes('items-center gap-2 w-full'):
             ui.label(f'{action.icon if action else "?"} {mission.get("name", mission_id)}').classes(
@@ -100,8 +119,13 @@ class MissionStoreCard(ui.column):
             ui.label('✓' if last_ok is True else '✗' if last_ok is False else '—').classes(
                 'text-xs font-mono').style(GREEN if last_ok is True else
                                            RED if last_ok is False else MUTED)
+            if not remote:  # the station starts remote missions
+                run = ui.button('▶', on_click=lambda _, m=mission_id: self._run_saved(m))
+                run.props('flat dense').classes('text-xs').style(GREEN)
+                run.tooltip('Run this saved mission now')
             active = ui.checkbox('', value=mission.get('active', False)).props('dense')
-            active.tooltip('Active — included in today_queue()')
+            active.tooltip('Cleared when the mission ends; never scheduled' if remote
+                           else 'Active — included in today_queue()')
             active.on_value_change(lambda e, m=mission_id: self._vm.set_active(m, e.value))
             ui.button('✕', on_click=lambda _, m=mission_id: self._vm.delete(m)).props(
                 'flat dense').classes('text-xs').style(RED)

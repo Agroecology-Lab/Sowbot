@@ -2,7 +2,7 @@
 """
 Mission storage and scheduling for the Sowbot webui.
 
-Owns the mission list, its YAML persistence, and the ACTIONS registry.
+Owns the mission list, its SQLite persistence, and the ACTIONS registry.
 Exposes a read-only snapshot, a version counter and a last-action status that
 a ViewModel polls to decide when to rebuild. It holds no UI or node state and
 does not inherit from rclpy.node.Node; attach() takes only a logger source.
@@ -11,18 +11,7 @@ Unlike obstacles, missions are not broadcast on a ROS topic — they exist
 to drive the executor in ui_node.py, which dispatches `sowbot_row_follow`
 goals and toggles tool topics. The store knows nothing about ROS itself.
 
-Threading model
----------------
-self._missions is an immutable tuple. All writes replace it wholesale
-under self._lock, and bump self._version in the same critical section.
-Readers grab the tuple reference lock-free (CPython attribute reads are
-atomic) and walk a consistent snapshot. Same pattern as obstacles.py.
-
-Persistence is serialised through a single background writer thread
-(self._write_q). Callers snapshot the current tuple inside the lock and
-enqueue (snapshot, status_msg). The writer drains the queue, keeping
-only the most-recent snapshot per wakeup, so rapid back-to-back writes
-do not pile up threads and the status message is never stale.
+Persistence is MissionSqliteStore, which serialises every call under one lock.
 
 Scheduling
 ----------
@@ -81,13 +70,16 @@ from datetime import datetime, timedelta
 
 from devkit_ui.actions import ACTIONS
 from devkit_ui.missions.sqlite import MissionSqliteStore
-from devkit_ui.missions.yaml import MissionYamlStore
 from devkit_ui.time_utils import now_utc, now_utc_str, parse_ts
 
 MISSIONS_FILE = '/workspace/maps/missions.db'
 
 _NAME_RE    = re.compile(r'^[A-Z0-9_]+$')
 _NAME_CLEAN = re.compile(r'[^A-Z0-9_]')
+
+# Run-result fields, written by the run path through record_result.
+_RESULT_FIELDS = frozenset({
+    'state', 'steps_done', 'stage', 'reason', 'started_at', 'ended_at', 'result_sent'})
 
 _MUTABLE_FIELDS = frozenset({
     'name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active',
@@ -126,7 +118,7 @@ def validate_mission(name: str,
 
 
 class MissionStore:
-    """Owns the mission list and its YAML persistence.
+    """Owns the mission list and its SQLite persistence.
 
     Readers poll these properties:
 
@@ -146,24 +138,26 @@ class MissionStore:
         created_at:          str           (ISO 8601 UTC)
         last_run_at:         str  | None
         last_run_success:    bool | None
+
+        source:              str           ('local' | 'remote')
+        external_id:         str | None    (station's mission id; remote only, unique)
+        map_hash:            str | None
+        groups:              list | None   (LiteFarm row per entry; remote only)
+        state:               str           ('idle' | 'running' | 'ended')
+        steps_done, stage, reason, started_at, ended_at, result_sent: last run result
+
+    See missions.md for the meaning of the remote fields.
     """
 
     _MUTABLE_FIELDS = frozenset(
         {'name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active'})
 
     def __init__(self, path: str = MISSIONS_FILE) -> None:
-        """Select YAML storage for .yaml or open SQLite storage for .sqlite and .db.
+        """Open the SQLite database at path, creating or upgrading its schema.
 
-        YAML records are loaded by attach(); SQLite opens and creates its schema here.
-        Raises ValueError for other suffixes; SQLite initialization errors propagate.
+        SQLite initialization errors propagate.
         """
-        if path.endswith('.yaml'):
-            self._store = MissionYamlStore(path, on_write_done=self.set_status)
-        elif path.endswith('.sqlite') or path.endswith('.db'):
-            self._store = MissionSqliteStore(path, on_write_done=self.set_status)
-        else:
-            raise ValueError(f'Unsupported file extension: {path}')
-
+        self._store = MissionSqliteStore(path, on_write_done=self.set_status)
         self._version = 0
         self._status = ''
         self._lock     = threading.Lock()
@@ -171,16 +165,13 @@ class MissionStore:
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     def close(self) -> None:
-        """Release backend resources (the SQLite connection). A no-op for the YAML backend."""
-        if isinstance(self._store, MissionSqliteStore):
-            self._store.close()
+        """Release the SQLite connection."""
+        self._store.close()
 
     def attach(self, ros) -> None:
-        """Load YAML missions synchronously and increment the version for either backend.
+        """End any mission left running by a restart, and increment the version.
 
-        ros supplies get_logger() for YAML load and write results.
-        Missing YAML files leave the snapshot unchanged; YAML load errors are caught.
-        SQLite needs no additional loading here.
+        Call once, from the only process that owns the database.
         """
         with self._lock:
             self._store.attach(ros)
@@ -216,9 +207,8 @@ class MissionStore:
         Clean name to uppercase letters, digits, and underscores, using the ID if empty.
         repeat_every_hours is a positive interval after a successful run, or None for
         a one-shot mission; active controls inclusion in scheduling.
-        Validation errors are reported in status.
-        YAML writes are queued and report failures in status; SQLite database and JSON
-        serialization errors propagate to the caller.
+        Validation errors are reported in status. SQLite and JSON serialization errors
+        propagate to the caller.
         """
 
         name = _NAME_CLEAN.sub('', (name or '').strip().upper().replace(' ', '_'))
@@ -236,17 +226,56 @@ class MissionStore:
 
         return mid
 
+    def add_remote(self, *,
+                   external_id: str,
+                   rows: list,
+                   action: str,
+                   map_hash: str,
+                   groups: list,
+                   action_params: dict | None = None) -> str | None:
+        """Store a station mission, idle and active, and return its ID.
+
+        external_id is the id the station chose; the robot never interprets it. rows holds
+        entry-node names, one per fragment, and groups the LiteFarm row of each.
+        Return None and set status for an empty external_id or map_hash, rows and groups of
+        different lengths, a validation error, or an external_id already stored; look it up
+        with find_by_external_id first to answer a repeat.
+        """
+        err = ('ERROR: empty external_id' if not external_id else
+               'ERROR: empty map_hash' if not map_hash else
+               'ERROR: rows and groups differ in length' if len(rows) != len(groups) else
+               validate_mission('', rows, action, None))
+        if err:
+            self.set_status(err)
+            return None
+
+        with self._lock:
+            if self._store.find_by_external_id(external_id) is not None:
+                self.set_status(f'ERROR: {external_id!r} already stored')
+                return None
+            mid = self._store.add(rows, action, action_params, '', None, True, source='remote',
+                                  external_id=external_id, map_hash=map_hash, groups=groups)
+            self._version += 1
+        return mid
+
+    def find_by_external_id(self, external_id: str) -> dict | None:
+        """Look up a remote mission by the station's id."""
+        return self._store.find_by_external_id(external_id)
+
     def delete(self, mid: str) -> bool:
         """Delete a saved mission and increment the version.
 
-        Return False and set status for an unknown ID; otherwise return the backend result.
-        YAML persistence is asynchronous; SQLite lookup and write errors propagate,
-        including ValueError for an ID that cannot be converted to a database integer.
+        Return False and set status for an unknown ID or a running mission, whose result
+        still has to be written. SQLite lookup and write errors propagate, including
+        ValueError for an ID that cannot be converted to a database integer.
         """
         with self._lock:
             mission = self.find(mid)
             if mission is None:
                 self.set_status(f'ERROR: {mid!r} not found')
+                return False
+            if mission.get('state') == 'running':
+                self.set_status(f'ERROR: {mid} is running')
                 return False
 
             self.set_status(f'deleting {mid} — writing…')
@@ -261,8 +290,8 @@ class MissionStore:
         Clean names as in add(), falling back to mid when the cleaned name is empty.
         Return False and set status for unsupported fields, an unknown ID, or invalid
         mission values; otherwise return the backend result.
-        YAML persistence is asynchronous; SQLite lookup, write, and JSON serialization
-        errors propagate, including ValueError for malformed database IDs.
+        SQLite lookup, write, and JSON serialization errors propagate, including ValueError
+        for malformed database IDs.
         """
         bad = set(fields) - _MUTABLE_FIELDS
         if bad:
@@ -326,6 +355,24 @@ class MissionStore:
             self.set_status(f'{mid} re-armed — writing…')
             return self._write_run_state(mid, last_run_at=None, last_run_success=None, active=True)
 
+    def record_result(self, mid: str, **fields) -> bool:
+        """Persist the result of the current or last run: state, steps_done, stage, reason,
+        started_at, ended_at and result_sent.
+
+        Return False and set status for an unsupported field or an unknown ID, and increment
+        the version on success. SQLite lookup and write errors propagate, including ValueError
+        for an unknown state.
+        """
+        bad = set(fields) - _RESULT_FIELDS
+        if bad:
+            self.set_status(f'ERROR: cannot record field(s) {sorted(bad)}')
+            return False
+        with self._lock:
+            if self.find(mid) is None:
+                self.set_status(f'ERROR: {mid!r} not found')
+                return False
+            return self._write_run_state(mid, **fields)
+
     def record_run(self, mid: str, success: bool) -> bool:
         """Record a run outcome. Called by the executor (and any 'Run now'
         path) so the repeat interval re-arms from actual robot activity
@@ -364,6 +411,8 @@ class MissionStore:
         for m in self._store.missions:
             if not m.get('active'):
                 continue
+            if m.get('source') == 'remote':
+                continue  # the station decides when a remote mission runs, never the scheduler
             if not self._is_due(m, now):
                 continue
             action = m.get('action')

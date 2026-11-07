@@ -61,6 +61,7 @@ class RowBuildSettings:
     overwrite: bool = False
     contour_used: bool = False
     break_after: frozenset[int] = frozenset()
+    lf_rows: tuple = ()
     connect_to: str | None = None
     waypoint_interval_m: float = CONTOUR_WAYPOINT_INTERVAL_M
 
@@ -76,8 +77,13 @@ class RowBuild:
 
 
 def _make_node(name: str, x: float, y: float, role: str, lat: float, lon: float,
-               row_id: int, settings: RowBuildSettings) -> TopoNode:
-    """Create one row node carrying its row identity in both properties and metadata."""
+               row_id: int, settings: RowBuildSettings,
+               lf: tuple[int, int, int] | None = None) -> TopoNode:
+    """Create one row node carrying its row identity in both properties and metadata.
+
+    lf is the LiteFarm (field, row, frag) of the swath, written to the metadata as lf_field,
+    lf_row and lf_frag.
+    """
     node = TopoNode(
         name=name,
         nav_frame=settings.nav_frame,
@@ -99,7 +105,8 @@ def _make_node(name: str, x: float, y: float, role: str, lat: float, lon: float,
         # row_id and row_role must also live in .meta: topo_renderer.build_svg()
         # reads them to style row nodes and to place one label per row at its
         # entry node.
-        meta={'map': settings.map_name, 'node': name, 'row_id': row_id, 'row_role': role},
+        meta={'map': settings.map_name, 'node': name, 'row_id': row_id, 'row_role': role,
+              **({'lf_field': lf[0], 'lf_row': lf[1], 'lf_frag': lf[2]} if lf else {})},
     )
     node.add_metadata(dropped_by='webui_f2c', timestamp=settings.timestamp,
                       gps_fix_type=settings.fix_type, gps_hdop=None, row_id=row_id)
@@ -149,6 +156,8 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
         settings: Naming, metadata and edge options. Row IDs are ``row_id_start``
             plus the swath index; ``prefix`` is used verbatim. Waypoint
             spacing is ``waypoint_interval_m`` meters along the swath.
+            ``lf_rows``, if not empty, has one LiteFarm (field, row, frag) per swath;
+            each swath's nodes carry it as lf_field, lf_row and lf_frag metadata.
 
     Returns:
         Generated nodes, added row IDs, endpoint names and row IDs skipped for
@@ -159,9 +168,12 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
         TypeError: A consumed coordinate is nonnumeric or a point is not iterable.
         ValueError: A consumed point does not unpack into two coordinates, or
             projection or resampling encounters invalid numeric input.
+        ValueError: ``settings.lf_rows`` is not empty and differs in length from ``swaths``.
         ZeroDivisionError: Row resampling uses a zero waypoint interval.
         OverflowError: A resampling count cannot be converted to an integer.
     """
+    if settings.lf_rows and len(settings.lf_rows) != len(swaths):
+        raise ValueError(f'{len(settings.lf_rows)} LiteFarm rows for {len(swaths)} swaths')
     build = RowBuild()
     prefix, row_action = settings.prefix, settings.row_action
 
@@ -169,6 +181,7 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
         if len(swath) < 2:
             continue
         rid = settings.row_id_start + i
+        lf = settings.lf_rows[i] if settings.lf_rows else None
         in_lat, in_lon = swath[0]
         out_lat, out_lon = swath[-1]
 
@@ -194,13 +207,13 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
                 wlat, wlon = f2c_xy_to_latlon(wx, wy, anchor.lat, anchor.lon)
                 build.nodes[name] = _make_node(
                     name, round(anchor.x + wx, 3), round(anchor.y + wy, 3),
-                    'waypoint', wlat, wlon, rid, settings)
+                    'waypoint', wlat, wlon, rid, settings, lf)
                 waypoint_names.append(name)
 
         build.nodes[in_name] = _make_node(
-            in_name, in_x, in_y, 'entry', in_lat, in_lon, rid, settings)
+            in_name, in_x, in_y, 'entry', in_lat, in_lon, rid, settings, lf)
         build.nodes[out_name] = _make_node(
-            out_name, out_x, out_y, 'exit', out_lat, out_lon, rid, settings)
+            out_name, out_x, out_y, 'exit', out_lat, out_lon, rid, settings, lf)
 
         for a_name, b_name in pairwise([in_name, *waypoint_names, out_name]):
             build.nodes[a_name].add_edge(b_name, action=row_action)

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import sqlite3
+import time
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING
 
 from devkit_ui.domain_services.mission_domain_service import (
     ERROR,
     NAV_TIMEOUT_SEC,
     MissionError,
+    MissionResult,
     resolve_steps,
 )
+from devkit_ui.time_utils import now_utc_str
 
 if TYPE_CHECKING:
     from devkit_ui.application_services.drive_application_service import (
@@ -96,7 +101,9 @@ class MissionApplicationService:
         """Save a row queue as a mission and return its id, or None if it was rejected.
 
         queue holds (row_id, action_key, action_params) tuples. Each row is stored as its
-        entry node name in the live map, or ROW_<id>_IN when the map has no such node.
+        entry node name in the live map, or ROW_<id>_IN when the map has no such node. If a
+        node of that name already exists, it belongs to another row and would be resolved
+        in place of this one, so the integer row id is stored instead.
         All steps must have the same action and parameters, as the store applies them
         to the whole mission. An empty or mixed queue or a store validation error is
         reported in status.
@@ -114,10 +121,11 @@ class MissionApplicationService:
             return None
         doc = self._topology.get_doc()
         nodes = doc.nodes if doc is not None else []
+        taken = {nd.name for nd in nodes}
         rows = [
             next((nd.name for nd in nodes
                   if nd.meta.get('row_id') == rid and nd.meta.get('row_role') == 'entry'),
-                 f'ROW_{rid}_IN')
+                 rid if f'ROW_{rid}_IN' in taken else f'ROW_{rid}_IN')
             for rid, _, _ in queue
         ]
         return self._store.add(
@@ -125,31 +133,121 @@ class MissionApplicationService:
             name=name or '', repeat_every_hours=repeat_every_hours, active=True)
 
     def start(self, queue: list, on_status: StatusCallback,
-              on_nav_update: Callable[[NavUpdate], None] | None = None) -> None:
+              on_nav_update: Callable[[NavUpdate], None] | None = None,
+              on_result: Callable[[MissionResult], None] | None = None,
+              on_step_done: Callable[[int], None] | None = None,
+              prepare_run: Callable[[], AbstractContextManager] | None = None) -> bool:
         """Run the queued (row_id, action_key, action_params) steps on a worker thread.
 
-        Report an empty queue, a running mission, unavailable navigation or a MissionError
-        through on_status(ERROR, 'ERROR: ...') and return without starting.
+        Return True if the mission started. Report an empty queue, a running mission,
+        unavailable navigation or a MissionError through on_status(ERROR, 'ERROR: ...') and
+        return False without starting.
         Otherwise on_status receives progress as (level, text) first on the calling thread,
         then on the worker. on_nav_update receives each navigation update, on the worker.
+        on_step_done(n) and on_result(MissionResult) run on the worker; see
+        MissionDomainService.start.
+        prepare_run is entered after admission and before the worker starts.
         Other startup errors propagate.
         """
         if not queue:
             on_status(ERROR, 'ERROR: queue is empty')
-            return
+            return False
         if self._mission_service.running:
             on_status(ERROR, 'ERROR: mission already running')
-            return
+            return False
         if not self._navigation.available:
             on_status(ERROR, 'ERROR: action client unavailable')
-            return
+            return False
         try:
             steps = resolve_steps(self._topology.get_doc(), queue)
             self._mission_service.start(
                 steps, lambda target: self._navigate(target, on_nav_update), on_status,
-                lambda: self._drive.soft_estop_active)
+                lambda: self._drive.soft_estop_active, on_result, on_step_done,
+                **({'prepare_run': prepare_run} if prepare_run is not None else {}))
         except MissionError as exc:
             on_status(ERROR, f'ERROR: {exc}')
+            return False
+        return True
+
+    def run_saved(self, mission_id: str, on_status: StatusCallback,
+                  on_nav_update: Callable[[NavUpdate], None] | None = None) -> bool:
+        """Run a saved mission: load it, resolve its entry nodes to steps and start().
+
+        The Run button for saved missions, a future scheduler and remote intake share this
+        path. Return True if the mission started. An unknown mission id is reported through
+        on_status(ERROR, 'ERROR: ... not found'). A mission that is inactive still runs,
+        because active only controls scheduling. Every other failure is reported as in start().
+
+        The outcome is recorded in the store: state running with started_at when
+        it starts, steps_done as each step finishes, then state ended with stage, reason and
+        ended_at, and record_run for the repeat schedule. A remote mission is also made
+        inactive when it ends, whatever the result. A mission that fails to start keeps the
+        result it had before.
+        SQLite lookup errors propagate, including ValueError for malformed IDs.
+        """
+        mission = self._store.find(mission_id)
+        if mission is None:
+            on_status(ERROR, f'ERROR: {mission_id!r} not found')
+            return False
+        action, params = mission['action'], mission.get('action_params') or {}
+        queue = [(row, action, params) for row in mission.get('rows', ())]
+
+        @contextmanager
+        def prepare_run() -> Iterator[None]:
+            """Initialize after admission; roll back only before the worker starts."""
+            fields = ('state', 'steps_done', 'stage', 'reason', 'started_at', 'ended_at')
+            current = self._store.find(mission_id)
+            if current is None:
+                raise MissionError(f'{mission_id!r} not found')
+            before = {name: current.get(name) for name in fields if name in current}
+            try:
+                if self._store.record_result(
+                        mission_id, state='running', steps_done=0, stage=None, reason=None,
+                        started_at=now_utc_str(), ended_at=None) is False:
+                    raise RuntimeError(self._store.status)
+                yield
+            except BaseException:
+                try:
+                    self._store.record_result(mission_id, **before)
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._store.set_status(f'ERROR: restoring {mission_id} failed: {exc}')
+                raise
+
+        def on_step_done(count: int) -> None:
+            """Store the steps finished so far, so a restart reports a true count."""
+            self._store.record_result(mission_id, steps_done=count)
+
+        def on_result(result: MissionResult) -> None:
+            """Store how the mission ended and re-arm its schedule."""
+            ended_at = now_utc_str()
+
+            def complete() -> None:
+                if self._store.record_result(
+                        mission_id, state='ended', steps_done=result.steps_done, stage=result.stage,
+                        reason=result.reason, ended_at=ended_at) is False:
+                    raise RuntimeError(self._store.status)
+                if self._store.record_run(mission_id, result.ok) is False:
+                    raise RuntimeError(self._store.status)
+                if mission.get('source') == 'remote':
+                    self._store.set_active(mission_id, False)
+
+            try:
+                for attempt in range(3):
+                    try:
+                        complete()
+                        break
+                    except sqlite3.OperationalError:
+                        if attempt == 2:
+                            raise
+                        time.sleep(0.1)
+            except Exception as exc:  # pylint: disable=broad-except
+                text = f'ERROR: mission {mission_id} completion could not be saved: {exc}'
+                self._store.set_status(text)
+                on_status(ERROR, text)
+                raise
+
+        return self.start(queue, on_status, on_nav_update, on_result, on_step_done,
+                          prepare_run=prepare_run)
 
     def cancel(self) -> None:
         """Stop the mission before its next goal, then cancel the goal in flight.
@@ -159,16 +257,22 @@ class MissionApplicationService:
         if self._mission_service.cancel():
             self._navigation.cancel()
 
-    def _navigate(self, target: str, on_nav_update: Callable[[NavUpdate], None] | None) -> bool:
+    def _navigate(self, target: str, on_nav_update: Callable[[NavUpdate], None] | None) -> str:
         """Navigate to a node and block until it ends; call from the mission worker thread.
 
         Use a 300-second wait budget after sending the goal, excluding the server wait.
         A mission cancel or a confirmed soft estop requests cancellation while waiting.
-        Return True only on arrival; failure, rejection, cancellation, timeout or unavailable
-        navigation returns False. Synchronous navigation errors propagate to the mission worker.
-        See NavigationApplicationService.navigate_and_wait for polling and cancellation timing.
+        Return 'arrived', or why it did not: 'nav' (failure, rejection or unavailable
+        navigation), 'timeout', 'cancel', or 'estop' when the stop came from the soft estop and
+        not from a mission cancel. Synchronous navigation errors propagate to the mission worker.
+        See NavigationApplicationService.navigate_and_wait_result for polling and cancellation
+        timing.
         """
-        return self._navigation.navigate_and_wait(
+        result = self._navigation.navigate_and_wait_result(
             target, NAV_TIMEOUT_SEC,
             lambda: self._mission_service.cancel_requested or self._drive.soft_estop_active,
             on_nav_update)
+        if (result == 'cancel' and not self._mission_service.cancel_requested
+                and self._drive.soft_estop_active):
+            return 'estop'
+        return result
