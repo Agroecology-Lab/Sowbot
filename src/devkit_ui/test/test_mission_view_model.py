@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import test_mission_domain_service  # noqa: F401  # pylint: disable=unused-import
 from devkit_ui.application_services.mission_application_service import MissionApplicationService
+from devkit_ui.domain_services.mission_domain_service import MissionError, resolve_steps
 from devkit_ui.missions import MissionStore
 from devkit_ui.topo_results import NavUpdate
 from devkit_ui.view_models.mission_view_model import MissionViewModel
@@ -69,6 +70,21 @@ class TestMissionViewModel(unittest.TestCase):
         mid = self.vm.save_queue([(3, 'drive', None)], '', None)
 
         self.assertEqual(self.store.find(mid)['rows'], ['ROW_3_IN'])
+
+    def test_fallback_name_taken_by_another_rows_entry_saves_the_row_id(self) -> None:
+        """Verify a missing row never gets a fallback name that another row's entry already has."""
+        self.doc = SimpleNamespace(nodes=[
+            row_node('A_1', 1, 'entry'), row_node('A_2', 1, 'exit'),
+            row_node('ROW_9_IN', 2, 'entry'), row_node('B_2', 2, 'exit')])
+
+        mid = self.vm.save_queue([(9, 'drive', None), (7, 'drive', None), (2, 'drive', None)],
+                                 '', None)
+
+        rows = self.store.find(mid)['rows']
+        self.assertEqual(rows, [9, 'ROW_7_IN', 'ROW_9_IN'])
+        # Row 9 is not in the map, so running it must fail rather than run row 2 in its place.
+        with self.assertRaisesRegex(MissionError, r'incomplete row nodes for row\(s\) \[9\]'):
+            resolve_steps(self.doc, [(row, 'drive', None) for row in rows[:1]])
 
     def test_equivalent_parameter_dicts_are_accepted_regardless_of_key_order(self) -> None:
         """Compare parameter values rather than object identity or insertion order."""

@@ -108,6 +108,7 @@ class MissionStoreCard(ui.column):
         else:
             due_text, due_style = f'in {due:.1f}h', AMBER
         last_ok = mission.get('last_run_success')
+        remote = mission.get('source') == 'remote'
 
         with ui.row().classes('items-center gap-2 w-full'):
             ui.label(f'{action.icon if action else "?"} {mission.get("name", mission_id)}').classes(
@@ -118,12 +119,13 @@ class MissionStoreCard(ui.column):
             ui.label('✓' if last_ok is True else '✗' if last_ok is False else '—').classes(
                 'text-xs font-mono').style(GREEN if last_ok is True else
                                            RED if last_ok is False else MUTED)
-            if mission.get('source') != 'remote':  # the station starts remote missions
+            if not remote:  # the station starts remote missions
                 run = ui.button('▶', on_click=lambda _, m=mission_id: self._run_saved(m))
                 run.props('flat dense').classes('text-xs').style(GREEN)
                 run.tooltip('Run this saved mission now')
             active = ui.checkbox('', value=mission.get('active', False)).props('dense')
-            active.tooltip('Active — included in today_queue()')
+            active.tooltip('Cleared when the mission ends; never scheduled' if remote
+                           else 'Active — included in today_queue()')
             active.on_value_change(lambda e, m=mission_id: self._vm.set_active(m, e.value))
             ui.button('✕', on_click=lambda _, m=mission_id: self._vm.delete(m)).props(
                 'flat dense').classes('text-xs').style(RED)

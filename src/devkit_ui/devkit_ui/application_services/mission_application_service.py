@@ -101,7 +101,9 @@ class MissionApplicationService:
         """Save a row queue as a mission and return its id, or None if it was rejected.
 
         queue holds (row_id, action_key, action_params) tuples. Each row is stored as its
-        entry node name in the live map, or ROW_<id>_IN when the map has no such node.
+        entry node name in the live map, or ROW_<id>_IN when the map has no such node. If a
+        node of that name already exists, it belongs to another row and would be resolved
+        in place of this one, so the integer row id is stored instead.
         All steps must have the same action and parameters, as the store applies them
         to the whole mission. An empty or mixed queue or a store validation error is
         reported in status.
@@ -119,10 +121,11 @@ class MissionApplicationService:
             return None
         doc = self._topology.get_doc()
         nodes = doc.nodes if doc is not None else []
+        taken = {nd.name for nd in nodes}
         rows = [
             next((nd.name for nd in nodes
                   if nd.meta.get('row_id') == rid and nd.meta.get('row_role') == 'entry'),
-                 f'ROW_{rid}_IN')
+                 rid if f'ROW_{rid}_IN' in taken else f'ROW_{rid}_IN')
             for rid, _, _ in queue
         ]
         return self._store.add(
