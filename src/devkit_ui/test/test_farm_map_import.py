@@ -21,6 +21,22 @@ def load() -> dict:
     return json.loads(FIXTURE.read_text(encoding='utf-8'))
 
 
+def with_docks(doc: dict) -> dict:
+    """Return doc with a dock, a placeholder dock and a route from the dock to the first row end."""
+    meta = {'farm_map_id': doc['properties']['farm_map_id']}
+    doc['features'] += [
+        {'type': 'Feature', 'properties': {'role': 'dock', 'name': 'dock', 'heading_deg': 1, **meta},
+         'geometry': {'type': 'Point', 'coordinates': [3.6615, 48.0039]}},
+        {'type': 'Feature', 'properties': {'role': 'dock', 'name': 'dock1', 'heading_deg': None, **meta},
+         'geometry': {'type': 'Point', 'coordinates': [3.6614, 48.0038]}},
+        {'type': 'Feature', 'properties': {'role': 'route', 'name': 'route1', 'from_node': 'dock',
+                                           'to_node': 'F1R0N0', **meta},
+         'geometry': {'type': 'LineString',
+                      'coordinates': [[3.6615, 48.0039], [3.6617, 48.0040], [3.6619, 48.0041]]}},
+    ]
+    return doc
+
+
 def parse(doc: dict, **kwargs):
     """Parse a dict as a farm map file."""
     return parse_farm_map(json.dumps(doc), **kwargs)
@@ -256,6 +272,49 @@ class FarmMapImportTest(unittest.TestCase):
         """Parsing twice gives the same map."""
         text = json.dumps(copy.deepcopy(load()))
         self.assertEqual(parse_farm_map(text).content_hash, parse_farm_map(text).content_hash)
+
+
+class FarmMapDockTest(unittest.TestCase):
+    """Docks and routes are read, checked for form, and kept out of the hash."""
+
+    def test_docks_and_routes_are_read(self):
+        """Points become (lat, lon), and a null heading stays None."""
+        farm_map = parse(with_docks(load()))
+        self.assertEqual([(d.name, d.lat, d.lon, d.heading_deg) for d in farm_map.docks],
+                         [('dock', 48.0039, 3.6615, 1.0), ('dock1', 48.0038, 3.6614, None)])
+        route = farm_map.routes[0]
+        self.assertEqual((route.name, route.from_node, route.to_node), ('route1', 'dock', 'F1R0N0'))
+        self.assertEqual(route.points, [(48.0039, 3.6615), (48.0040, 3.6617), (48.0041, 3.6619)])
+
+    def test_docks_do_not_change_the_hash(self):
+        """The hash covers rows only."""
+        self.assertEqual(parse(with_docks(load())).content_hash, FIXTURE_HASH)
+
+    def test_a_map_without_docks_has_none(self):
+        farm_map = parse(load())
+        self.assertEqual((farm_map.docks, farm_map.routes), ([], []))
+
+    def test_route_from_an_unknown_dock_is_refused(self):
+        doc = with_docks(load())
+        doc['features'][-1]['properties']['from_node'] = 'nowhere'
+        with self.assertRaisesRegex(FarmMapError, 'not a dock in the map'):
+            parse(doc)
+
+    def test_dock_must_be_a_point_with_a_numeric_heading(self):
+        doc = with_docks(load())
+        doc['features'][-3]['properties']['heading_deg'] = 'north'
+        with self.assertRaisesRegex(FarmMapError, 'heading_deg'):
+            parse(doc)
+        doc = with_docks(load())
+        doc['features'][-3]['geometry'] = {'type': 'LineString', 'coordinates': [[3.6, 48.0], [3.7, 48.1]]}
+        with self.assertRaisesRegex(FarmMapError, 'not a Point'):
+            parse(doc)
+
+    def test_duplicate_dock_names_are_refused(self):
+        doc = with_docks(load())
+        doc['features'][-2]['properties']['name'] = 'dock'
+        with self.assertRaisesRegex(FarmMapError, 'not unique'):
+            parse(doc)
 
 
 if __name__ == '__main__':

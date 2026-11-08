@@ -146,7 +146,8 @@ class PlanApplicationService:
             return ImportOutcome(error='farm map rows differ between the two readers; not importing')
         return ImportOutcome(planned=PlannedRows(
             plan.swaths, farm_map.origin, farm_map.contour,
-            frozenset(farm_map.break_after()), verified, farm_map.hash8))
+            frozenset(farm_map.break_after()), verified, farm_map.hash8,
+            tuple(farm_map.docks), tuple(farm_map.routes)))
 
     def save_rows(self, planned: PlannedRows | None, prefix: str, row_id_start: int,
                   overwrite: bool, *, row_action: str, current_node: str | None,
@@ -182,6 +183,7 @@ class PlanApplicationService:
                 swaths=planned.swaths, origin_ll=planned.origin_ll,
                 contour_used=planned.contour_used, break_after=planned.break_after,
                 lf_rows=planned.lf_rows, map_hash8=planned.map_hash8,
+                docks=planned.docks, routes=planned.routes,
                 is_sim=self._is_sim,
                 odom_xy=(odom.pose.pose.position.x, odom.pose.pose.position.y) if odom else None,
                 gps=self._telemetry.latest_gps, row_action=row_action,

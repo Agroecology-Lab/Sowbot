@@ -17,6 +17,12 @@ from devkit_ui.application_services.topology_application_service import (
 )
 from devkit_ui.constants import NAV_ACTION
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties, Vector2
+from devkit_ui.topo_dock_builder import (
+    DockBuild,
+    DockBuildSettings,
+    apply_dock_nodes,
+    build_dock_nodes,
+)
 from devkit_ui.topo_results import StagedDrop, StagedEdit, TopologyEditError
 from devkit_ui.topo_row_builder import (
     RowAnchor,
@@ -140,6 +146,7 @@ class TopologyEditService:
                        swaths: list, origin_ll: tuple[float, float] | None,
                        contour_used: bool, break_after: set | frozenset,
                        lf_rows: tuple = (), map_hash8: str | None = None,
+                       docks: tuple = (), routes: tuple = (),
                        is_sim: bool, odom_xy: tuple[float, float] | None, gps: Any,
                        row_action: str, current_node: str | None,
                        selected_node: str | None) -> StagedEdit:
@@ -148,6 +155,9 @@ class TopologyEditService:
         Nothing is added to the live map; the edit is applied when it is persisted.
         lf_rows, if given, holds one LiteFarm (field, row, frag) per swath and is written to
         the row nodes' metadata.
+        docks and routes, if given, are the farm map's FarmDock and FarmRoute entries. Each dock is
+        saved as a node, joined to the row end its route names (see topo_dock_builder). They never
+        change whether the map counts as the farm map, which depends on the rows alone.
         map_hash8, if given, is the hash8 of the farm map the swaths came from. It is stamped
         into the saved map only when the save leaves the map holding exactly that farm map's
         rows: no swath dropped or skipped, and no other row nodes left in the map. Otherwise
@@ -229,7 +239,11 @@ class TopologyEditService:
             raise TopologyEditError(
                 'ERROR: nothing added (all names already taken)', tuple(warnings))
 
+        dock_build = self._build_docks(docks, routes, anchor, doc, build, prefix, nav_frame, status, warnings)
+
         skip_str = f' (skipped {len(build.skipped)} dup ids)' if build.skipped else ''
+        if dock_build:
+            skip_str += f' · {len(docks)} docks'
         splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
         stamp, differs = None, ''
         if map_hash8 is not None:
@@ -237,10 +251,15 @@ class TopologyEditService:
                 stamp = map_hash8
             else:
                 differs = ' · map is not the farm map, remote missions are refused'
+        def modify(file_doc: TopoDoc) -> None:
+            apply_row_nodes(file_doc, build, prefix, overwrite)
+            if dock_build:
+                apply_dock_nodes(file_doc, dock_build, prefix, overwrite)
+
         return StagedEdit(
             pending=f'writing {len(build.added)} rows · {prefix}{splice_str}{skip_str}…',
             success=f'saved {len(build.added)} rows · {prefix}{splice_str}{skip_str}{differs}',
-            modify=lambda file_doc: apply_row_nodes(file_doc, build, prefix, overwrite),
+            modify=modify,
             warnings=tuple(warnings),
             infos=infos,
             map_hash8=stamp,
@@ -321,6 +340,28 @@ class TopologyEditService:
             modify=lambda file_doc: file_doc.remove_nodes(set(targets)),
             affected=targets,
         )
+
+    @staticmethod
+    def _build_docks(docks: tuple, routes: tuple, anchor: RowAnchor, doc: TopoDoc, build: RowBuild,
+                     prefix: str, nav_frame: str, status: int, warnings: list[str]) -> DockBuild | None:
+        """Return the dock nodes for a save, or None when there are no docks.
+
+        A route whose row end was not built is left out and noted in warnings.
+
+        Raises:
+            TopologyEditError: Two docks or route points get the same node name.
+        """
+        if not docks:
+            return None
+        try:
+            dock_build = build_dock_nodes(docks, routes, anchor, DockBuildSettings(
+                prefix=prefix, nav_frame=nav_frame, map_name=doc.name or 'mixed_test_map',
+                timestamp=_timestamp(), fix_type=int(status)), build.nodes)
+        except ValueError as exc:
+            raise TopologyEditError(f'ERROR: {exc}', tuple(warnings)) from exc
+        if dock_build.skipped:
+            warnings.append(f'docks: no row end in the map for routes {", ".join(dock_build.skipped)}')
+        return dock_build
 
     @staticmethod
     def _holds_only_these_rows(doc: TopoDoc, build: RowBuild, swath_count: int, prefix: str,

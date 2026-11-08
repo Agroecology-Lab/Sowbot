@@ -13,6 +13,11 @@ the canonical rows are those of row_plan_format (``[[row,frag,[[lon,lat],...]],.
 mission order). It covers geometry, order and field numbers, not names. A robot that holds a map keeps
 this hash; a mission is only valid for the map whose hash it names.
 
+  docks:      role 'dock' (Point), name, heading_deg (number or null)
+  routes:     role 'route' (LineString), name, from_node (a dock), to_node (F<field>R<row>N<n>)
+
+Docks and routes are outside the hash. They are read after the rows are accepted and checked only for form.
+
 This module only validates and describes. It does not touch the topological map.
 """
 import hashlib
@@ -53,8 +58,32 @@ class FieldRows:
 
 
 @dataclass(frozen=True)
+class FarmDock:
+    """A dock point. ``heading_deg`` is None when the map gives no heading."""
+
+    name: str
+    lat: float
+    lon: float
+    heading_deg: float | None = None
+
+
+@dataclass(frozen=True)
+class FarmRoute:
+    """A route from a dock to a row end, as (lat, lon) points.
+
+    ``from_node`` names a dock and ``to_node`` a row node (``F<field>R<row>N<n>``). The first point is the
+    dock and the last is the row end, so the points between them are the route's own waypoints.
+    """
+
+    name: str
+    from_node: str
+    to_node: str
+    points: list[tuple[float, float]]
+
+
+@dataclass(frozen=True)
 class FarmMap:
-    """A verified farm map."""
+    """A verified farm map. Docks and routes are not covered by the content hash."""
 
     farm_map_id: str
     version: int
@@ -65,6 +94,8 @@ class FarmMap:
     season: str | None = None
     previous_farm_map_id: str | None = None
     warnings: list[str] = field(default_factory=list)
+    docks: list[FarmDock] = field(default_factory=list)
+    routes: list[FarmRoute] = field(default_factory=list)
 
     @property
     def origin(self) -> tuple[float, float]:
@@ -147,6 +178,38 @@ def _points(coords: object, what: str) -> list[tuple[float, float]]:
     return points
 
 
+def _name(fp: dict, what: str) -> str:
+    """Return the feature's name, or raise FarmMapError."""
+    name = fp.get('name')
+    if not isinstance(name, str) or not ID_PATTERN.match(name):
+        raise FarmMapError(f'{what}: name is missing or not a valid id')
+    return name
+
+
+def _dock(feature: dict, fp: dict, what: str) -> FarmDock:
+    """Return the dock a ``dock`` feature describes, or raise FarmMapError."""
+    geometry = feature.get('geometry')
+    if not isinstance(geometry, dict) or geometry.get('type') != 'Point':
+        raise FarmMapError(f'{what}: dock is not a Point')
+    lat, lon = _points([geometry.get('coordinates'), geometry.get('coordinates')], what)[0]
+    heading = fp.get('heading_deg')
+    if heading is not None and (isinstance(heading, bool) or not isinstance(heading, (int, float))
+                                or not math.isfinite(heading)):
+        raise FarmMapError(f'{what}: heading_deg must be a finite number or null')
+    return FarmDock(_name(fp, what), lat, lon, None if heading is None else float(heading))
+
+
+def _route(feature: dict, fp: dict, what: str) -> FarmRoute:
+    """Return the route a ``route`` feature describes, or raise FarmMapError."""
+    geometry = feature.get('geometry')
+    if not isinstance(geometry, dict) or geometry.get('type') != 'LineString':
+        raise FarmMapError(f'{what}: route is not a LineString')
+    ends = [fp.get('from_node'), fp.get('to_node')]
+    if not all(isinstance(e, str) and ID_PATTERN.match(e) for e in ends):
+        raise FarmMapError(f'{what}: from_node and to_node must be valid ids')
+    return FarmRoute(_name(fp, what), ends[0], ends[1], _points(geometry.get('coordinates'), what))
+
+
 def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
     """Parse a LiteFarm farm map export and verify its content hash.
 
@@ -204,6 +267,8 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
         field_meta[number] = entry
 
     rows_by_field: dict[int, list[PlanRow]] = {}
+    docks: list[FarmDock] = []
+    routes: list[FarmRoute] = []
     last_field = None
     count = 0
     features = doc.get('features')
@@ -216,6 +281,12 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
         fp = feature.get('properties')
         if not isinstance(fp, dict):
             raise FarmMapError(f'{what}: properties must be an object')
+        if fp.get('role') == 'dock':
+            docks.append(_dock(feature, fp, what))
+            continue
+        if fp.get('role') == 'route':
+            routes.append(_route(feature, fp, what))
+            continue
         if fp.get('role') != 'row':
             continue
         count += 1
@@ -265,5 +336,11 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
     if computed != declared:
         raise FarmMapError(f'content_hash does not match the rows (file says {declared[:12]}, '
                            f'rows give {computed[:12]}): the file was changed or damaged')
+    dock_names = [d.name for d in docks]
+    if len(set(dock_names)) != len(dock_names) or len({r.name for r in routes}) != len(routes):
+        raise FarmMapError('dock or route names are not unique')
+    for route in routes:
+        if route.from_node not in dock_names:
+            raise FarmMapError(f'route {route.name!r}: from_node {route.from_node!r} is not a dock in the map')
     return FarmMap(map_id, version, declared, status, fields, props.get('farm_map_name'), props.get('season'),
-                   props.get('previous_farm_map_id'), warnings)
+                   props.get('previous_farm_map_id'), warnings, docks, routes)

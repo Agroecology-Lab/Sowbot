@@ -9,6 +9,7 @@ from devkit_ui.application_services.plan_application_service import PlanApplicat
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
 from devkit_ui.missions.lf_rows import LfRowError, resolve_lf_row
 from devkit_ui.models import MAP_EDITED, TopoDoc, TopoNode
+from test_farm_map_import import with_docks
 from test_plan_import import ROW0, ROW1, _feat, _plan
 from test_topology_persistence import ServiceCase
 
@@ -106,6 +107,59 @@ class SaveTest(FarmMapSaveCase):
         self.import_and_save(_plan([_feat(ROW0, 0), _feat(ROW1, 1)]))
         self.assertEqual(self.saved().map_hash8, MAP_EDITED)
         self.assertNotIn('hash8', self.saved().meta)
+
+
+class DockSaveTest(FarmMapSaveCase):
+    """The docks of a farm map become nodes joined to the row end their route names."""
+
+    def docks_text(self, to_node: str = 'F1R0N0') -> str:
+        doc = with_docks(json.loads(self.farm_map_text()))
+        doc['features'][-1]['properties']['to_node'] = to_node
+        return json.dumps(doc)
+
+    def edges(self, name: str) -> set[str]:
+        return {e.node for e in self.saved().get_node(name).edges}
+
+    def test_docks_are_saved_as_nodes(self) -> None:
+        self.import_and_save(self.docks_text())
+        dock = self.saved().get_node('FARM_D_DOCK')
+        self.assertEqual((dock.meta['role'], dock.meta['farm_name'], dock.meta['heading_deg']), ('dock', 'dock', 1.0))
+        self.assertIsNone(self.saved().get_node('FARM_D_DOCK1').meta['heading_deg'])
+        self.assertEqual(self.saved().get_node('FARM_D_ROUTE1_1').meta['role'], 'route')
+        self.assertIn('2 docks', self.statuses[-1])
+
+    def test_the_route_joins_the_dock_to_the_row_end_both_ways(self) -> None:
+        self.import_and_save(self.docks_text())
+        self.assertEqual(self.edges('FARM_D_DOCK'), {'FARM_D_ROUTE1_1'})
+        self.assertEqual(self.edges('FARM_D_ROUTE1_1'), {'FARM_D_DOCK', 'FARM_R1_IN'})
+        self.assertIn('FARM_D_ROUTE1_1', self.edges('FARM_R1_IN'))
+
+    def test_a_later_index_ends_the_route_at_the_row_exit(self) -> None:
+        self.import_and_save(self.docks_text('F1R0N1'))
+        self.assertIn('FARM_D_ROUTE1_1', self.edges('FARM_R1_OUT'))
+        self.assertNotIn('FARM_D_ROUTE1_1', self.edges('FARM_R1_IN'))
+
+    def test_docks_leave_the_farm_map_identity_alone(self) -> None:
+        self.import_and_save(self.docks_text())
+        self.assertEqual(self.saved().map_hash8, 'c50f60d8')
+        self.assertNotIn('remote missions are refused', self.statuses[-1])
+
+    def test_importing_again_with_overwrite_does_not_duplicate_docks(self) -> None:
+        self.import_and_save(self.docks_text())
+        self.import_and_save(self.docks_text(), overwrite=True)
+        names = sorted(n.name for n in self.saved().nodes if n.meta.get('dock_prefix'))
+        self.assertEqual(names, ['FARM_D_DOCK', 'FARM_D_DOCK1', 'FARM_D_ROUTE1_1'])
+        self.assertEqual(self.edges('FARM_D_ROUTE1_1'), {'FARM_D_DOCK', 'FARM_R1_IN'})
+        self.assertEqual(self.saved().map_hash8, 'c50f60d8')
+
+    def test_a_route_to_a_row_that_is_not_there_leaves_the_dock_unlinked(self) -> None:
+        self.import_and_save(self.docks_text('F9R9N0'))
+        self.assertEqual(self.edges('FARM_D_DOCK'), set())
+        self.assertFalse(self.saved().has_node('FARM_D_ROUTE1_1'))
+
+    def test_a_farm_map_without_docks_adds_none(self) -> None:
+        self.import_and_save(self.farm_map_text())
+        self.assertFalse([n for n in self.saved().nodes if n.meta.get('dock_prefix')])
 
 
 class EditTest(FarmMapSaveCase):

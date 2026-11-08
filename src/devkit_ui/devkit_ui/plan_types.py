@@ -105,7 +105,8 @@ class PlannedRows:
     indices that must not get a headland edge to the next swath. lf_rows holds each swath's
     LiteFarm (field, row, frag), or is empty when the rows have no LiteFarm identity.
     map_hash8 is the first 8 hex characters of the verified farm map the rows came from, or
-    None when they did not come from one.
+    None when they did not come from one. docks and routes are the farm map's FarmDock and
+    FarmRoute entries; they are outside the hash and empty for other plans.
     """
     swaths: list
     origin_ll: tuple[float, float] | None
@@ -113,3 +114,5 @@ class PlannedRows:
     break_after: frozenset[int] = frozenset()
     lf_rows: tuple = ()
     map_hash8: str | None = None
+    docks: tuple = ()
+    routes: tuple = ()

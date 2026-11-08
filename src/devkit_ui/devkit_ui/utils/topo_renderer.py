@@ -87,6 +87,21 @@ def _row_labels(doc: TopoDoc, tx, ty) -> list[str]:
     return labels
 
 
+def _dock_labels(doc: TopoDoc, tx, ty) -> list[str]:
+    """One label above each dock node, showing the dock's name in the farm map."""
+    return [
+        f'<text class="topo-dock-label" x="{tx(nd.x):.1f}" y="{ty(nd.y) - _NODE_R - 6:.1f}" '
+        f'text-anchor="middle" fill="#9a6700" font-family="Courier New" font-size="10" '
+        f'font-weight="700" style="pointer-events:none">'
+        f'{html.escape(str(nd.meta.get("farm_name") or nd.name), quote=True)}</text>'
+        for nd in doc.nodes if nd.meta.get('role') == 'dock']
+
+
+def _is_dock_edge(*nodes: TopoNode) -> bool:
+    """Return whether any of the nodes is a dock or a route point."""
+    return any(nd.meta.get('role') in ('dock', 'route') for nd in nodes)
+
+
 def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) -> str:
     """Render the topology with selected/current highlights, or an empty-map placeholder."""
     if doc is None or not doc.nodes:
@@ -111,13 +126,17 @@ def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) ->
 
             tgt_node = doc.get_node(tgt_name)
 
-            is_row_edge = (nd.meta.get('row_id') is not None
-                        or tgt_node.meta.get('row_id') is not None)
+            if _is_dock_edge(nd, tgt_node):
+                stroke, width, dash = '#d4a72c', '2', ' stroke-dasharray="4 3"'
+            elif (nd.meta.get('row_id') is not None
+                    or tgt_node.meta.get('row_id') is not None):
+                stroke, width, dash = '#d8e8fd', '2', ''
+            else:
+                stroke, width, dash = '#d0d7de', '1', ''
             parts.append(
                 f'<line x1="{tx(nd.x):.1f}" y1="{ty(nd.y):.1f}" '
                 f'x2="{tx(tgt_node.x):.1f}" y2="{ty(tgt_node.y):.1f}" '
-                f'stroke="{"#d8e8fd" if is_row_edge else "#d0d7de"}" '
-                f'stroke-width="{"2" if is_row_edge else "1"}" stroke-linecap="round"/>')
+                f'stroke="{stroke}" stroke-width="{width}"{dash} stroke-linecap="round"/>')
 
     sel_label = ''
     for nd in doc.nodes:
@@ -126,12 +145,17 @@ def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) ->
         is_cur = name == current
         is_sel = name == selected
         is_row = nd.meta.get('row_id') is not None
+        is_dock = nd.meta.get('role') == 'dock'
 
         # pylint: disable=multiple-statements
         if is_cur:
             fill, stroke, sw = '#dafbe1', '#1a7f37', 2
         elif is_sel:
             fill, stroke, sw = '#fff8c5', '#9a6700', 2
+        elif is_dock:
+            fill, stroke, sw = '#fff1c2', '#bf8700', 2
+        elif nd.meta.get('role') == 'route':
+            fill, stroke, sw = '#fff8dc', '#d4a72c', 1
         elif is_row:
             fill, stroke, sw = '#d8e8fd', '#0969da', 1
         elif nd.meta.get('dropped_by'):
@@ -149,10 +173,17 @@ def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) ->
                 f'<animate attributeName="opacity" values="0.4;0" '
                 f'dur="2s" repeatCount="indefinite"/></circle>')
 
-        parts.append(
-            f'<circle class="topo-node" data-node="{html.escape(str(name), quote=True)}" '
-            f'cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R}" '
-            f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>')
+        node_attrs = f'class="topo-node" data-node="{html.escape(str(name), quote=True)}"'
+        if is_dock:
+            side = 2 * _NODE_R + 2
+            parts.append(
+                f'<rect {node_attrs} x="{cx - side / 2:.1f}" y="{cy - side / 2:.1f}" '
+                f'width="{side}" height="{side}" '
+                f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>')
+        else:
+            parts.append(
+                f'<circle {node_attrs} cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R}" '
+                f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>')
 
         if is_sel:
             sel_label = (
@@ -162,6 +193,7 @@ def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) ->
                 f'{html.escape(str(name), quote=True)}</text>')
 
     parts.extend(_row_labels(doc, tx, ty))
+    parts.extend(_dock_labels(doc, tx, ty))
     parts.append(sel_label)
 
     return (f'<svg id="topo-map" width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
