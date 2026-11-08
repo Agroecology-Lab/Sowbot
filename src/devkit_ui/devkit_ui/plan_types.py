@@ -106,7 +106,8 @@ class PlannedRows:
     LiteFarm (field, row, frag), or is empty when the rows have no LiteFarm identity.
     map_hash8 is the first 8 hex characters of the verified farm map the rows came from, or
     None when they did not come from one. docks and routes are the farm map's FarmDock and
-    FarmRoute entries; they are outside the hash and empty for other plans.
+    FarmRoute entries; their canonical forms are included in the verified farm map hash.
+    They are empty for other plans.
     """
     swaths: list
     origin_ll: tuple[float, float] | None

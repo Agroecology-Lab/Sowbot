@@ -150,7 +150,7 @@ class TopologyApplicationService:
     # These block on file and service I/O: call them from a worker thread.
 
     def persist_and_reload(self, modify: Callable[[TopoDoc], None], *,
-                           map_hash8: str | None = None) -> PersistResult:
+                           map_hash8: str | Callable[[TopoDoc], str | None] | None = None) -> PersistResult:
         """Apply modify to the saved map, save it, and make it live.
 
         Edits the file on disk when there is one, otherwise a copy of the live map seeded
@@ -160,6 +160,7 @@ class TopologyApplicationService:
         Every edit marks a map that came from a farm map as edited, so that robots holding
         the same farm map are known to hold the same map. Pass map_hash8 only for an edit
         that makes the map equal to the farm map with that hash: it is stamped instead.
+        A callable computes eligibility from the saved document under the persistence lock.
 
         Call from a worker thread. Raises ValueError if no map is loaded. The result
         reports whether switching succeeded or publishing was used as a fallback.
@@ -176,9 +177,10 @@ class TopologyApplicationService:
                 if not file_doc.actions:
                     file_doc.seed_actions(default_actions(), default_definitions())
 
+            stamp = map_hash8(file_doc) if callable(map_hash8) else map_hash8
             modify(file_doc)
-            if map_hash8 is not None:
-                file_doc.stamp_map_hash8(map_hash8)
+            if stamp is not None:
+                file_doc.stamp_map_hash8(stamp)
             else:
                 file_doc.mark_map_edited()
 

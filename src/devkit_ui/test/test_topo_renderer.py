@@ -108,6 +108,12 @@ class TestTopoRendererDocks(unittest.TestCase):
         self.assertTrue(dock.tag.endswith('rect'))
         self.assertEqual(dock.attrib['class'], 'topo-node')
 
+    def test_selected_dock_labels_have_distinct_positions(self):
+        root = ElementTree.fromstring(build_svg(dock_doc(), selected='DOCK', current=None))
+        labels = [e for e in root.iter() if e.attrib.get('class') in ('topo-dock-label', 'topo-node-label')]
+        self.assertEqual(len(labels), 2)
+        self.assertNotEqual(labels[0].attrib['y'], labels[1].attrib['y'])
+
     def test_a_dock_is_labelled_with_its_escaped_farm_name(self) -> None:
         svg = build_svg(dock_doc(), selected=None, current=None)
 

@@ -87,10 +87,11 @@ def _row_labels(doc: TopoDoc, tx, ty) -> list[str]:
     return labels
 
 
-def _dock_labels(doc: TopoDoc, tx, ty) -> list[str]:
+def _dock_labels(doc: TopoDoc, tx, ty, selected: str | None = None) -> list[str]:
     """One label above each dock node, showing the dock's name in the farm map."""
     return [
-        f'<text class="topo-dock-label" x="{tx(nd.x):.1f}" y="{ty(nd.y) - _NODE_R - 6:.1f}" '
+        f'<text class="topo-dock-label" x="{tx(nd.x):.1f}" '
+        f'y="{ty(nd.y) - _NODE_R - (20 if nd.name == selected else 6):.1f}" '
         f'text-anchor="middle" fill="#9a6700" font-family="Courier New" font-size="10" '
         f'font-weight="700" style="pointer-events:none">'
         f'{html.escape(str(nd.meta.get("farm_name") or nd.name), quote=True)}</text>'
@@ -193,7 +194,7 @@ def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) ->
                 f'{html.escape(str(name), quote=True)}</text>')
 
     parts.extend(_row_labels(doc, tx, ty))
-    parts.extend(_dock_labels(doc, tx, ty))
+    parts.extend(_dock_labels(doc, tx, ty, selected))
     parts.append(sel_label)
 
     return (f'<svg id="topo-map" width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '

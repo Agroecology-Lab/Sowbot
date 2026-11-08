@@ -292,7 +292,27 @@ class FarmMapImportTest(unittest.TestCase):
 
 
 class FarmMapDockTest(unittest.TestCase):
-    """Docks and routes are read, checked for form, and kept out of the hash."""
+    """Canonical docks and routes are included in the verified farm map hash."""
+
+    def test_fractional_heading_uses_javascript_number_format(self):
+        for value, expected in ((0.000001, '0.000001'), (1e-7, '1e-7'),
+                                (-1e-7, '-1e-7'), (1.5, '1.5'), (1e20, '100000000000000000000'),
+                                (1e21, '1e+21'), (-0.0, '0')):
+            with self.subTest(value=value):
+                self.assertIn(f',"dock",{expected},',
+                              canonical_features_text([FarmDock('dock', 48, 3, value)], []))
+
+    def test_out_of_bounds_docks_and_route_waypoints_are_refused(self):
+        for index, point_index in ((-3, None), (-1, 1)):
+            for point in ([181, 48], [-181, 48], [3, 91], [3, -91]):
+                doc = with_docks(load())
+                geometry = doc['features'][index]['geometry']
+                if point_index is None:
+                    geometry['coordinates'] = point
+                else:
+                    geometry['coordinates'][point_index] = point
+                with self.assertRaisesRegex(FarmMapError, 'bounds'):
+                    parse(doc)
 
     def test_docks_and_routes_are_read(self):
         """Points become (lat, lon), and a null heading stays None."""

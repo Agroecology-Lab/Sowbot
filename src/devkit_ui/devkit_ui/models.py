@@ -395,7 +395,7 @@ class TopoDoc:
     def clone_empty(self, map_name: str | None = None) -> 'TopoDoc':
         """Clones the document and returns a new document with no nodes.
         Retains metadata, actions, definitions, and transformation."""
-        return TopoDoc(
+        doc = TopoDoc(
             name=map_name or self._name,
             metric_map=self._metric_map,
             pointset=self._pointset,
@@ -405,3 +405,5 @@ class TopoDoc:
             transformation=copy.deepcopy(self._transformation),
             nodes=[],
         )
+        doc.mark_map_edited()
+        return doc

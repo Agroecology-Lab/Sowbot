@@ -255,8 +255,20 @@ class TopologyEditService:
                 differs = ' · map is not the farm map, remote missions are refused'
         def modify(file_doc: TopoDoc) -> None:
             apply_row_nodes(file_doc, build, prefix, overwrite)
-            if dock_build:
-                apply_dock_nodes(file_doc, dock_build, prefix, overwrite)
+            if dock_build is not None or overwrite:
+                apply_dock_nodes(file_doc, dock_build or DockBuild(), prefix, overwrite)
+
+        def verified_stamp(file_doc: TopoDoc) -> str | None:
+            live = self._topology.get_doc()
+            if live is None:
+                return None
+            live_rows = {n.name for n in live.nodes if n.meta.get('row_id') is not None}
+            saved_rows = {n.name for n in file_doc.nodes if n.meta.get('row_id') is not None}
+            if (saved_rows <= live_rows
+                    and self._holds_only_these_rows(file_doc, build, len(swaths), prefix, overwrite)
+                    and self._holds_only_these_docks(file_doc, dock_build, prefix, overwrite)):
+                return stamp
+            return None
 
         return StagedEdit(
             pending=f'writing {len(build.added)} rows · {prefix}{splice_str}{skip_str}…',
@@ -264,7 +276,7 @@ class TopologyEditService:
             modify=modify,
             warnings=tuple(warnings),
             infos=infos,
-            map_hash8=stamp,
+            map_hash8=verified_stamp if stamp is not None else None,
         )
 
     def stage_repair(self, row_action: str, connect_to: str | None = None) -> StagedEdit:

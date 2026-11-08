@@ -10,7 +10,7 @@ from devkit_ui.application_services.plan_application_service import PlanApplicat
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
 from devkit_ui.missions.lf_rows import LfRowError, resolve_lf_row
 from devkit_ui.models import MAP_EDITED, TopoDoc, TopoNode
-from devkit_ui.topo_dock_builder import DockBuild
+from devkit_ui.topo_dock_builder import DockBuild, apply_dock_nodes
 from test_farm_map_import import DOCKS, ROUTES, resign, with_docks
 from test_plan_import import ROW0, ROW1, _feat, _plan
 from test_topology_persistence import ServiceCase
@@ -105,6 +105,14 @@ class SaveTest(FarmMapSaveCase):
         self.import_and_save(self.farm_map_text(), prefix='NEW')
         self.assertEqual(self.saved().map_hash8, MAP_EDITED)
 
+    def test_saved_rows_absent_from_live_map_prevent_hash_stamp(self):
+        self.import_and_save(self.farm_map_text())
+        saved = self.saved()
+        saved.insert_node(TopoNode(name='FARM_R999_IN', x=0, y=0, meta={'row_id': 999}))
+        self.store.save(saved, 'farm')
+        self.import_and_save(self.farm_map_text(), overwrite=True)
+        self.assertEqual(self.saved().map_hash8, MAP_EDITED)
+
     def test_a_plain_plan_save_leaves_no_identity(self) -> None:
         self.import_and_save(_plan([_feat(ROW0, 0), _feat(ROW1, 1)]))
         self.assertEqual(self.saved().map_hash8, MAP_EDITED)
@@ -117,7 +125,13 @@ class DockSaveTest(FarmMapSaveCase):
     def docks_text(self, to_node: str = 'F1R0N0') -> str:
         doc = with_docks(json.loads(self.farm_map_text()))
         doc['features'][-1]['properties']['to_node'] = to_node
-        return json.dumps(resign(doc, DOCKS, [replace(route, to_node=to_node) for route in ROUTES]))
+        endpoint = next((f['geometry']['coordinates'][f['properties']['node_names'].index(to_node)]
+                         for f in doc['features'] if to_node in f['properties'].get('node_names', [])), None)
+        points = list(ROUTES[0].points)
+        if endpoint is not None:
+            points[-1] = tuple(reversed(endpoint))
+            doc['features'][-1]['geometry']['coordinates'][-1] = endpoint
+        return json.dumps(resign(doc, DOCKS, [replace(route, to_node=to_node, points=points) for route in ROUTES]))
 
     def edges(self, name: str) -> set[str]:
         return {e.node for e in self.saved().get_node(name).edges}
@@ -180,6 +194,54 @@ class DockSaveTest(FarmMapSaveCase):
         self.assertTrue(holds(TopoDoc(name='farm', nodes=[old]), None, 'FARM', overwrite=True))
         self.assertFalse(holds(TopoDoc(name='farm', nodes=[old]), None, 'FARM', overwrite=False))
 
+    def test_rows_only_overwrite_removes_old_docks_and_routes(self):
+        self.import_and_save(self.docks_text())
+        self.import_and_save(self.farm_map_text(), overwrite=True)
+        self.assertFalse([n for n in self.saved().nodes if n.meta.get('dock_prefix')])
+        self.assertEqual(self.saved().map_hash8, 'c50f60d8')
+        self.assertFalse(any(e.node.startswith('FARM_D_') for n in self.saved().nodes for e in n.edges))
+
+    def test_unrelated_generated_name_collision_is_rejected_before_mutation(self):
+        for overwrite in (False, True):
+            with self.subTest(overwrite=overwrite):
+                existing = TopoNode(name='FARM_D_DOCK', x=9, y=9)
+                doc = TopoDoc(name='farm', nodes=[existing])
+                generated = TopoNode(name='FARM_D_DOCK', x=1, y=1,
+                                     meta={'dock_prefix': 'FARM', 'role': 'dock', 'farm_name': 'dock'})
+                with self.assertRaisesRegex(ValueError, 'collision'):
+                    apply_dock_nodes(doc, DockBuild(nodes={generated.name: generated}), 'FARM', overwrite)
+                self.assertIs(doc.get_node(existing.name), existing)
+                self.assertEqual(list(existing.edges), [])
+
+    def test_existing_generated_dock_can_be_reused(self):
+        node = TopoNode(name='FARM_D_DOCK', x=1, y=1,
+                        meta={'dock_prefix': 'FARM', 'role': 'dock', 'farm_name': 'dock'})
+        doc = TopoDoc(name='farm', nodes=[node])
+        apply_dock_nodes(doc, DockBuild(nodes={node.name: node}), 'FARM', False)
+        self.assertIs(doc.get_node(node.name), node)
+
+    def test_unknown_index_in_existing_row_is_rejected(self):
+        self.import_and_save(self.docks_text('F1R0N999'))
+        self.assertIn('not an exported row endpoint', self.statuses[-1])
+        self.assertFalse(self.domain.get_doc().has_node('FARM_D_DOCK'))
+
+    def test_wrong_endpoint_is_rejected(self):
+        doc = json.loads(self.docks_text())
+        doc['features'][-1]['geometry']['coordinates'][-1][0] += 0.001
+        points = [tuple(reversed(pt)) for pt in doc['features'][-1]['geometry']['coordinates']]
+        self.import_and_save(json.dumps(resign(doc, DOCKS, [replace(ROUTES[0], points=points)])))
+        self.assertIn('endpoint coordinates', self.statuses[-1])
+        self.assertFalse(self.domain.get_doc().has_node('FARM_D_DOCK'))
+
+    def test_second_fragment_endpoint_is_resolved(self):
+        doc = json.loads(self.farm_map_text())
+        fragment = next(f for f in doc['features'] if f['properties'].get('field') == 1
+                        and f['properties'].get('row') == 1 and f['properties'].get('frag') == 1)
+        target = fragment['properties']['node_names'][-1]
+        self.import_and_save(self.docks_text(target))
+        self.assertIn('FARM_D_ROUTE1_1', self.edges('FARM_R3_OUT'))
+        self.assertEqual(self.saved().get_node('FARM_R3_OUT').meta['lf_node'], target)
+
     def test_a_farm_map_without_docks_adds_none(self) -> None:
         self.import_and_save(self.farm_map_text())
         self.assertFalse([n for n in self.saved().nodes if n.meta.get('dock_prefix')])
@@ -231,7 +293,7 @@ class EditTest(FarmMapSaveCase):
         """Robots get the map by file copy: the meta must survive a rename and a clone."""
         doc = self.saved()
         self.assertEqual(doc.renamed('robot_two').map_hash8, 'c50f60d8')
-        self.assertEqual(doc.clone_empty('robot_two').map_hash8, 'c50f60d8')
+        self.assertEqual(doc.clone_empty('robot_two').map_hash8, MAP_EDITED)
 
 
 if __name__ == '__main__':

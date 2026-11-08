@@ -2,8 +2,8 @@
 
 Like topo_row_builder, this works on in-memory ``TopoDoc`` objects and plain values, with no ROS,
 NiceGUI or persistence dependency. A dock becomes a node ``<prefix>_D_<NAME>`` and each point a route
-passes through becomes ``<prefix>_D_<ROUTE>_<k>``. The names never start with ``<prefix>_R``, so saving
-rows with overwrite does not remove them. The nodes are joined to the row end the route names by
+passes through becomes ``<prefix>_D_<ROUTE>_<k>``. An overwrite removes earlier generated docks
+and routes with the same prefix. The nodes are joined to the row end the route names by
 navigation edges in both directions.
 """
 import re
@@ -17,7 +17,6 @@ from devkit_ui.topo_row_builder import RowAnchor
 
 # Meta key on every dock and route node: the prefix of the save that made it.
 DOCK_PREFIX_KEY = 'dock_prefix'
-_ROW_END = re.compile(r'^F(\d+)R(\d+)N(\d+)$')
 _NODE_VERTS = (Vector2(x=-1.0, y=-1.0), Vector2(x=1.0, y=-1.0), Vector2(x=1.0, y=1.0), Vector2(x=-1.0, y=1.0))
 
 
@@ -51,8 +50,8 @@ def build_dock_nodes(docks: tuple | list, routes: tuple | list, anchor: RowAncho
     """Turn docks and routes into nodes and the edges along each route.
 
     A route ends at a row node named ``F<field>R<row>N<n>``. It is found through the ``lf_field``,
-    ``lf_row`` and ``lf_frag`` metadata of ``row_nodes``: N0 is the entry of the row's first fragment and
-    any other index is its exit. The first and last points of a route are the dock and the row end, so only
+    ``lf_row`` and ``lf_frag`` metadata of ``row_nodes`` using the exact exported endpoint identity
+    resolved by the farm map reader. The first and last points of a route are the dock and the row end, so only
     the points between them become nodes. Nothing is mutated or persisted.
 
     Raises:
@@ -68,10 +67,16 @@ def build_dock_nodes(docks: tuple | list, routes: tuple | list, anchor: RowAncho
         ends[dock.name] = name
 
     for route in routes:
-        target = _row_end(route.to_node, row_nodes)
+        target = _row_end(route, row_nodes)
         if target is None or route.from_node not in ends:
             build.skipped.append(route.name)
             continue
+        dock_node = build.nodes[ends[route.from_node]]
+        row_node = row_nodes[target]
+        for supplied, node in ((route.points[0], dock_node), (route.points[-1], row_node)):
+            if tuple(round(v, 7) for v in supplied) != (node.properties.gps_lat, node.properties.gps_lon):
+                raise ValueError(f'route {route.name}: endpoint coordinates do not match named node')
+        row_node.meta['lf_node'] = route.to_node
         chain = [ends[route.from_node]]
         for k, (lat, lon) in enumerate(route.points[1:-1], start=1):
             name = _node_name(settings.prefix, f'{route.name}_{k}')
@@ -93,9 +98,19 @@ def apply_dock_nodes(doc: TopoDoc, build: DockBuild, prefix: str, overwrite: boo
     """Insert the generated dock nodes into ``doc`` in place, without persisting it.
 
     With ``overwrite``, the dock and route nodes an earlier save with this prefix made are removed first.
-    Nodes whose names are taken by other nodes are kept unchanged. Each link adds an edge from the row end to
+    Names taken by unrelated nodes are rejected before mutation. Each link adds an edge from the row end to
     the route, when both are in ``doc``. Call it after the rows are applied.
     """
+    for name, node in build.nodes.items():
+        if doc.has_node(name):
+            existing = doc.get_node(name)
+            if (existing.meta.get(DOCK_PREFIX_KEY) != prefix
+                    or existing.meta.get('role') != node.meta.get('role')
+                    or existing.meta.get('farm_name') != node.meta.get('farm_name')):
+                raise ValueError(f'dock or route node name collision: {name}')
+    for row_end, route_node in build.links:
+        if row_end in build.nodes or route_node not in build.nodes or not doc.has_node(row_end):
+            raise ValueError('dock route link does not refer to the intended nodes')
     if overwrite:
         old = {n.name for n in doc.nodes if n.meta.get(DOCK_PREFIX_KEY) == prefix}
         if old:
@@ -121,17 +136,19 @@ def _node_name(prefix: str, name: str) -> str:
     return f'{prefix}_D_{re.sub(r"[^A-Z0-9_]", "", name.upper())}'
 
 
-def _row_end(to_node: str, row_nodes: dict[NodeID, TopoNode]) -> NodeID | None:
-    """Return the name of the row node ``F<field>R<row>N<n>`` stands for, or None if it is not built."""
-    match = _ROW_END.match(to_node)
-    if not match:
-        return None
-    field_number, row, index = (int(g) for g in match.groups())
-    wanted = 'entry' if index == 0 else 'exit'
+def _row_end(route, row_nodes: dict[NodeID, TopoNode]) -> NodeID | None:
+    """Resolve the exact exported fragment endpoint, without guessing from its index."""
+    if route.target is None:
+        match = re.fullmatch(r'F(\d+)R(\d+)N(\d+)', route.to_node)
+        if match and not any((n.meta.get('lf_field'), n.meta.get('lf_row')) ==
+                             (int(match[1]), int(match[2])) for n in row_nodes.values()):
+            return None
+        raise ValueError(f'route {route.name}: target is not an exported row endpoint')
+    field_number, row, frag, role = route.target
     found = [n for n in row_nodes.values()
-             if n.meta.get('lf_field') == field_number and n.meta.get('lf_row') == row
-             and n.meta.get('row_role') == wanted]
-    return min(found, key=lambda n: n.meta.get('lf_frag', 0)).name if found else None
+             if (n.meta.get('lf_field'), n.meta.get('lf_row'), n.meta.get('lf_frag'),
+                 n.meta.get('row_role')) == (field_number, row, frag, role)]
+    return found[0].name if len(found) == 1 else None
 
 
 def _make_node(name: str, anchor: RowAnchor, east: float, north: float, lat: float, lon: float,

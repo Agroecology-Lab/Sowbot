@@ -25,7 +25,8 @@ import json
 import math
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from decimal import Decimal
 
 from devkit_ui.row_plan_format import (
     MAX_BYTES,
@@ -75,12 +76,14 @@ class FarmRoute:
 
     ``from_node`` names a dock and ``to_node`` a row node (``F<field>R<row>N<n>``). The first point is the
     dock and the last is the row end, so the points between them are the route's own waypoints.
+    target is the exported endpoint's (field, row, fragment, role), resolved by the reader.
     """
 
     name: str
     from_node: str
     to_node: str
     points: list[tuple[float, float]]
+    target: tuple[int, int, int, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -167,7 +170,13 @@ def canonical_features_text(docks: Sequence[FarmDock], routes: Sequence[FarmRout
     def heading(value: float | None) -> str:
         if value is None:
             return 'null'
-        return str(int(value)) if value == int(value) else repr(value)
+        if value == 0:
+            return '0'
+        if 1e-6 <= abs(value) < 1e21:
+            fixed = format(Decimal(repr(value)), 'f')
+            return fixed.rstrip('0').rstrip('.') if '.' in fixed else fixed
+        mantissa, exponent = repr(value).lower().split('e')
+        return f'{mantissa.rstrip("0").rstrip(".")}e{int(exponent):+d}'
 
     def points(pts: Sequence[tuple[float, float]]) -> str:
         return '[' + ','.join(f'[{format_coordinate(lon)},{format_coordinate(lat)}]' for lat, lon in pts) + ']'
@@ -208,6 +217,8 @@ def _points(coords: object, what: str) -> list[tuple[float, float]]:
                 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
                        for v in c[:2])):
             raise FarmMapError(f'{what}: a position is not a pair of finite numbers')
+        if not -180 <= c[0] <= 180 or not -90 <= c[1] <= 90:
+            raise FarmMapError(f'{what}: position is outside latitude/longitude bounds')
         points.append((float(c[1]), float(c[0])))
     return points
 
@@ -300,6 +311,7 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
             raise FarmMapError(f'field {number}: field_numbers does not match location {location_id!r}')
         field_meta[number] = entry
 
+    exported_ends = {}
     rows_by_field: dict[int, list[PlanRow]] = {}
     docks: list[FarmDock] = []
     routes: list[FarmRoute] = []
@@ -340,9 +352,19 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
             raise FarmMapError(f'{what}: row is not a LineString')
         if number != last_field and number in rows_by_field:
             raise FarmMapError(f'rows of field {number} are not together')
+        row_points = _points(geometry.get('coordinates'), what)
+        names = fp.get('node_names', [])
+        if isinstance(names, list) and len(names) == len(row_points) and len(names) >= 2:
+            for name, role in ((names[0], 'entry'), (names[-1], 'exit')):
+                if isinstance(name, str):
+                    if not re.fullmatch(fr'F{number}R{row}N[0-9]+', name):
+                        raise FarmMapError(f'{what}: invalid exported node {name}')
+                    if name in exported_ends:
+                        raise FarmMapError(f'{what}: duplicate exported node {name}')
+                    exported_ends[name] = (number, row, frag, role)
         last_field = number
         rows_by_field.setdefault(number, []).append(
-            PlanRow(row, _points(geometry.get('coordinates'), what), frag))
+            PlanRow(row, row_points, frag))
     if not rows_by_field:
         raise FarmMapError('no rows in farm map')
     if list(rows_by_field) != sorted(rows_by_field):
@@ -373,6 +395,7 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
         if route.from_node not in dock_names:
             raise FarmMapError(f'route {route.name!r}: from_node {route.from_node!r} is not a dock in the map')
 
+    routes = [replace(r, target=exported_ends.get(r.to_node)) for r in routes]
     computed = farm_map_hash(fields, docks, routes)
     if computed != declared:
         raise FarmMapError(f'content_hash does not match the rows and docks (file says {declared[:12]}, '

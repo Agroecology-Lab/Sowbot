@@ -81,7 +81,8 @@ class StagedEdit:
     log lines produced while staging. affected names the nodes the edit removes.
 
     map_hash8 is set only by an edit that leaves the map equal to a farm map (a complete farm
-    map import). It is stamped into the saved map. Any other edit leaves it None, and saving
+    map import). A callable verifies the saved document under the persistence lock before stamping.
+    Any other edit leaves it None, and saving
     it marks the map as edited.
     """
     pending: str
@@ -90,7 +91,7 @@ class StagedEdit:
     warnings: tuple[str, ...] = ()
     infos: tuple[str, ...] = ()
     affected: frozenset[str] = frozenset()
-    map_hash8: str | None = None
+    map_hash8: str | Callable[[TopoDoc], str | None] | None = None
 
 
 @dataclass(frozen=True)
