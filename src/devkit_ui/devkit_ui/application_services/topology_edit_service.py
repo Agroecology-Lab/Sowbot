@@ -18,6 +18,7 @@ from devkit_ui.application_services.topology_application_service import (
 from devkit_ui.constants import NAV_ACTION
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties, Vector2
 from devkit_ui.topo_dock_builder import (
+    DOCK_PREFIX_KEY,
     DockBuild,
     DockBuildSettings,
     apply_dock_nodes,
@@ -156,12 +157,12 @@ class TopologyEditService:
         lf_rows, if given, holds one LiteFarm (field, row, frag) per swath and is written to
         the row nodes' metadata.
         docks and routes, if given, are the farm map's FarmDock and FarmRoute entries. Each dock is
-        saved as a node, joined to the row end its route names (see topo_dock_builder). They never
-        change whether the map counts as the farm map, which depends on the rows alone.
+        saved as a node, joined to the row end its route names (see topo_dock_builder).
         map_hash8, if given, is the hash8 of the farm map the swaths came from. It is stamped
         into the saved map only when the save leaves the map holding exactly that farm map's
-        rows: no swath dropped or skipped, and no other row nodes left in the map. Otherwise
-        the map is marked as edited and the success text says so.
+        rows and docks: no swath dropped or skipped, no route left out, and no other row, dock
+        or route nodes left in the map. Otherwise the map is marked as edited and the success
+        text says so.
         Hardware anchors rows to the GPS fix and odometry position (odom_xy). Simulation
         anchors them to origin_ll at (0, 0), because the sim GPS fix is a datum that is
         not where the field was drawn. A GPS status below zero only logs a warning.
@@ -247,7 +248,8 @@ class TopologyEditService:
         splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
         stamp, differs = None, ''
         if map_hash8 is not None:
-            if self._holds_only_these_rows(doc, build, len(swaths), prefix, overwrite):
+            if (self._holds_only_these_rows(doc, build, len(swaths), prefix, overwrite)
+                    and self._holds_only_these_docks(doc, dock_build, prefix, overwrite)):
                 stamp = map_hash8
             else:
                 differs = ' · map is not the farm map, remote missions are refused'
@@ -377,6 +379,21 @@ class TopologyEditService:
         if any(n.name in build.nodes for n in kept):
             return False
         return not any(n.meta.get('row_id') is not None for n in kept)
+
+    @staticmethod
+    def _holds_only_these_docks(doc: TopoDoc, dock_build: DockBuild | None, prefix: str,
+                                overwrite: bool) -> bool:
+        """Return whether saving dock_build leaves the map's dock and route nodes exactly the built ones.
+
+        False when a route was left out, when a built node name is already taken by a node that stays,
+        or when other dock or route nodes stay in the map. With no dock_build, no such node may stay.
+        """
+        if dock_build is not None and dock_build.skipped:
+            return False
+        kept = [n for n in doc.nodes if not (overwrite and n.meta.get(DOCK_PREFIX_KEY) == prefix)]
+        if dock_build is not None and any(n.name in dock_build.nodes for n in kept):
+            return False
+        return not any(n.meta.get('role') in ('dock', 'route') for n in kept)
 
     def _require_loaded(self) -> TopoDoc:
         """Return the live map, or raise TopologyEditError if none is loaded."""

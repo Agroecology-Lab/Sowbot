@@ -16,7 +16,7 @@ this hash; a mission is only valid for the map whose hash it names.
   docks:      role 'dock' (Point), name, heading_deg (number or null)
   routes:     role 'route' (LineString), name, from_node (a dock), to_node (F<field>R<row>N<n>)
 
-Docks and routes are outside the hash. They are read after the rows are accepted and checked only for form.
+Docks and routes are part of the hash, after the rows (see farm_map_hash). They are also checked for form.
 
 This module only validates and describes. It does not touch the topological map.
 """
@@ -24,6 +24,7 @@ import hashlib
 import json
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from devkit_ui.row_plan_format import (
@@ -34,6 +35,7 @@ from devkit_ui.row_plan_format import (
     PlanRow,
     canonical_rows_text,
     check_rows,
+    format_coordinate,
 )
 
 HASH_PATTERN = re.compile(r'^[0-9a-f]{64}$')
@@ -83,7 +85,7 @@ class FarmRoute:
 
 @dataclass(frozen=True)
 class FarmMap:
-    """A verified farm map. Docks and routes are not covered by the content hash."""
+    """A verified farm map."""
 
     farm_map_id: str
     version: int
@@ -138,11 +140,43 @@ class FarmMap:
         return breaks
 
 
-def farm_map_hash(fields: list[FieldRows]) -> str:
-    """Return the farm map hash LiteFarm computes: SHA-256 of ``[[field,<rows>],...]`` by field number."""
+def farm_map_hash(fields: list[FieldRows], docks: Sequence[FarmDock] = (), routes: Sequence[FarmRoute] = ()) -> str:
+    """Return the farm map hash LiteFarm computes.
+
+    It is the SHA-256 of ``[[field,<rows>],...]`` by field number. A map with docks or routes continues with
+    ``;`` and their canonical text, see ``canonical_features_text``. A map with neither hashes as it did before
+    docks existed.
+    """
     parts = [f'[{f.field_number},{canonical_rows_text(f.rows)}]'
              for f in sorted(fields, key=lambda f: f.field_number)]
-    return hashlib.sha256(f'[{",".join(parts)}]'.encode()).hexdigest()
+    text = f'[{",".join(parts)}]'
+    if docks or routes:
+        text += f';{canonical_features_text(docks, routes)}'
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def canonical_features_text(docks: Sequence[FarmDock], routes: Sequence[FarmRoute]) -> str:
+    """Return the canonical text of docks and routes, as LiteFarm's canonicalFeaturesText writes it.
+
+    ``[["dock",name,heading,from,to,[[lon,lat],...]],...]``: docks first, then routes, each by name. A heading
+    is written as a JavaScript number would be (``1``, not ``1.0``) or ``null``, a name as ``"name"`` or ``null``.
+    """
+    def text(value: str | None) -> str:
+        return 'null' if value is None else f'"{value}"'
+
+    def heading(value: float | None) -> str:
+        if value is None:
+            return 'null'
+        return str(int(value)) if value == int(value) else repr(value)
+
+    def points(pts: Sequence[tuple[float, float]]) -> str:
+        return '[' + ','.join(f'[{format_coordinate(lon)},{format_coordinate(lat)}]' for lat, lon in pts) + ']'
+
+    entries = [f'["dock","{d.name}",{heading(d.heading_deg)},null,null,{points([(d.lat, d.lon)])}]'
+               for d in sorted(docks, key=lambda d: d.name)]
+    entries += [f'["route","{r.name}",null,{text(r.from_node)},{text(r.to_node)},{points(r.points)}]'
+                for r in sorted(routes, key=lambda r: r.name)]
+    return f'[{",".join(entries)}]'
 
 
 def looks_like_farm_map(text_or_doc: str | dict) -> bool:
@@ -332,15 +366,16 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
                                 meta.get('field_name'), origin, meta.get('contour') is True))
     warnings = [f'field {n} is listed but has no rows' for n in sorted(set(field_meta) - set(rows_by_field))]
 
-    computed = farm_map_hash(fields)
-    if computed != declared:
-        raise FarmMapError(f'content_hash does not match the rows (file says {declared[:12]}, '
-                           f'rows give {computed[:12]}): the file was changed or damaged')
     dock_names = [d.name for d in docks]
     if len(set(dock_names)) != len(dock_names) or len({r.name for r in routes}) != len(routes):
         raise FarmMapError('dock or route names are not unique')
     for route in routes:
         if route.from_node not in dock_names:
             raise FarmMapError(f'route {route.name!r}: from_node {route.from_node!r} is not a dock in the map')
+
+    computed = farm_map_hash(fields, docks, routes)
+    if computed != declared:
+        raise FarmMapError(f'content_hash does not match the rows and docks (file says {declared[:12]}, '
+                           f'rows give {computed[:12]}): the file was changed or damaged')
     return FarmMap(map_id, version, declared, status, fields, props.get('farm_map_name'), props.get('season'),
                    props.get('previous_farm_map_id'), warnings, docks, routes)

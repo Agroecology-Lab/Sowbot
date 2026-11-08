@@ -36,7 +36,7 @@ One `LineString` per row fragment, `properties`: `{"role": "row", "row": <int>, 
 
 A farm map may also carry `dock` and `route` features.
 The robot saves them as topological nodes.
-They are outside the hash and checked only for form.
+They are part of the farm map's `content_hash` and are also checked for form.
 
 - Dock: `Point`, `properties`: `{"role": "dock", "name": <string>, "heading_deg": <number or null>}`. Names are unique.
 - Route: `LineString`, `properties`: `{"role": "route", "name": <string>, "from_node": <dock name>, "to_node": "F<field>R<row>N<n>"}`.

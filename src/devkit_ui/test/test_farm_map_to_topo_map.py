@@ -2,6 +2,7 @@
 # pylint: disable=missing-docstring
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +10,8 @@ from devkit_ui.application_services.plan_application_service import PlanApplicat
 from devkit_ui.application_services.topology_edit_service import TopologyEditService
 from devkit_ui.missions.lf_rows import LfRowError, resolve_lf_row
 from devkit_ui.models import MAP_EDITED, TopoDoc, TopoNode
-from test_farm_map_import import with_docks
+from devkit_ui.topo_dock_builder import DockBuild
+from test_farm_map_import import DOCKS, ROUTES, resign, with_docks
 from test_plan_import import ROW0, ROW1, _feat, _plan
 from test_topology_persistence import ServiceCase
 
@@ -115,7 +117,7 @@ class DockSaveTest(FarmMapSaveCase):
     def docks_text(self, to_node: str = 'F1R0N0') -> str:
         doc = with_docks(json.loads(self.farm_map_text()))
         doc['features'][-1]['properties']['to_node'] = to_node
-        return json.dumps(doc)
+        return json.dumps(resign(doc, DOCKS, [replace(route, to_node=to_node) for route in ROUTES]))
 
     def edges(self, name: str) -> set[str]:
         return {e.node for e in self.saved().get_node(name).edges}
@@ -139,9 +141,12 @@ class DockSaveTest(FarmMapSaveCase):
         self.assertIn('FARM_D_ROUTE1_1', self.edges('FARM_R1_OUT'))
         self.assertNotIn('FARM_D_ROUTE1_1', self.edges('FARM_R1_IN'))
 
-    def test_docks_leave_the_farm_map_identity_alone(self) -> None:
-        self.import_and_save(self.docks_text())
-        self.assertEqual(self.saved().map_hash8, 'c50f60d8')
+    def test_a_complete_save_with_docks_is_the_farm_map(self) -> None:
+        """The stamp is the hash8 of the map with its docks, not of its rows."""
+        text = self.docks_text()
+        self.import_and_save(text)
+        self.assertEqual(self.saved().map_hash8, json.loads(text)['properties']['content_hash'][:8])
+        self.assertNotEqual(self.saved().map_hash8, 'c50f60d8')
         self.assertNotIn('remote missions are refused', self.statuses[-1])
 
     def test_importing_again_with_overwrite_does_not_duplicate_docks(self) -> None:
@@ -150,12 +155,30 @@ class DockSaveTest(FarmMapSaveCase):
         names = sorted(n.name for n in self.saved().nodes if n.meta.get('dock_prefix'))
         self.assertEqual(names, ['FARM_D_DOCK', 'FARM_D_DOCK1', 'FARM_D_ROUTE1_1'])
         self.assertEqual(self.edges('FARM_D_ROUTE1_1'), {'FARM_D_DOCK', 'FARM_R1_IN'})
-        self.assertEqual(self.saved().map_hash8, 'c50f60d8')
+        self.assertEqual(self.saved().map_hash8, json.loads(self.docks_text())['properties']['content_hash'][:8])
 
     def test_a_route_to_a_row_that_is_not_there_leaves_the_dock_unlinked(self) -> None:
         self.import_and_save(self.docks_text('F9R9N0'))
         self.assertEqual(self.edges('FARM_D_DOCK'), set())
         self.assertFalse(self.saved().has_node('FARM_D_ROUTE1_1'))
+        self.assertEqual(self.saved().map_hash8, MAP_EDITED)
+        self.assertIn('remote missions are refused', self.statuses[-1])
+
+    def test_a_dock_from_another_save_stops_it_being_the_farm_map(self) -> None:
+        stray = TopoNode(name='OTHER_D_DOCK', x=0.0, y=0.0, meta={'role': 'dock', 'dock_prefix': 'OTHER'})
+        doc = TopoDoc(name='farm', nodes=[stray])
+        built = DockBuild(nodes={'FARM_D_DOCK': TopoNode(name='FARM_D_DOCK', x=1.0, y=1.0)})
+        holds = TopologyEditService._holds_only_these_docks  # pylint: disable=protected-access
+        self.assertFalse(holds(doc, built, 'FARM', overwrite=True))
+        self.assertFalse(holds(doc, None, 'FARM', overwrite=True))
+        self.assertTrue(holds(TopoDoc(name='farm', nodes=[]), built, 'FARM', overwrite=False))
+        self.assertTrue(holds(TopoDoc(name='farm', nodes=[]), None, 'FARM', overwrite=False))
+
+    def test_the_docks_of_an_earlier_save_with_this_prefix_are_replaced(self) -> None:
+        old = TopoNode(name='FARM_D_DOCK', x=0.0, y=0.0, meta={'role': 'dock', 'dock_prefix': 'FARM'})
+        holds = TopologyEditService._holds_only_these_docks  # pylint: disable=protected-access
+        self.assertTrue(holds(TopoDoc(name='farm', nodes=[old]), None, 'FARM', overwrite=True))
+        self.assertFalse(holds(TopoDoc(name='farm', nodes=[old]), None, 'FARM', overwrite=False))
 
     def test_a_farm_map_without_docks_adds_none(self) -> None:
         self.import_and_save(self.farm_map_text())

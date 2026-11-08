@@ -5,11 +5,16 @@ import unittest
 from pathlib import Path
 
 from devkit_ui.farm_map_import import (
+    FarmDock,
     FarmMapError,
+    FarmRoute,
+    FieldRows,
+    canonical_features_text,
     farm_map_hash,
     looks_like_farm_map,
     parse_farm_map,
 )
+from devkit_ui.row_plan_format import PlanRow
 
 FIXTURE = Path(__file__).resolve().parents[3] / 'tests' / 'farm-map.geojson'
 # From LiteFarm tests/utils-tests/farmMapFixture.test.js. If the two sides disagree, a published map would be refused.
@@ -21,19 +26,31 @@ def load() -> dict:
     return json.loads(FIXTURE.read_text(encoding='utf-8'))
 
 
+DOCKS = [FarmDock('dock', 48.0039, 3.6615, 1.0), FarmDock('dock1', 48.0038, 3.6614)]
+ROUTES = [FarmRoute('route1', 'dock', 'F1R0N0', [(48.0039, 3.6615), (48.0040, 3.6617), (48.0041, 3.6619)])]
+# From LiteFarm's computeFarmMapHash for one field, row 0 (48.0, 3.66) to (48.0, 3.661), and DOCKS and ROUTES.
+DOCKS_HASH = '08cad4e963a19ebc8abf3fa58edb96e3d34e72e063653c4cc688aad4f5120194'
+ROWS_ONLY_HASH = '8ff7d39a783d26c225de3ad433d8159cc1b764cd3579a771bb5ac2375c8edae8'
+
+
 def with_docks(doc: dict) -> dict:
-    """Return doc with a dock, a placeholder dock and a route from the dock to the first row end."""
+    """Return doc with DOCKS and ROUTES added and its content_hash recomputed, as LiteFarm publishes it."""
     meta = {'farm_map_id': doc['properties']['farm_map_id']}
-    doc['features'] += [
-        {'type': 'Feature', 'properties': {'role': 'dock', 'name': 'dock', 'heading_deg': 1, **meta},
-         'geometry': {'type': 'Point', 'coordinates': [3.6615, 48.0039]}},
-        {'type': 'Feature', 'properties': {'role': 'dock', 'name': 'dock1', 'heading_deg': None, **meta},
-         'geometry': {'type': 'Point', 'coordinates': [3.6614, 48.0038]}},
-        {'type': 'Feature', 'properties': {'role': 'route', 'name': 'route1', 'from_node': 'dock',
-                                           'to_node': 'F1R0N0', **meta},
-         'geometry': {'type': 'LineString',
-                      'coordinates': [[3.6615, 48.0039], [3.6617, 48.0040], [3.6619, 48.0041]]}},
-    ]
+    for dock in DOCKS:
+        doc['features'].append({'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [dock.lon, dock.lat]},
+                                'properties': {'role': 'dock', 'name': dock.name, 'heading_deg': dock.heading_deg,
+                                               **meta}})
+    for route in ROUTES:
+        coordinates = [[lon, lat] for lat, lon in route.points]
+        doc['features'].append({'type': 'Feature', 'geometry': {'type': 'LineString', 'coordinates': coordinates},
+                                'properties': {'role': 'route', 'name': route.name, 'from_node': route.from_node,
+                                               'to_node': route.to_node, **meta}})
+    return resign(doc, DOCKS, ROUTES)
+
+
+def resign(doc: dict, docks: list[FarmDock], routes: list[FarmRoute]) -> dict:
+    """Set doc's content_hash to the hash of the fixture rows with these docks and routes."""
+    doc['properties']['content_hash'] = farm_map_hash(parse(load()).fields, docks, routes)
     return doc
 
 
@@ -286,9 +303,30 @@ class FarmMapDockTest(unittest.TestCase):
         self.assertEqual((route.name, route.from_node, route.to_node), ('route1', 'dock', 'F1R0N0'))
         self.assertEqual(route.points, [(48.0039, 3.6615), (48.0040, 3.6617), (48.0041, 3.6619)])
 
-    def test_docks_do_not_change_the_hash(self):
-        """The hash covers rows only."""
-        self.assertEqual(parse(with_docks(load())).content_hash, FIXTURE_HASH)
+    def test_docks_and_routes_are_in_the_hash(self):
+        """The hash is LiteFarm's: rows, then ';', then docks and routes."""
+        field = FieldRows(1, [PlanRow(0, [(48.0, 3.66), (48.0, 3.661)])])
+        self.assertEqual(farm_map_hash([field], DOCKS, ROUTES), DOCKS_HASH)
+        self.assertEqual(farm_map_hash([field]), ROWS_ONLY_HASH)
+        self.assertEqual(
+            canonical_features_text(DOCKS, ROUTES),
+            '[["dock","dock",1,null,null,[[3.6615000,48.0039000]]],'
+            '["dock","dock1",null,null,null,[[3.6614000,48.0038000]]],'
+            '["route","route1",null,"dock","F1R0N0",'
+            '[[3.6615000,48.0039000],[3.6617000,48.0040000],[3.6619000,48.0041000]]]]')
+
+    def test_editing_a_dock_breaks_the_hash(self):
+        doc = with_docks(load())
+        doc['features'][-3]['geometry']['coordinates'][0] += 0.0001
+        with self.assertRaisesRegex(FarmMapError, 'content_hash does not match'):
+            parse(doc)
+
+    def test_a_map_with_docks_needs_a_hash_that_covers_them(self):
+        """A hash of the rows alone no longer verifies a map that has docks."""
+        doc = with_docks(load())
+        doc['properties']['content_hash'] = FIXTURE_HASH
+        with self.assertRaisesRegex(FarmMapError, 'content_hash does not match'):
+            parse(doc)
 
     def test_a_map_without_docks_has_none(self):
         farm_map = parse(load())
