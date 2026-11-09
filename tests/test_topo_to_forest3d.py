@@ -236,3 +236,64 @@ def test_strip_model_collisions_crop_category(tmp_path):
     (d / 'model.sdf').write_text(_WEED_SDF.format(n='maize_1'))
     assert t.strip_model_collisions(tmp_path, 'crop') == 1
     assert list(ET.parse(d / 'model.sdf').getroot().iter('collision')) == []
+
+
+def test_strip_collisions_preserves_original_bytes(tmp_path, capsys):
+    model = tmp_path / 'weed' / 'weed1'
+    model.mkdir(parents=True)
+    collision = b'<collision name="a > b"><geometry/></collision>'
+    original = (b'<?xml version="1.0"?>\r\n<!-- keep <collision/> -->\r\n'
+                b'<sdf><model name="caf\xc3\xa9"><link>' + collision
+                + b'<collision name="empty" /> <!-- tail -->'
+                b'<visual><![CDATA[<collision/>]]></visual></link></model></sdf>')
+    sdf = model / 'model.sdf'
+    sdf.write_bytes(original)
+    assert t.strip_model_collisions(tmp_path, 'weed') == 2
+    assert sdf.read_bytes() == original.replace(collision, b'').replace(b'<collision name="empty" />', b'')
+    # A malformed direct model keeps the existing warning/skip behavior.
+    (tmp_path / 'weed' / 'bad').mkdir()
+    bad = tmp_path / 'weed' / 'bad' / 'model.sdf'
+    bad.write_text('<sdf>')
+    assert t.strip_model_collisions(tmp_path, 'weed') == 0
+    assert bad.read_text() == '<sdf>'
+    assert 'cannot parse' in capsys.readouterr().err
+
+
+def test_strip_follows_only_weed_includes(tmp_path):
+    weed = tmp_path / 'weed' / 'weed1'
+    weed.mkdir(parents=True)
+    child = weed / 'parts' / 'included.sdf'
+    child.parent.mkdir()
+    child.write_text(_WEED_SDF.format(n='child'))
+    shared = tmp_path / 'crop' / 'shared'
+    shared.mkdir(parents=True)
+    shared_sdf = shared / 'model.sdf'
+    shared_sdf.write_text(_WEED_SDF.format(n='crop'))
+    original = shared_sdf.read_bytes()
+    (weed / 'model.sdf').write_text(
+        '<sdf><model name="weed"><include><uri>parts/included.sdf</uri></include>'
+        '<include><uri>model://crop/shared</uri></include>'
+        f'<include><uri>{shared.as_uri()}</uri></include></model></sdf>')
+    assert t.strip_model_collisions(tmp_path, 'weed') == 1
+    assert not list(ET.parse(child).getroot().iter('collision'))
+    assert shared_sdf.read_bytes() == original
+
+
+def test_readonly_weeds_are_staged_and_world_redirected(tmp_path):
+    models = tmp_path / 'models'
+    weed = models / 'weed' / 'weed1'
+    weed.mkdir(parents=True)
+    sdf = weed / 'model.sdf'
+    sdf.write_text(_WEED_SDF.format(n='weed'))
+    sdf.chmod(0o444)
+    original = sdf.read_bytes()
+    world = tmp_path / 'scene.world'
+    world.write_text('<sdf><world><include><uri>model://weed/weed1</uri></include>'
+                     '<include><uri>model://ground</uri></include></world></sdf>')
+    staged = t.stage_readonly_weeds(models, tmp_path / 'generated', world)
+    assert staged != models
+    assert t.strip_model_collisions(staged, 'weed') == 1
+    assert sdf.read_bytes() == original
+    uris = [el.text for el in ET.parse(world).iter('uri')]
+    assert uris == [(staged / 'weed' / 'weed1' / 'model.sdf').as_uri(), 'model://ground']
+    assert t.stage_readonly_weeds(staged, tmp_path / 'unused', world) == staged
