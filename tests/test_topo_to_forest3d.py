@@ -197,3 +197,33 @@ def test_extract_rows_projects_unnumbered_waypoints_along_reversed_chord():
     ]}
     (row,) = t.extract_rows(nodes)
     assert row['path'] == [(10, 10), (8, 7), (2, 3), (0, 0)]
+
+
+_WEED_SDF = (
+    '<sdf version="1.8"><model name="{n}"><static>true</static>'
+    '<link name="link"><collision name="c"><geometry><box><size>1 1 1</size>'
+    '</box></geometry></collision><visual name="v"><geometry><box>'
+    '<size>1 1 1</size></box></geometry></visual></link></model></sdf>')
+
+
+def test_strip_model_collisions_keeps_visuals(tmp_path):
+    """Weed models lose their collisions but keep their visuals."""
+    for name in ('weed1', 'weed2'):
+        d = tmp_path / 'weed' / name
+        d.mkdir(parents=True)
+        (d / 'model.sdf').write_text(_WEED_SDF.format(n=name))
+    assert t.strip_model_collisions(tmp_path, 'weed') == 2
+    for name in ('weed1', 'weed2'):
+        root = ET.parse(tmp_path / 'weed' / name / 'model.sdf').getroot()
+        assert list(root.iter('collision')) == []
+        assert len(list(root.iter('visual'))) == 1
+    assert t.strip_model_collisions(tmp_path, 'weed') == 0
+
+
+def test_strip_model_collisions_leaves_other_categories(tmp_path):
+    """Crop models keep their collisions when weeds are stripped."""
+    d = tmp_path / 'crop' / 'plant'
+    d.mkdir(parents=True)
+    (d / 'model.sdf').write_text(_WEED_SDF.format(n='plant'))
+    assert t.strip_model_collisions(tmp_path, 'weed') == 0
+    assert len(list(ET.parse(d / 'model.sdf').getroot().iter('collision'))) == 1

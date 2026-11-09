@@ -1141,6 +1141,43 @@ def patch_model_mesh_scale(models_path, category, model_name, user_factor):
           f"(base × {user_factor:.3f})")
 
 
+def strip_model_collisions(models_path, category):
+    """Remove every <collision> from the models under models_path/category.
+
+    Weeds are visual only: the robot must drive over them, so they must not
+    take part in physics. A weed model with a <collision> (an imported one, or
+    a stock one that gained a collision mesh) is a solid obstacle to the
+    tracks. Rewrites a model.sdf only if it had a collision. Return the number
+    of <collision> elements removed. Missing folders count as zero; an
+    unparsable model.sdf is skipped with a warning.
+    """
+    import xml.etree.ElementTree as _ET
+
+    root_dir = Path(models_path) / category
+    if not root_dir.is_dir():
+        return 0
+    removed = 0
+    for sdf_path in sorted(root_dir.glob("*/model.sdf")):
+        try:
+            tree = _ET.parse(sdf_path)
+        except _ET.ParseError as exc:
+            print(f"WARNING: cannot parse {sdf_path} — collisions left in "
+                  f"place: {exc}", file=sys.stderr)
+            continue
+        found = 0
+        for parent in list(tree.getroot().iter()):
+            for child in list(parent):
+                if child.tag == "collision":
+                    parent.remove(child)
+                    found += 1
+        if found:
+            sdf_path.write_text('<?xml version="1.0" ?>\n'
+                                + _ET.tostring(tree.getroot(), encoding="unicode"))
+            print(f"Removed {found} collision(s) from {sdf_path}")
+            removed += found
+    return removed
+
+
 def write_spawn_pose(x, y, z, output_path):
     """Write the robot spawn pose so sim.launch.py can read it at startup."""
     Path(output_path).write_text(f"{x} {y} {z}\n")
@@ -1427,6 +1464,10 @@ if __name__ == '__main__':
             snap_plants_to_terrain(
                 args.world_out,
                 Path(args.models_path) / 'ground' / 'mesh' / 'terrain.stl')
+
+        # Step 5: Weeds are visual only so the robot drives over them.
+        if args.models_path:
+            strip_model_collisions(args.models_path, 'weed')
 
         # Step 6: replace model://crop/ URIs to point at the user-selected model.
         if args.world_out and args.crop_model:
