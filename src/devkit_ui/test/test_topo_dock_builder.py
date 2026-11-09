@@ -1,5 +1,6 @@
 import math
 import unittest
+from dataclasses import replace
 
 from devkit_ui.constants import YAW_GOAL_TOLERANCE
 from devkit_ui.farm_map_import import FarmDock
@@ -11,9 +12,10 @@ SETTINGS = DockBuildSettings(prefix='FARM', nav_frame='map', map_name='farm',
                              timestamp='01-01-2026_00-00-00', fix_type=2)
 
 
-def dock_node(heading_deg: float | None):
+def dock_node(heading_deg: float | None, map_yaw_deg: float = 0.0):
     """Build one dock with the given compass heading and return its node."""
-    build = build_dock_nodes([FarmDock('DOCK', 51.0, -2.0, heading_deg)], [], ANCHOR, SETTINGS, {})
+    build = build_dock_nodes([FarmDock('DOCK', 51.0, -2.0, heading_deg)], [], ANCHOR,
+                             replace(SETTINGS, map_yaw_deg=map_yaw_deg), {})
     return build.nodes['FARM_D_DOCK']
 
 
@@ -34,6 +36,15 @@ class TestDockOrientation(unittest.TestCase):
         for heading, expected in cases.items():
             with self.subTest(heading=heading):
                 self.assertEqual(orientation(dock_node(heading)), expected)
+
+    def test_a_rotated_map_turns_the_goal_to_keep_the_compass_heading(self) -> None:
+        """Verify with the map x axis north, a north-facing dock faces map +x and an east one faces -y."""
+        half = round(math.sqrt(0.5), 6)
+
+        self.assertEqual(orientation(dock_node(0.0, map_yaw_deg=90.0)),
+                         {'x': 0.0, 'y': 0.0, 'z': 0.0, 'w': 1.0})
+        self.assertEqual(orientation(dock_node(90.0, map_yaw_deg=90.0)),
+                         {'x': 0.0, 'y': 0.0, 'z': -half, 'w': half})
 
     def test_a_dock_with_a_heading_uses_the_shared_yaw_tolerance(self) -> None:
         self.assertEqual(dock_node(0.0).properties.yaw_goal_tolerance, YAW_GOAL_TOLERANCE)

@@ -40,6 +40,8 @@ class DockBuildSettings:
     map_name: str
     timestamp: str
     fix_type: int
+    # Direction of the map x axis in degrees counter-clockwise from east, as MAP_YAW_DEG.
+    map_yaw_deg: float = 0.0
 
 
 @dataclass
@@ -67,8 +69,9 @@ def build_dock_nodes(docks: tuple | list, routes: tuple | list, anchor: RowAncho
     skipped. Matched row nodes receive the exported endpoint name in their ``lf_node`` metadata;
     nothing is persisted.
 
-    A dock with a ``heading_deg`` faces it, read as a compass bearing: degrees clockwise from north, so
-    90 faces east, map +x. A dock without one, and every route point, accepts any final yaw, so the
+    A dock with a ``heading_deg`` faces it, read as a compass bearing: degrees clockwise from north. With
+    ``settings.map_yaw_deg`` 0, 90 faces east, map +x; the goal is turned by that yaw so the dock faces the
+    same compass bearing in a rotated map. A dock without one, and every route point, accepts any final yaw, so the
     goal checker does not ask for a turn the map never specified.
 
     Raises:
@@ -82,7 +85,7 @@ def build_dock_nodes(docks: tuple | list, routes: tuple | list, anchor: RowAncho
         name = _node_name(settings.prefix, dock.name)
         east, north = f2c_latlon_to_xy(dock.lat, dock.lon, anchor.lat, anchor.lon)
         extra = {'role': 'dock', 'farm_name': dock.name, 'heading_deg': dock.heading_deg}
-        yaw = None if dock.heading_deg is None else _compass_to_yaw(dock.heading_deg)
+        yaw = None if dock.heading_deg is None else _compass_to_yaw(dock.heading_deg, settings.map_yaw_deg)
         _add(build, _make_node(name, anchor, east, north, dock.lat, dock.lon, settings, extra, yaw))
         ends[dock.name] = name
 
@@ -174,12 +177,14 @@ def _row_end(route, row_nodes: dict[NodeID, TopoNode]) -> NodeID | None:
     return found[0].name if len(found) == 1 else None
 
 
-def _compass_to_yaw(heading_deg: float) -> float:
-    """Return the map yaw in radians, within [-pi, pi], of a compass heading in degrees.
+def _compass_to_yaw(heading_deg: float, map_yaw_deg: float = 0.0) -> float:
+    """Return the map-frame yaw in radians, within [-pi, pi], of a compass heading in degrees.
 
-    Map +x is east and +y is north, so north (0 degrees) is a yaw of pi / 2.
+    With the map x axis east (``map_yaw_deg`` 0) and +y north, north (0 degrees) is a yaw of pi / 2.
+    A map whose x axis points ``map_yaw_deg`` counter-clockwise from east turns every yaw by that
+    angle the other way.
     """
-    yaw = math.pi / 2 - math.radians(heading_deg)
+    yaw = math.pi / 2 - math.radians(heading_deg) - math.radians(map_yaw_deg)
     return math.atan2(math.sin(yaw), math.cos(yaw))
 
 

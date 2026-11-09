@@ -11,6 +11,7 @@ from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_row_builder import (
     RowAnchor,
     RowBuildSettings,
+    _bearings,
     add_missing_edges,
     apply_row_nodes,
     build_row_nodes,
@@ -235,6 +236,20 @@ class TestRowOrientation(unittest.TestCase):
         self.assertAlmostEqual(yaw_of(build.nodes[chain[-1]]), yaw_of(build.nodes[chain[-2]]), places=4)
         self.assertAlmostEqual(yaw_of(build.nodes[chain[0]]), 0.0, places=4)
         self.assertAlmostEqual(yaw_of(build.nodes[chain[-1]]), math.pi / 2, places=4)
+
+    def test_a_node_on_top_of_the_exit_keeps_the_row_heading(self) -> None:
+        """Verify coincident nodes take a neighbouring segment's heading, not yaw 0 (+x)."""
+        north = math.pi / 2
+
+        self.assertEqual(_bearings([(0.0, 0.0), (0.0, 5.0), (0.0, 5.0)]), [north, north, north])
+
+    def test_a_node_on_top_of_the_entry_takes_the_next_heading(self) -> None:
+        north = math.pi / 2
+
+        self.assertEqual(_bearings([(0.0, 0.0), (0.0, 0.0), (0.0, 5.0)]), [north, north, north])
+
+    def test_a_path_of_coincident_points_has_yaw_zero(self) -> None:
+        self.assertEqual(_bearings([(1.0, 2.0), (1.0, 2.0)]), [0.0, 0.0])
 
     def test_orientation_survives_a_yaml_round_trip(self) -> None:
         """Verify a saved and reloaded map keeps the headings instead of resetting them."""

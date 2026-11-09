@@ -8,6 +8,7 @@ lines and starts the background write. No ROS or NiceGUI imports.
 from __future__ import annotations
 
 import math
+import os
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -42,6 +43,22 @@ _NO_NODE = ('—', 'none', 'None', '', None)
 def clean_name(raw: str | None) -> str:
     """Return raw stripped, uppercased, with spaces as underscores and other junk removed."""
     return re.sub(r'[^A-Z0-9_]', '', (raw or '').strip().upper().replace(' ', '_'))
+
+
+def _map_yaw_deg() -> float:
+    """Return MAP_YAW_DEG, the direction of the map x axis in degrees counter-clockwise from east (default 0).
+
+    Raises:
+        ValueError: The variable is set to something that is not a finite number.
+    """
+    raw = os.getenv('MAP_YAW_DEG', '').strip()
+    try:
+        value = float(raw or 0.0)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value):
+        raise ValueError(f'MAP_YAW_DEG must be a number, got {raw!r}')
+    return value
 
 
 def _timestamp() -> str:
@@ -371,7 +388,7 @@ class TopologyEditService:
         try:
             dock_build = build_dock_nodes(docks, routes, anchor, DockBuildSettings(
                 prefix=prefix, nav_frame=nav_frame, map_name=doc.name or 'mixed_test_map',
-                timestamp=_timestamp(), fix_type=int(status)), build.nodes)
+                timestamp=_timestamp(), fix_type=int(status), map_yaw_deg=_map_yaw_deg()), build.nodes)
         except ValueError as exc:
             raise TopologyEditError(f'ERROR: {exc}', tuple(warnings)) from exc
         if dock_build.skipped:

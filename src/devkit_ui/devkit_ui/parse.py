@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import UTC, datetime
 
 import yaml
@@ -39,7 +40,7 @@ def _topo_from_dict(doc: dict) -> TopoDoc:
             pose=TopoPose(
                 x=float(pos['x']),
                 y=float(pos['y']),
-                orientation=_orientation(n['pose'].get('orientation') or {}),
+                orientation=_orientation(n['pose'].get('orientation') or {}, name),
             ),
             edges=edges,
             meta=meta,
@@ -59,10 +60,20 @@ def _topo_from_dict(doc: dict) -> TopoDoc:
     )
 
 
-def _orientation(raw: dict) -> Vector4:
-    """Return the quaternion of a pose mapping, with missing components as the identity rotation."""
-    return Vector4(x=float(raw.get('x', 0.0)), y=float(raw.get('y', 0.0)),
-                   z=float(raw.get('z', 0.0)), w=float(raw.get('w', 1.0)))
+def _orientation(raw: dict, node_name: str) -> Vector4:
+    """Return the quaternion of a pose mapping, with missing components as the identity rotation.
+
+    An absent orientation is the identity. A given one must be finite and not the zero quaternion,
+    which a partial mapping such as ``{w: 0}`` produces.
+
+    Raises:
+        ValueError: A component is not a number, or the quaternion is not finite and nonzero.
+    """
+    quaternion = Vector4(x=float(raw.get('x', 0.0)), y=float(raw.get('y', 0.0)),
+                         z=float(raw.get('z', 0.0)), w=float(raw.get('w', 1.0)))
+    if raw and not (all(map(math.isfinite, quaternion)) and math.hypot(*quaternion) > 0.0):
+        raise ValueError(f'node {node_name}: orientation {dict(raw)} is not a valid quaternion')
+    return quaternion
 
 
 def parse_topo_yaml(filename: str) -> TopoDoc:

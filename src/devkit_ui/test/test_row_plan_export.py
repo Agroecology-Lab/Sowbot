@@ -10,7 +10,8 @@ from devkit_ui.parse import parse_topo_yaml
 from devkit_ui.row_plan_export import ROW_ROLES, export_row_plan
 from devkit_ui.row_plan_format import PlanRow, RowPlanError, map_hash
 
-MAIZE_MAP = Path(__file__).resolve().parents[3] / 'maps' / 'maize_map'
+# A frozen four-row copy of the map, so the tests do not change when maps/maize_map is regenerated.
+MAIZE_MAP = Path(__file__).resolve().parent / 'data' / 'maize_map_four_rows'
 LAT0, LON0, EARTH_RADIUS_M = 51.5, -2.4, 6_378_137.0
 
 

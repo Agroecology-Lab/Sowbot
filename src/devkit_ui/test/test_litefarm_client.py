@@ -14,7 +14,8 @@ from unittest.mock import patch
 from devkit_ui.litefarm_client import LiteFarmError, import_row_plan, login
 from devkit_ui.row_plan_cli import PASSWORD_ENV, main
 
-MAIZE_MAP = str(Path(__file__).resolve().parents[3] / 'maps' / 'maize_map')
+# A frozen four-row copy of the map, so the tests do not change when maps/maize_map is regenerated.
+MAIZE_MAP = str(Path(__file__).resolve().parent / 'data' / 'maize_map_four_rows')
 GEOJSON = {'type': 'FeatureCollection', 'properties': {'version': 1}, 'features': []}
 PLAN = {'row_plan': {'row_plan_id': 'plan-1'}, 'row_count': 4, 'warnings': ['careful']}
 LOGIN_OK = (200, {'id_token': 'tok', 'user': {'user_id': 'u1'}})

@@ -249,10 +249,24 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
 def _bearings(points: list[tuple[float, float]]) -> list[float]:
     """Return the yaw in radians of each point on a path of two or more points.
 
-    A point faces the next one; the last point keeps the heading of the final segment. Coincident
-    points give yaw 0.
+    A point faces the next one; the last point keeps the heading of the final segment. A segment
+    between coincident points has no heading of its own and takes that of the next nonzero segment,
+    or of the previous one when none follows. A path of coincident points gives yaw 0.
     """
-    segments = [math.atan2(b[1] - a[1], b[0] - a[0]) for a, b in pairwise(points)]
+    segments: list[float | None] = [None if a == b else math.atan2(b[1] - a[1], b[0] - a[0])
+                                    for a, b in pairwise(points)]
+    heading = None
+    for i in reversed(range(len(segments))):
+        if segments[i] is None:
+            segments[i] = heading
+        else:
+            heading = segments[i]
+    heading = 0.0
+    for i, segment in enumerate(segments):
+        if segment is None:
+            segments[i] = heading
+        else:
+            heading = segment
     return [*segments, segments[-1]]
 
 
