@@ -5,12 +5,16 @@ import unittest
 from pathlib import Path
 
 from devkit_ui.farm_map_import import (
+    FarmDock,
     FarmMapError,
+    FarmRoute,
+    FieldRows,
+    canonical_features_text,
     farm_map_hash,
     looks_like_farm_map,
     parse_farm_map,
-    robot_row_id,
 )
+from devkit_ui.row_plan_format import PlanRow
 
 FIXTURE = Path(__file__).resolve().parents[3] / 'tests' / 'farm-map.geojson'
 # From LiteFarm tests/utils-tests/farmMapFixture.test.js. If the two sides disagree, a published map would be refused.
@@ -20,6 +24,34 @@ FIXTURE_HASH = 'c50f60d85849c514ef0cab4dc65b2417cd03ccb0acf624d2387c35cc77212eb8
 def load() -> dict:
     """Return the fixture as a fresh dict."""
     return json.loads(FIXTURE.read_text(encoding='utf-8'))
+
+
+DOCKS = [FarmDock('dock', 48.0039, 3.6615, 1.0), FarmDock('dock1', 48.0038, 3.6614)]
+ROUTES = [FarmRoute('route1', 'dock', 'F1R0N0', [(48.0039, 3.6615), (48.0040, 3.6617), (48.0041, 3.6619)])]
+# From LiteFarm's computeFarmMapHash for one field, row 0 (48.0, 3.66) to (48.0, 3.661), and DOCKS and ROUTES.
+DOCKS_HASH = '08cad4e963a19ebc8abf3fa58edb96e3d34e72e063653c4cc688aad4f5120194'
+ROWS_ONLY_HASH = '8ff7d39a783d26c225de3ad433d8159cc1b764cd3579a771bb5ac2375c8edae8'
+
+
+def with_docks(doc: dict) -> dict:
+    """Return doc with DOCKS and ROUTES added and its content_hash recomputed, as LiteFarm publishes it."""
+    meta = {'farm_map_id': doc['properties']['farm_map_id']}
+    for dock in DOCKS:
+        doc['features'].append({'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [dock.lon, dock.lat]},
+                                'properties': {'role': 'dock', 'name': dock.name, 'heading_deg': dock.heading_deg,
+                                               **meta}})
+    for route in ROUTES:
+        coordinates = [[lon, lat] for lat, lon in route.points]
+        doc['features'].append({'type': 'Feature', 'geometry': {'type': 'LineString', 'coordinates': coordinates},
+                                'properties': {'role': 'route', 'name': route.name, 'from_node': route.from_node,
+                                               'to_node': route.to_node, **meta}})
+    return resign(doc, DOCKS, ROUTES)
+
+
+def resign(doc: dict, docks: list[FarmDock], routes: list[FarmRoute]) -> dict:
+    """Set doc's content_hash to the hash of the fixture rows with these docks and routes."""
+    doc['properties']['content_hash'] = farm_map_hash(parse(load()).fields, docks, routes)
+    return doc
 
 
 def parse(doc: dict, **kwargs):
@@ -47,13 +79,11 @@ class FarmMapImportTest(unittest.TestCase):
         self.assertEqual([f.name for f in farm_map.fields], ['North field', 'South field'])
         self.assertEqual(farm_map.row_count, 6)
 
-    def test_rows_are_numbered_by_field_and_row(self):
-        """Robot row ids come from the field and row number, so the station can work them out."""
+    def test_fragments_keep_their_row_and_frag_numbers(self):
+        """A split row stays two fragments of one row, so a (field, row) lookup can find both."""
         farm_map = parse(load())
-        self.assertEqual(farm_map.row_ids(), [10000, 10001, 10001, 10002, 20000, 20001])
-        self.assertEqual(robot_row_id(2, 17), 20017)
-        with self.assertRaises(FarmMapError):
-            robot_row_id(1, 10000)
+        self.assertEqual([(f.field_number, r.row, r.frag) for f in farm_map.fields for r in f.rows],
+                         [(1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 2, 0), (2, 0, 0), (2, 1, 0)])
 
     def test_swaths_are_lat_lon_in_mission_order(self):
         """GeoJSON [lon, lat] becomes (lat, lon), and the file order is kept."""
@@ -259,6 +289,90 @@ class FarmMapImportTest(unittest.TestCase):
         """Parsing twice gives the same map."""
         text = json.dumps(copy.deepcopy(load()))
         self.assertEqual(parse_farm_map(text).content_hash, parse_farm_map(text).content_hash)
+
+
+class FarmMapDockTest(unittest.TestCase):
+    """Canonical docks and routes are included in the verified farm map hash."""
+
+    def test_fractional_heading_uses_javascript_number_format(self):
+        for value, expected in ((0.000001, '0.000001'), (1e-7, '1e-7'),
+                                (-1e-7, '-1e-7'), (1.5, '1.5'), (1e20, '100000000000000000000'),
+                                (1e21, '1e+21'), (-0.0, '0')):
+            with self.subTest(value=value):
+                self.assertIn(f',"dock",{expected},',
+                              canonical_features_text([FarmDock('dock', 48, 3, value)], []))
+
+    def test_out_of_bounds_docks_and_route_waypoints_are_refused(self):
+        for index, point_index in ((-3, None), (-1, 1)):
+            for point in ([181, 48], [-181, 48], [3, 91], [3, -91]):
+                doc = with_docks(load())
+                geometry = doc['features'][index]['geometry']
+                if point_index is None:
+                    geometry['coordinates'] = point
+                else:
+                    geometry['coordinates'][point_index] = point
+                with self.assertRaisesRegex(FarmMapError, 'bounds'):
+                    parse(doc)
+
+    def test_docks_and_routes_are_read(self):
+        """Points become (lat, lon), and a null heading stays None."""
+        farm_map = parse(with_docks(load()))
+        self.assertEqual([(d.name, d.lat, d.lon, d.heading_deg) for d in farm_map.docks],
+                         [('dock', 48.0039, 3.6615, 1.0), ('dock1', 48.0038, 3.6614, None)])
+        route = farm_map.routes[0]
+        self.assertEqual((route.name, route.from_node, route.to_node), ('route1', 'dock', 'F1R0N0'))
+        self.assertEqual(route.points, [(48.0039, 3.6615), (48.0040, 3.6617), (48.0041, 3.6619)])
+
+    def test_docks_and_routes_are_in_the_hash(self):
+        """The hash is LiteFarm's: rows, then ';', then docks and routes."""
+        field = FieldRows(1, [PlanRow(0, [(48.0, 3.66), (48.0, 3.661)])])
+        self.assertEqual(farm_map_hash([field], DOCKS, ROUTES), DOCKS_HASH)
+        self.assertEqual(farm_map_hash([field]), ROWS_ONLY_HASH)
+        self.assertEqual(
+            canonical_features_text(DOCKS, ROUTES),
+            '[["dock","dock",1,null,null,[[3.6615000,48.0039000]]],'
+            '["dock","dock1",null,null,null,[[3.6614000,48.0038000]]],'
+            '["route","route1",null,"dock","F1R0N0",'
+            '[[3.6615000,48.0039000],[3.6617000,48.0040000],[3.6619000,48.0041000]]]]')
+
+    def test_editing_a_dock_breaks_the_hash(self):
+        doc = with_docks(load())
+        doc['features'][-3]['geometry']['coordinates'][0] += 0.0001
+        with self.assertRaisesRegex(FarmMapError, 'content_hash does not match'):
+            parse(doc)
+
+    def test_a_map_with_docks_needs_a_hash_that_covers_them(self):
+        """A hash of the rows alone no longer verifies a map that has docks."""
+        doc = with_docks(load())
+        doc['properties']['content_hash'] = FIXTURE_HASH
+        with self.assertRaisesRegex(FarmMapError, 'content_hash does not match'):
+            parse(doc)
+
+    def test_a_map_without_docks_has_none(self):
+        farm_map = parse(load())
+        self.assertEqual((farm_map.docks, farm_map.routes), ([], []))
+
+    def test_route_from_an_unknown_dock_is_refused(self):
+        doc = with_docks(load())
+        doc['features'][-1]['properties']['from_node'] = 'nowhere'
+        with self.assertRaisesRegex(FarmMapError, 'not a dock in the map'):
+            parse(doc)
+
+    def test_dock_must_be_a_point_with_a_numeric_heading(self):
+        doc = with_docks(load())
+        doc['features'][-3]['properties']['heading_deg'] = 'north'
+        with self.assertRaisesRegex(FarmMapError, 'heading_deg'):
+            parse(doc)
+        doc = with_docks(load())
+        doc['features'][-3]['geometry'] = {'type': 'LineString', 'coordinates': [[3.6, 48.0], [3.7, 48.1]]}
+        with self.assertRaisesRegex(FarmMapError, 'not a Point'):
+            parse(doc)
+
+    def test_duplicate_dock_names_are_refused(self):
+        doc = with_docks(load())
+        doc['features'][-2]['properties']['name'] = 'dock'
+        with self.assertRaisesRegex(FarmMapError, 'not unique'):
+            parse(doc)
 
 
 if __name__ == '__main__':

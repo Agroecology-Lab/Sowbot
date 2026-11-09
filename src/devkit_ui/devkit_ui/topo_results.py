@@ -79,6 +79,11 @@ class StagedEdit:
     pending is the status to show while writing and success the status once saved.
     modify applies the same edit to the saved copy of the map. warnings and infos are
     log lines produced while staging. affected names the nodes the edit removes.
+
+    map_hash8 is set only by an edit that leaves the map equal to a farm map (a complete farm
+    map import). A callable verifies the saved document under the persistence lock before stamping.
+    Any other edit leaves it None, and saving
+    it marks the map as edited.
     """
     pending: str
     success: str
@@ -86,6 +91,7 @@ class StagedEdit:
     warnings: tuple[str, ...] = ()
     infos: tuple[str, ...] = ()
     affected: frozenset[str] = frozenset()
+    map_hash8: str | Callable[[TopoDoc], str | None] | None = None
 
 
 @dataclass(frozen=True)

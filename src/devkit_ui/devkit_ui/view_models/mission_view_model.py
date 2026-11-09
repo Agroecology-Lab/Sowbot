@@ -124,6 +124,13 @@ class MissionViewModel:
         """
         self._app_service.start(queue, on_status, self._on_nav_update)
 
+    def run_saved(self, mission_id: str, on_status: StatusCallback) -> None:
+        """Run a saved mission; progress arrives as (level, text).
+
+        See MissionApplicationService.run_saved for the error behaviour.
+        """
+        self._app_service.run_saved(mission_id, on_status, self._on_nav_update)
+
     def cancel(self) -> None:
         """Cancel the running mission and its active navigation goal."""
         self._app_service.cancel()

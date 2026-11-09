@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from devkit_f2c_planner.f2c_planner import run_f2c
 from devkit_ui import plan_import
+from devkit_ui.farm_map_import import FarmMapError, looks_like_farm_map, parse_farm_map
 from devkit_ui.plan_types import (
     MIN_CORNERS,
     ImportOutcome,
@@ -108,13 +109,18 @@ class PlanApplicationService:
         return PlanOutcome(planned=planned, mode=mode)
 
     def import_plan(self, text: str) -> ImportOutcome:
-        """Read a web-planner plan into planned rows the caller can save.
+        """Read a web-planner plan or a LiteFarm farm map into planned rows the caller can save.
 
         Does not touch the topology map. Hardware requires a valid fix with finite GPS
         coordinates and at least one absolute value above 1e-9 degrees, and rejects a plan
         whose row-endpoint center is more than 2,000 meters from the robot.
         Simulation skips these GPS checks.
-        PlanError becomes a failed outcome with its message; other parser errors propagate.
+        A file that names a farm_map_id must be a published farm map whose content hash
+        matches its rows, docks and routes. Its planned rows carry the hash8; saving stamps it
+        only if the resulting map qualifies as that farm map. The two parsers must agree on
+        the row identities and geometry or the import returns an error.
+        PlanError and FarmMapError become a failed outcome with their message; other parser
+        errors propagate.
         """
         robot_ll = None
         gps = self._telemetry.latest_gps
@@ -124,13 +130,26 @@ class PlanApplicationService:
                 robot_ll = (lat, lon)
         if robot_ll is None and not self._is_sim:
             return ImportOutcome(error='no GPS fix; cannot check the plan is near the robot')
+        farm_map = None
         try:
+            if looks_like_farm_map(text):
+                farm_map = parse_farm_map(text)
             plan = plan_import.parse_plan(text, robot_ll=None if self._is_sim else robot_ll)
-        except plan_import.PlanError as exc:
+        except (plan_import.PlanError, FarmMapError) as exc:
             return ImportOutcome(error=str(exc))
+        if farm_map is None:
+            return ImportOutcome(planned=PlannedRows(
+                plan.swaths, plan.origin_ll, bool(plan.params.get('contour')),
+                frozenset(plan.break_after), tuple(plan.lf_rows)))
+        # The farm map parser verified the hash over these rows. The plan parser supplies the
+        # swaths, so the two must agree on which rows there are and in what order.
+        verified = tuple((f.field_number, r.row, r.frag) for f in farm_map.fields for r in f.rows)
+        if plan.lf_rows != verified or plan.swaths != farm_map.swaths():
+            return ImportOutcome(error='farm map rows differ between the two readers; not importing')
         return ImportOutcome(planned=PlannedRows(
-            plan.swaths, plan.origin_ll, bool(plan.params.get('contour')),
-            frozenset(plan.break_after)))
+            plan.swaths, farm_map.origin, farm_map.contour,
+            frozenset(farm_map.break_after()), verified, farm_map.hash8,
+            tuple(farm_map.docks), tuple(farm_map.routes)))
 
     def save_rows(self, planned: PlannedRows | None, prefix: str, row_id_start: int,
                   overwrite: bool, *, row_action: str, current_node: str | None,
@@ -165,6 +184,8 @@ class PlanApplicationService:
                 prefix, row_id_start, overwrite,
                 swaths=planned.swaths, origin_ll=planned.origin_ll,
                 contour_used=planned.contour_used, break_after=planned.break_after,
+                lf_rows=planned.lf_rows, map_hash8=planned.map_hash8,
+                docks=planned.docks, routes=planned.routes,
                 is_sim=self._is_sim,
                 odom_xy=(odom.pose.pose.position.x, odom.pose.pose.position.y) if odom else None,
                 gps=self._telemetry.latest_gps, row_action=row_action,
@@ -211,7 +232,7 @@ class PlanApplicationService:
     def _write(self, edit: StagedEdit, on_status: Callable[[str], None]) -> None:
         """Persist the edit and report how it ended through on_status."""
         try:
-            result = self._topology.persist_and_reload(edit.modify)
+            result = self._topology.persist_and_reload(edit.modify, map_hash8=edit.map_hash8)
             on_status(result.describe(edit.success))
             _LOG.info('plan write: %s', edit.success)
         except Exception as exc:

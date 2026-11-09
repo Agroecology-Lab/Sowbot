@@ -149,12 +149,18 @@ class TopologyApplicationService:
     # ── persistence ──────────────────────────────────────────────────────────
     # These block on file and service I/O: call them from a worker thread.
 
-    def persist_and_reload(self, modify: Callable[[TopoDoc], None]) -> PersistResult:
+    def persist_and_reload(self, modify: Callable[[TopoDoc], None], *,
+                           map_hash8: str | Callable[[TopoDoc], str | None] | None = None) -> PersistResult:
         """Apply modify to the saved map, save it, and make it live.
 
         Edits the file on disk when there is one, otherwise a copy of the live map seeded
         with default actions if it has none. Raises on read, modify or write errors, and
         leaves the live document untouched in that case.
+
+        Every edit marks a map that came from a farm map as edited, so that robots holding
+        the same farm map are known to hold the same map. Pass map_hash8 only for an edit
+        that makes the map equal to the farm map with that hash: it is stamped instead.
+        A callable computes eligibility from the saved document under the persistence lock.
 
         Call from a worker thread. Raises ValueError if no map is loaded. The result
         reports whether switching succeeded or publishing was used as a fallback.
@@ -171,7 +177,12 @@ class TopologyApplicationService:
                 if not file_doc.actions:
                     file_doc.seed_actions(default_actions(), default_definitions())
 
+            stamp = map_hash8(file_doc) if callable(map_hash8) else map_hash8
             modify(file_doc)
+            if stamp is not None:
+                file_doc.stamp_map_hash8(stamp)
+            else:
+                file_doc.mark_map_edited()
 
             # Backfill per-node meta the tmap schema requires (hand-written nodes, F2C rows).
             # Must run after modify(), or newly added nodes are never backfilled.
@@ -211,6 +222,7 @@ class TopologyApplicationService:
             saved = copy.deepcopy(node)
             saved.remove_edges({edge.node for edge in saved.edges if edge.node not in existing})
             file_doc.insert_node(saved)
+            file_doc.mark_map_edited()
             self._store.save(file_doc, name)
 
         return self._go_live(name, file_doc, on_saved)
@@ -229,6 +241,7 @@ class TopologyApplicationService:
             doc = self._store.load(live.name)
             if doc.has_node(node_name):
                 doc.get_node(node_name).patch_role(role)
+                doc.mark_map_edited()
             self._store.save(doc, live.name)
 
     # ── background persistence ───────────────────────────────────────────────
@@ -237,7 +250,8 @@ class TopologyApplicationService:
     # called from that thread. Worker exceptions are logged and never propagate.
 
     def persist_and_reload_async(self, modify: Callable[[TopoDoc], None], success_msg: str,
-                                 report: Callable[[str], None]) -> None:
+                                 report: Callable[[str], None], *,
+                                 map_hash8: str | None = None) -> None:
         """Run persist_and_reload in the background and report success_msg or the error.
 
         Requires a loaded map; without one the worker reports 'ERROR: map not loaded'.
@@ -245,7 +259,7 @@ class TopologyApplicationService:
         """
         def work() -> None:
             try:
-                report(self.persist_and_reload(modify).describe(success_msg))
+                report(self.persist_and_reload(modify, map_hash8=map_hash8).describe(success_msg))
                 _LOG.info('persist_and_reload: %s', success_msg)
             except Exception as e:  # pylint: disable=broad-except
                 report(f'ERROR: {e}')

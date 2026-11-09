@@ -314,6 +314,26 @@ class TestNavigationApplicationService(unittest.TestCase):
         domain.send_goal('other', Mock())
         self.assertFalse(app.navigate_and_wait('A', 5.0, lambda: False))
 
+    def test_the_result_says_why_a_goal_did_not_arrive(self):
+        """Verify arrival, failure, rejection, unavailable, abort and timeout map to reasons."""
+        app, _ = self.service(ActionClient(handle=GoalHandle(success=True)))
+        self.assertEqual(app.navigate_and_wait_result('A', 5.0, lambda: False), 'arrived')
+
+        app, _ = self.service(ActionClient(handle=GoalHandle(success=False)))
+        self.assertEqual(app.navigate_and_wait_result('A', 5.0, lambda: False), 'nav')
+
+        app, _ = self.service(ActionClient(handle=GoalHandle(accepted=False)))
+        self.assertEqual(app.navigate_and_wait_result('A', 5.0, lambda: False), 'nav')
+
+        app, _ = self.service(ActionClient(ready=False))
+        self.assertEqual(app.navigate_and_wait_result('A', 5.0, lambda: False), 'nav')
+
+        app, _ = self.service(ActionClient(handle=GoalHandle(finishes=False)))
+        self.assertEqual(app.navigate_and_wait_result('A', 5.0, lambda: True), 'cancel')
+
+        app, _ = self.service(ActionClient(handle=GoalHandle(finishes=False)))
+        self.assertEqual(app.navigate_and_wait_result('A', 0.03, lambda: False), 'timeout')
+
     def test_wait_forwards_updates(self):
         """Verify blocking navigation forwards initial and terminal progress updates."""
         app, _ = self.service(ActionClient())

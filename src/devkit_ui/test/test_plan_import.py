@@ -40,6 +40,11 @@ class ParsePlanTest(unittest.TestCase):
         plan = parse_plan(_plan([_feat(ROW0, 0, 0), _feat(ROW0, 0, 1), _feat(ROW1, 1)]))
         self.assertEqual(plan.break_after, {0})
 
+    def test_single_field_files_have_no_litefarm_identity(self):
+        """Verify a file without multi_field has no field number, so lf_rows is empty."""
+        plan = parse_plan(_plan([_feat(ROW0, 0), _feat(ROW1, 1)]))
+        self.assertEqual(plan.lf_rows, ())
+
     def test_rejects_bad_input(self):
         """Verify malformed plans, invalid coordinates, and invalid row IDs raise PlanError."""
         bad = [
@@ -53,6 +58,9 @@ class ParsePlanTest(unittest.TestCase):
             _plan([_feat([[-2.6, float('nan')], [-2.5, 51.0]], 0)]),
             _plan([_feat(ROW0, -1)]),
             _plan([_feat(ROW0, True)]),
+            _plan([_feat(ROW0, 0, frag=-1)]),
+            _plan([_feat(ROW0, 0, frag=True)]),
+            _plan([_feat(ROW0, 0, frag='0')]),
         ]
         for text in bad:
             with self.subTest(text=text[:60]), self.assertRaises(PlanError):
@@ -111,6 +119,19 @@ class ParseMultiFieldPlanTest(unittest.TestCase):
         self.assertEqual(plan.swaths[2][0], (51.46, -2.6))
         self.assertEqual(plan.origin_ll, (51.45, -2.6))
         self.assertEqual(plan.params['tool_width'], 3)
+
+    def test_litefarm_field_row_and_frag_are_kept_before_the_row_offset(self):
+        """Verify lf_rows holds the file's own numbers per swath, not the merged row numbers."""
+        plan = parse_plan(_multi([_mfeat(ROW0, 0, 1, 0), _mfeat(ROW0, 0, 1, 1),
+                                  _mfeat(ROW1, 1, 1), _mfeat(ROW0B, 0, 2), _mfeat(ROW1B, 1, 2)]))
+        self.assertEqual(plan.lf_rows, ((1, 0, 0), (1, 0, 1), (1, 1, 0), (2, 0, 0), (2, 1, 0)))
+        self.assertEqual(len(plan.lf_rows), len(plan.swaths))
+
+    def test_a_missing_frag_is_zero(self):
+        """Verify a row feature without frag is fragment 0."""
+        feature = _mfeat(ROW0, 0, 1)
+        del feature['properties']['frag']
+        self.assertEqual(parse_plan(_multi([feature])).lf_rows, ((1, 0, 0),))
 
     def test_no_edge_joins_two_fields(self):
         """Verify the last swath of a field is not linked to the first of the next."""

@@ -34,6 +34,7 @@ from devkit_ui.domain_services.mission_domain_service import (
     WARN,
     MissionDomainService,
     MissionError,
+    MissionResult,
     resolve_steps,
 )
 
@@ -49,6 +50,31 @@ def doc(*nodes):
 
 
 class TestResolveSteps(unittest.TestCase):
+    def test_distinct_entries_for_the_same_row_are_rejected(self) -> None:
+        """Reject ambiguous entries regardless of which saved name is queued."""
+        topo = doc(node('A', 9, 'entry'), node('B', '9', 'entry'), node('X', 9, 'exit'))
+        for row in ('A', 'B', 'ROW_9_IN', 9):
+            with self.subTest(row=row), self.assertRaisesRegex(MissionError, 'multiple entry nodes for row 9'):
+                resolve_steps(topo, [(row, 'drive', None)])
+
+    def test_repeated_same_entry_is_unambiguous(self) -> None:
+        """Repeated metadata for the same entry name preserves resolution."""
+        topo = doc(node('A', 9, 'entry'), node('A', '9', 'entry'), node('X', 9, 'exit'))
+        self.assertEqual(resolve_steps(topo, [('A', 'drive', None)]), [(9, 'A', 'X', 'drive', None)])
+
+    def test_saved_row_aliases_resolve_to_the_live_entry(self) -> None:
+        """Fallback names and string row IDs survive an entry rename."""
+        topo = doc(node('new_entry', 9, 'entry'), node('X', 9, 'exit'))
+        self.assertEqual(resolve_steps(topo, [('ROW_9_IN', 'drive', None), ('9', 'drive', None)]),
+                         [(9, 'new_entry', 'X', 'drive', None)] * 2)
+
+    def test_entry_name_takes_precedence_over_row_alias(self) -> None:
+        """Existing entry names keep their identity even when they look like fallbacks."""
+        topo = doc(node('ROW_9_IN', 1, 'entry'), node('X', 1, 'exit'),
+                   node('E9', 9, 'entry'), node('X9', 9, 'exit'))
+        self.assertEqual(resolve_steps(topo, [('ROW_9_IN', 'drive', None)]),
+                         [(1, 'ROW_9_IN', 'X', 'drive', None)])
+
     def test_resolves_entry_and_exit(self) -> None:
         """Verify each queued row maps to its entry and exit node names."""
         topo = doc(node('A_1', 1, 'entry'), node('A_2', 1, 'exit'), node('B_1', '2', 'entry'),
@@ -56,6 +82,21 @@ class TestResolveSteps(unittest.TestCase):
         steps = resolve_steps(topo, [(2, 'drive', None), (1, 'drive', {'x': 1})])
         self.assertEqual(steps, [(2, 'B_1', 'B_2', 'drive', None),
                                  (1, 'A_1', 'A_2', 'drive', {'x': 1})])
+
+    def test_resolves_entry_node_names_through_the_row_id(self) -> None:
+        """Verify a saved mission's entry names find their exits and mix with row ids."""
+        topo = doc(node('A_1', 1, 'entry'), node('A_2', 1, 'exit'), node('B_1', '2', 'entry'),
+                   node('B_2', '2', 'exit'))
+        steps = resolve_steps(topo, [('B_1', 'drive', None), (1, 'drive', None),
+                                     ('B_1', 'drive', None)])
+        self.assertEqual([step[:3] for step in steps],
+                         [(2, 'B_1', 'B_2'), (1, 'A_1', 'A_2'), (2, 'B_1', 'B_2')])
+
+    def test_a_name_that_is_not_an_entry_node_is_rejected(self) -> None:
+        """Verify exit nodes and unknown names do not resolve as entries."""
+        topo = doc(node('A_1', 1, 'entry'), node('A_2', 1, 'exit'))
+        with self.assertRaisesRegex(MissionError, r"unknown entry node\(s\) \['A_2', 'ROW_9_IN'\]"):
+            resolve_steps(topo, [('A_2', 'drive', None), ('ROW_9_IN', 'drive', None)])
 
     def test_no_map(self) -> None:
         """Verify a missing map raises MissionError."""
@@ -82,11 +123,14 @@ class TestMissionExecution(unittest.TestCase):
         self.svc = MissionDomainService(self.ros)
         self.svc.publish_tool_msgs = Mock()
         self.events: list = []
+        self.results: list = []
 
-    def run_steps(self, steps, navigate, estop=lambda: False) -> None:
-        """Run the executor synchronously and capture status events."""
+    def run_steps(self, steps, navigate, estop=lambda: False, on_step_done=None) -> None:
+        """Run the executor synchronously, capturing status events and the final result."""
         self.svc._running = True
-        self.svc._execute(steps, navigate, lambda lvl, txt: self.events.append((lvl, txt)), estop)
+        self.results.clear()
+        self.svc._execute(steps, navigate, lambda lvl, txt: self.events.append((lvl, txt)), estop,
+                          self.results.append, on_step_done)
 
     def test_success_visits_entry_then_exit_with_tool_around_traversal(self) -> None:
         """Verify order: entry transit, tool on, exit traversal, tool off, then completion."""
@@ -96,6 +140,76 @@ class TestMissionExecution(unittest.TestCase):
         self.assertEqual(order, ['E', ('tool', True), 'X', ('tool', False)])
         self.assertEqual(self.events[-1][0], OK)
         self.assertFalse(self.svc.running)
+
+    def test_success_reports_every_step_done(self) -> None:
+        """Verify the result and the per-step callback on a clean run."""
+        counts: list = []
+        steps = [(1, 'E', 'X', 'drive', None), (2, 'E2', 'X2', 'drive', None)]
+
+        self.run_steps(steps, lambda n: 'arrived', on_step_done=counts.append)
+
+        self.assertEqual(self.results, [MissionResult(True, 2)])
+        self.assertEqual(counts, [1, 2])
+
+    def test_a_failed_transit_reports_stage_transit_and_the_navigation_reason(self) -> None:
+        steps = [(1, 'E', 'X', 'drive', None), (2, 'E2', 'X2', 'drive', None)]
+        outcomes = iter(['arrived', 'arrived', 'timeout'])
+
+        self.run_steps(steps, lambda n: next(outcomes))
+
+        self.assertEqual(self.results, [MissionResult(False, 1, 'transit', 'timeout')])
+
+    def test_a_failed_traverse_reports_stage_row(self) -> None:
+        outcomes = iter(['arrived', 'nav'])
+
+        self.run_steps([(1, 'E', 'X', 'drive', None)], lambda n: next(outcomes))
+
+        self.assertEqual(self.results, [MissionResult(False, 0, 'row', 'nav')])
+
+    def test_a_plain_false_from_navigate_is_a_nav_failure(self) -> None:
+        self.run_steps([(1, 'E', 'X', 'drive', None)], lambda n: False)
+
+        self.assertEqual(self.results, [MissionResult(False, 0, 'transit', 'nav')])
+
+    def test_a_cancel_or_estop_before_a_leg_is_reported_by_which_it_was(self) -> None:
+        for cancel, estop, reason in [(True, False, 'cancel'), (False, True, 'estop'),
+                                      (True, True, 'cancel')]:
+            with self.subTest(cancel=cancel, estop=estop):
+                self.svc._cancel = cancel
+                navigate = Mock()
+
+                self.run_steps([(1, 'E', 'X', 'drive', None)], navigate, lambda e=estop: e)
+
+                navigate.assert_not_called()
+                self.assertEqual(self.results, [MissionResult(False, 0, 'transit', reason)])
+
+    def test_an_estop_between_entry_and_exit_stops_before_the_tool_turns_on(self) -> None:
+        estops = iter([False, True])
+
+        self.run_steps([(1, 'E', 'X', 'drive', None)], lambda n: True, lambda: next(estops))
+
+        self.svc.publish_tool_msgs.assert_not_called()
+        self.assertEqual(self.results, [MissionResult(False, 0, 'transit', 'estop')])
+
+    def test_an_exception_is_reported_as_a_failed_result_in_the_current_stage(self) -> None:
+        def navigate(_target):
+            raise RuntimeError('boom')
+
+        self.run_steps([(1, 'E', 'X', 'drive', None)], navigate)
+
+        self.assertEqual(self.results, [MissionResult(False, 0, 'transit', 'nav')])
+        self.assertFalse(self.svc.running)
+
+    def test_a_failing_result_callback_cannot_leave_the_mission_running(self) -> None:
+        self.svc._running = True
+
+        def broken(_result):
+            raise RuntimeError('store down')
+
+        self.svc._execute([], Mock(), Mock(), lambda: False, broken)
+
+        self.assertFalse(self.svc.running)
+        self.ros.get_logger().error.assert_called()
 
     def test_transit_failure_stops_without_engaging_tool(self) -> None:
         """Verify a failed transit stops the mission and never engages the tool."""

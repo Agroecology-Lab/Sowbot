@@ -14,6 +14,12 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
+import pytest
+
+# industrial_ci runs pytest collection without the development requirements. Keep this
+# browser-only test out of that environment; the dedicated browser-test workflow installs
+# Playwright and runs it explicitly.
+pytest.importorskip('playwright', reason='browser test requires the Playwright development dependency')
 from playwright.sync_api import sync_playwright
 
 

@@ -205,8 +205,15 @@ class TopoNode:
         }
 
     def patch_role(self, role: str) -> None:
-        self._properties['row_role'] = role
+        """Set the row role in both the node's properties and metadata."""
+        self._properties = self._properties._replace(row_role=role)
         self._meta['row_role'] = role
+
+# Document meta key holding the first 8 hex characters of the farm map the map was built from.
+MAP_HASH_KEY = 'hash8'
+# Its value once the map was edited, and what map_hash8 reports for a map with no farm map.
+MAP_EDITED = '-'
+
 
 class TopoDoc:
     """Represents a topo document."""
@@ -293,6 +300,29 @@ class TopoDoc:
     def transformation(self) -> dict:
         return self._transformation
 
+    @property
+    def meta(self) -> dict:
+        """Return the document's mutable metadata."""
+        return self._meta
+
+    @property
+    def map_hash8(self) -> str:
+        """Return the first 8 hex characters of the farm map this map was built from.
+
+        Return MAP_EDITED ("-") when the map was edited since, or never came from a farm map.
+        """
+        value = self._meta.get(MAP_HASH_KEY)
+        return value if isinstance(value, str) and value else MAP_EDITED
+
+    def stamp_map_hash8(self, hash8: str) -> None:
+        """Record that this map was built from the farm map with this hash, and not edited since."""
+        self._meta[MAP_HASH_KEY] = hash8
+
+    def mark_map_edited(self) -> None:
+        """Record that the map no longer matches its farm map. A map with no farm map stays as it is."""
+        if MAP_HASH_KEY in self._meta:
+            self._meta[MAP_HASH_KEY] = MAP_EDITED
+
     def add_node(self, node: TopoNode) -> None:
         self._nodes[node.name] = node
 
@@ -366,8 +396,9 @@ class TopoDoc:
 
     def clone_empty(self, map_name: str | None = None) -> 'TopoDoc':
         """Clones the document and returns a new document with no nodes.
-        Retains metadata, actions, definitions, and transformation."""
-        return TopoDoc(
+        Retains metadata, actions, definitions, and transformation. If a farm map hash
+        is present, the clone is marked as edited."""
+        doc = TopoDoc(
             name=map_name or self._name,
             metric_map=self._metric_map,
             pointset=self._pointset,
@@ -377,3 +408,5 @@ class TopoDoc:
             transformation=copy.deepcopy(self._transformation),
             nodes=[],
         )
+        doc.mark_map_edited()
+        return doc

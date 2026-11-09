@@ -89,5 +89,47 @@ class TestTopoRendererLabels(unittest.TestCase):
         self.assertEqual(texts(svg, 'topo-row-label'), ['Row <7&'])
 
 
+def dock_doc() -> TopoDoc:
+    return TopoDoc(
+        name='field',
+        nodes=[
+            TopoNode(name='ROW_1_IN', x=2.0, y=0.0, edges=['WAY'], meta={'row_id': 1, 'row_role': 'entry'}),
+            TopoNode(name='WAY', x=1.0, y=0.0, edges=['ROW_1_IN', 'DOCK'], meta={'role': 'route'}),
+            TopoNode(name='DOCK', x=0.0, y=0.0, edges=['WAY'], meta={'role': 'dock', 'farm_name': 'dock<1>'}),
+        ],
+    )
+
+
+class TestTopoRendererDocks(unittest.TestCase):
+    def test_a_dock_is_a_clickable_square_and_not_a_circle(self) -> None:
+        root = ElementTree.fromstring(build_svg(dock_doc(), selected=None, current=None))
+        dock = next(e for e in root.iter() if e.attrib.get('data-node') == 'DOCK')
+
+        self.assertTrue(dock.tag.endswith('rect'))
+        self.assertEqual(dock.attrib['class'], 'topo-node')
+
+    def test_selected_dock_labels_have_distinct_positions(self):
+        root = ElementTree.fromstring(build_svg(dock_doc(), selected='DOCK', current=None))
+        labels = [e for e in root.iter() if e.attrib.get('class') in ('topo-dock-label', 'topo-node-label')]
+        self.assertEqual(len(labels), 2)
+        self.assertNotEqual(labels[0].attrib['y'], labels[1].attrib['y'])
+
+    def test_a_dock_is_labelled_with_its_escaped_farm_name(self) -> None:
+        svg = build_svg(dock_doc(), selected=None, current=None)
+
+        self.assertEqual(texts(svg, 'topo-dock-label'), ['dock<1>'])
+        self.assertIn('dock&lt;1&gt;', svg)
+
+    def test_route_edges_are_dashed_and_row_edges_are_not(self) -> None:
+        root = ElementTree.fromstring(build_svg(dock_doc(), selected=None, current=None))
+        lines = [e for e in root.iter() if e.tag.endswith('line')]
+
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(all(e.attrib.get('stroke-dasharray') for e in lines))
+
+    def test_row_only_maps_have_no_dock_labels(self) -> None:
+        self.assertEqual(texts(build_svg(row_doc(), selected=None, current=None), 'topo-dock-label'), [])
+
+
 if __name__ == '__main__':
     unittest.main()
