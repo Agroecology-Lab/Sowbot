@@ -253,20 +253,19 @@ def _bearings(points: list[tuple[float, float]]) -> list[float]:
     between coincident points has no heading of its own and takes that of the next nonzero segment,
     or of the previous one when none follows. A path of coincident points gives yaw 0.
     """
-    segments: list[float | None] = [None if a == b else math.atan2(b[1] - a[1], b[0] - a[0])
-                                    for a, b in pairwise(points)]
-    heading = None
-    for i in reversed(range(len(segments))):
-        if segments[i] is None:
-            segments[i] = heading
+    raw: list[float | None] = [None if a == b else math.atan2(b[1] - a[1], b[0] - a[0])
+                               for a, b in pairwise(points)]
+    following: float | None = None
+    for i in reversed(range(len(raw))):
+        if raw[i] is None:
+            raw[i] = following
         else:
-            heading = segments[i]
-    heading = 0.0
-    for i, segment in enumerate(segments):
-        if segment is None:
-            segments[i] = heading
-        else:
-            heading = segment
+            following = raw[i]
+    segments: list[float] = []
+    previous = 0.0
+    for heading in raw:
+        previous = previous if heading is None else heading
+        segments.append(previous)
     return [*segments, segments[-1]]
 
 
