@@ -1,4 +1,5 @@
 import copy
+import math
 from collections.abc import Iterator
 from datetime import datetime
 from typing import NamedTuple
@@ -25,6 +26,15 @@ class Vector2(NamedTuple):
     """Represents a 2D vector."""
     x: float
     y: float
+
+def yaw_to_orientation(yaw: float) -> Vector4:
+    """Return the quaternion for a rotation of ``yaw`` radians about the z axis.
+
+    Components are rounded to six places so saved maps stay readable. Yaw is measured from map +x,
+    counter-clockwise.
+    """
+    half = yaw / 2.0
+    return Vector4(x=0.0, y=0.0, z=round(math.sin(half), 6) + 0.0, w=round(math.cos(half), 6) + 0.0)
 
 class TopoPose:
     """Represents a point's pose in 3D space."""

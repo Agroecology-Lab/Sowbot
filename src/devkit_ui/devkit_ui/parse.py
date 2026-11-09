@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import yaml
 
-from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties
+from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoPose, TopoProperties, Vector4
 
 
 def _topo_from_dict(doc: dict) -> TopoDoc:
@@ -36,8 +36,11 @@ def _topo_from_dict(doc: dict) -> TopoDoc:
                 edges.append(e)
         nodes.append(TopoNode(
             name=name,
-            x=float(pos['x']),
-            y=float(pos['y']),
+            pose=TopoPose(
+                x=float(pos['x']),
+                y=float(pos['y']),
+                orientation=_orientation(n['pose'].get('orientation') or {}),
+            ),
             edges=edges,
             meta=meta,
             properties=TopoProperties(**n.get('properties', {})),
@@ -54,6 +57,13 @@ def _topo_from_dict(doc: dict) -> TopoDoc:
         definitions=doc.get('definitions', {}),
         transformation=doc.get('transformation', {}),
     )
+
+
+def _orientation(raw: dict) -> Vector4:
+    """Return the quaternion of a pose mapping, with missing components as the identity rotation."""
+    return Vector4(x=float(raw.get('x', 0.0)), y=float(raw.get('y', 0.0)),
+                   z=float(raw.get('z', 0.0)), w=float(raw.get('w', 1.0)))
+
 
 def parse_topo_yaml(filename: str) -> TopoDoc:
     with open(filename, encoding='utf-8') as f:

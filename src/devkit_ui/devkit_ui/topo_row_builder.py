@@ -6,6 +6,7 @@ chooses the anchor, and persists the result. That keeps the geometry and graph
 rules testable on their own and out of the UI node.
 """
 
+import math
 import re
 from dataclasses import dataclass, field
 from itertools import pairwise
@@ -20,6 +21,7 @@ from devkit_ui.models import (
     TopoPose,
     TopoProperties,
     Vector2,
+    yaw_to_orientation,
 )
 from devkit_ui.row_planning import (
     CONTOUR_WAYPOINT_INTERVAL_M,
@@ -78,17 +80,17 @@ class RowBuild:
 
 def _make_node(name: str, x: float, y: float, role: str, lat: float, lon: float,
                row_id: int, settings: RowBuildSettings,
-               lf: tuple[int, int, int] | None = None) -> TopoNode:
+               lf: tuple[int, int, int] | None = None, yaw: float = 0.0) -> TopoNode:
     """Create one row node carrying its row identity in both properties and metadata.
 
     lf is the LiteFarm (field, row, frag) of the swath, written to the metadata as lf_field,
-    lf_row and lf_frag.
+    lf_row and lf_frag. yaw is the goal heading in radians from map +x, counter-clockwise.
     """
     node = TopoNode(
         name=name,
         nav_frame=settings.nav_frame,
         edges=[],
-        pose=TopoPose(x=x, y=y),
+        pose=TopoPose(x=x, y=y, orientation=yaw_to_orientation(yaw)),
         properties=TopoProperties(
             xy_goal_tolerance=0.1,
             yaw_goal_tolerance=0.05,
@@ -130,7 +132,9 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
     """Turn planned swaths into entry, waypoint and exit nodes with their edges.
 
     Each usable swath becomes an IN and an OUT node joined by edges in both directions
-    using ``settings.row_action``. With contour mode, rows also get intermediate
+    using ``settings.row_action``. The pose of each node faces along the row, from IN towards OUT
+    (the bearing to the next node, and for OUT that of the last segment), so rows running along
+    map -x do not ask the robot to turn round at their ends. With contour mode, rows also get intermediate
     waypoints every ``settings.waypoint_interval_m`` meters of arc length, including
     two-point swaths; rows shorter than one interval, and all rows without contour
     mode, keep a single entry-to-exit edge.
@@ -196,24 +200,29 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
             build.skipped.append(rid)
             continue
 
-        waypoint_names: list[NodeID] = []
+        waypoints: list[tuple[NodeID, float, float, float, float]] = []
         if settings.contour_used:
-            waypoints = resample_row_xy(
-                swath, anchor.lat, anchor.lon, settings.waypoint_interval_m)
-            for k, (wx, wy) in enumerate(waypoints, start=1):
+            for k, (wx, wy) in enumerate(resample_row_xy(
+                    swath, anchor.lat, anchor.lon, settings.waypoint_interval_m), start=1):
                 name = f'{prefix}_R{rid}_W{k}'
                 if not settings.overwrite and name in build.nodes:
                     continue
                 wlat, wlon = f2c_xy_to_latlon(wx, wy, anchor.lat, anchor.lon)
-                build.nodes[name] = _make_node(
-                    name, round(anchor.x + wx, 3), round(anchor.y + wy, 3),
-                    'waypoint', wlat, wlon, rid, settings, lf)
-                waypoint_names.append(name)
+                waypoints.append((name, round(anchor.x + wx, 3), round(anchor.y + wy, 3), wlat, wlon))
+
+        # Every node faces along the row from IN towards OUT, so a robot that arrives travelling
+        # that way is already aligned and the goal checker does not ask for a spin.
+        yaws = _bearings([(in_x, in_y), *((x, y) for _, x, y, _, _ in waypoints), (out_x, out_y)])
+        waypoint_names: list[NodeID] = []
+        for (name, x, y, wlat, wlon), yaw in zip(waypoints, yaws[1:-1], strict=True):
+            build.nodes[name] = _make_node(
+                name, x, y, 'waypoint', wlat, wlon, rid, settings, lf, yaw)
+            waypoint_names.append(name)
 
         build.nodes[in_name] = _make_node(
-            in_name, in_x, in_y, 'entry', in_lat, in_lon, rid, settings, lf)
+            in_name, in_x, in_y, 'entry', in_lat, in_lon, rid, settings, lf, yaws[0])
         build.nodes[out_name] = _make_node(
-            out_name, out_x, out_y, 'exit', out_lat, out_lon, rid, settings, lf)
+            out_name, out_x, out_y, 'exit', out_lat, out_lon, rid, settings, lf, yaws[-1])
 
         for a_name, b_name in pairwise([in_name, *waypoint_names, out_name]):
             build.nodes[a_name].add_edge(b_name, action=row_action)
@@ -235,6 +244,16 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
         for target in (build.row_names[build.added[0]][0], build.row_names[build.added[-1]][1]):
             build.nodes[target].add_edge(settings.connect_to, action=NAV_ACTION)
     return build
+
+
+def _bearings(points: list[tuple[float, float]]) -> list[float]:
+    """Return the yaw in radians of each point on a path of two or more points.
+
+    A point faces the next one; the last point keeps the heading of the final segment. Coincident
+    points give yaw 0.
+    """
+    segments = [math.atan2(b[1] - a[1], b[0] - a[0]) for a, b in pairwise(points)]
+    return [*segments, segments[-1]]
 
 
 def apply_row_nodes(doc: TopoDoc, build: RowBuild, prefix: str, overwrite: bool) -> None:

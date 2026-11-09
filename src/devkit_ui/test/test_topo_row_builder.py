@@ -1,3 +1,4 @@
+import math
 import unittest
 from itertools import pairwise
 from pathlib import Path
@@ -190,6 +191,65 @@ class TestBuildRowNodes(unittest.TestCase):
         build = build_row_nodes([swath((0.0, 0.0))], ANCHOR, settings())
 
         self.assertEqual((build.nodes, build.added), ({}, []))
+
+
+def yaw_of(node) -> float:
+    """Return a node's pose yaw in radians, from its quaternion."""
+    q = node.to_dict()['node']['pose']['orientation']
+    return 2.0 * math.atan2(q['z'], q['w'])
+
+
+class TestRowOrientation(unittest.TestCase):
+    def test_row_nodes_face_along_the_row_from_in_to_out(self) -> None:
+        """Verify rows along -x face -x at both ends, so the end goal asks for no spin."""
+        build = build_row_nodes([swath((0.0, 0.0), (-12.0, 0.0))], ANCHOR, settings())
+
+        for name in ('FIELD_R1_IN', 'FIELD_R1_OUT'):
+            self.assertAlmostEqual(abs(yaw_of(build.nodes[name])), math.pi, places=5)
+
+    def test_snake_ordered_rows_face_opposite_ways(self) -> None:
+        """Verify the heading follows each swath's own direction, not a fixed axis."""
+        build = build_row_nodes(straight_rows(2), ANCHOR, settings())
+
+        self.assertAlmostEqual(yaw_of(build.nodes['FIELD_R1_OUT']), math.pi / 2, places=5)
+        self.assertAlmostEqual(yaw_of(build.nodes['FIELD_R2_IN']), -math.pi / 2, places=5)
+        self.assertAlmostEqual(yaw_of(build.nodes['FIELD_R2_OUT']), -math.pi / 2, places=5)
+
+    def test_row_along_plus_x_keeps_the_identity_orientation(self) -> None:
+        build = build_row_nodes([swath((0.0, 0.0), (12.0, 0.0))], ANCHOR, settings())
+
+        for node in build.nodes.values():
+            self.assertEqual(node.to_dict()['node']['pose']['orientation'],
+                             {'x': 0.0, 'y': 0.0, 'z': 0.0, 'w': 1.0})
+
+    def test_contour_waypoints_face_the_next_node_and_the_exit_keeps_the_last_heading(self) -> None:
+        """Verify a bent row turns its heading at the bend instead of using one end-to-end bearing."""
+        build = build_row_nodes([swath((0.0, 0.0), (9.0, 0.0), (9.0, 9.0))], ANCHOR,
+                                settings(contour_used=True))
+
+        chain = ['FIELD_R1_IN', *sorted((n for n in build.nodes if '_W' in n),
+                                        key=lambda n: int(n.rsplit('W', 1)[1])), 'FIELD_R1_OUT']
+        for here, there in pairwise(chain):
+            a, b = build.nodes[here], build.nodes[there]
+            self.assertAlmostEqual(yaw_of(a), math.atan2(b.y - a.y, b.x - a.x), places=4)
+        self.assertAlmostEqual(yaw_of(build.nodes[chain[-1]]), yaw_of(build.nodes[chain[-2]]), places=4)
+        self.assertAlmostEqual(yaw_of(build.nodes[chain[0]]), 0.0, places=4)
+        self.assertAlmostEqual(yaw_of(build.nodes[chain[-1]]), math.pi / 2, places=4)
+
+    def test_orientation_survives_a_yaml_round_trip(self) -> None:
+        """Verify a saved and reloaded map keeps the headings instead of resetting them."""
+        build = build_row_nodes([swath((0.0, 0.0), (-12.0, 0.0))], ANCHOR, settings())
+        doc = TopoDoc(name='field')
+        apply_row_nodes(doc, build, 'FIELD', overwrite=False)
+
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / 'field.tmap2.yaml'
+            dump_topo_yaml(doc, str(path))
+            loaded = parse_topo_yaml(str(path))
+
+        for node in doc.nodes:
+            self.assertEqual(loaded.get_node(node.name).to_dict()['node']['pose'],
+                             node.to_dict()['node']['pose'])
 
 
 class TestApplyRowNodes(unittest.TestCase):

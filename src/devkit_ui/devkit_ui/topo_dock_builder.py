@@ -6,18 +6,30 @@ passes through becomes ``<prefix>_D_<ROUTE>_<k>``. An overwrite removes earlier 
 and routes with the same prefix. The nodes are joined to the row end the route names by
 navigation edges in both directions.
 """
+import math
 import re
 from dataclasses import dataclass, field
 from itertools import pairwise
 
 from devkit_f2c_planner.f2c_planner import f2c_latlon_to_xy
 from devkit_ui.constants import NAV_ACTION
-from devkit_ui.models import NodeID, TopoDoc, TopoNode, TopoPose, TopoProperties, Vector2
+from devkit_ui.models import (
+    NodeID,
+    TopoDoc,
+    TopoNode,
+    TopoPose,
+    TopoProperties,
+    Vector2,
+    yaw_to_orientation,
+)
 from devkit_ui.topo_row_builder import RowAnchor
 
 # Meta key on every dock and route node: the prefix of the save that made it.
 DOCK_PREFIX_KEY = 'dock_prefix'
 _NODE_VERTS = (Vector2(x=-1.0, y=-1.0), Vector2(x=1.0, y=-1.0), Vector2(x=1.0, y=1.0), Vector2(x=-1.0, y=1.0))
+# A dock or route point with no heading accepts any final yaw.
+ANY_YAW_TOLERANCE = math.pi
+HEADED_YAW_TOLERANCE = 0.1
 
 
 @dataclass(frozen=True)
@@ -56,6 +68,10 @@ def build_dock_nodes(docks: tuple | list, routes: tuple | list, anchor: RowAncho
     skipped. Matched row nodes receive the exported endpoint name in their ``lf_node`` metadata;
     nothing is persisted.
 
+    A dock with a ``heading_deg`` faces it, read as a compass bearing: degrees clockwise from north, so
+    90 faces east, map +x. A dock without one, and every route point, accepts any final yaw, so the
+    goal checker does not ask for a turn the map never specified.
+
     Raises:
         ValueError: Generated names collide, a target is not an exported row endpoint, or route
             endpoint coordinates do not match the named nodes. Earlier row-node metadata changes
@@ -67,7 +83,8 @@ def build_dock_nodes(docks: tuple | list, routes: tuple | list, anchor: RowAncho
         name = _node_name(settings.prefix, dock.name)
         east, north = f2c_latlon_to_xy(dock.lat, dock.lon, anchor.lat, anchor.lon)
         extra = {'role': 'dock', 'farm_name': dock.name, 'heading_deg': dock.heading_deg}
-        _add(build, _make_node(name, anchor, east, north, dock.lat, dock.lon, settings, extra))
+        yaw = None if dock.heading_deg is None else _compass_to_yaw(dock.heading_deg)
+        _add(build, _make_node(name, anchor, east, north, dock.lat, dock.lon, settings, extra, yaw))
         ends[dock.name] = name
 
     for route in routes:
@@ -158,17 +175,31 @@ def _row_end(route, row_nodes: dict[NodeID, TopoNode]) -> NodeID | None:
     return found[0].name if len(found) == 1 else None
 
 
+def _compass_to_yaw(heading_deg: float) -> float:
+    """Return the map yaw in radians, within [-pi, pi], of a compass heading in degrees.
+
+    Map +x is east and +y is north, so north (0 degrees) is a yaw of pi / 2.
+    """
+    yaw = math.pi / 2 - math.radians(heading_deg)
+    return math.atan2(math.sin(yaw), math.cos(yaw))
+
+
 def _make_node(name: str, anchor: RowAnchor, east: float, north: float, lat: float, lon: float,
-               settings: DockBuildSettings, extra: dict) -> TopoNode:
-    """Create one dock or route node at a lat/lon projected about the anchor."""
+               settings: DockBuildSettings, extra: dict, yaw: float | None = None) -> TopoNode:
+    """Create one dock or route node at a lat/lon projected about the anchor.
+
+    yaw is the goal heading in radians from map +x. With None the pose keeps the identity
+    orientation and the node accepts any final yaw.
+    """
     return TopoNode(
         name=name,
         nav_frame=settings.nav_frame,
         edges=[],
-        pose=TopoPose(x=round(anchor.x + east, 3), y=round(anchor.y + north, 3)),
+        pose=TopoPose(x=round(anchor.x + east, 3), y=round(anchor.y + north, 3),
+                      orientation=yaw_to_orientation(0.0 if yaw is None else yaw)),
         properties=TopoProperties(
             xy_goal_tolerance=0.3,
-            yaw_goal_tolerance=0.1,
+            yaw_goal_tolerance=ANY_YAW_TOLERANCE if yaw is None else HEADED_YAW_TOLERANCE,
             dropped_by='webui_f2c',
             timestamp=settings.timestamp,
             gps_lat=round(lat, 7),
