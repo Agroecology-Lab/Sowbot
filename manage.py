@@ -562,12 +562,13 @@ class DevkitManager:
             # user pressed Launch Sim and fix_map_to_odom (sowbot_sim.launch.py)
             # got around to correcting it 30-45s later.
             #
-            # Running worldgen.sh here, synchronously, before nav_launch_cmd,
-            # closes that window: spawn_pose.txt is guaranteed to exist and be
-            # correct for the current map before sim_nav.launch.py ever reads
-            # it. worldgen.sh's own input-keyed cache keeps this fast on every
-            # boot after the first — it regenerates only when the map/settings
-            # actually changed, same as the Launch Sim button.
+            # The Gazebo world is NOT built here. It is built on a user button
+            # press: Launch Sim (sowbot_sim.launch.py world_gen step) or the UI
+            # Rebuild button. Building it at boot failed on any map larger than
+            # the uploaded ground mesh and, being chained with &&, stopped the
+            # nav stack from starting. Until Launch Sim runs, spawn_pose.txt may
+            # be absent, so sim_nav.launch.py publishes an identity map->odom;
+            # sowbot_sim.launch.py's fix_map_to_odom corrects it after world-gen.
             "([ -f /workspace/maps/maize_map ] || ("
             "ros2 run virtual_maize_field generate_world fre22_task_navigation_mini 2>/dev/null && "
             "python3 /workspace/get_maize_topo.py "
@@ -575,8 +576,6 @@ class DevkitManager:
             f"--out /workspace/maps/maize_map --name maize_map --rows 6 "
             f"--lat {datum_lat} --lon {datum_lon} --alt {datum_alt})) && "
             "echo '[world] map ready' && "
-            "bash /workspace/worldgen.sh && "
-            "echo '[world] spawn pose ready' && "
         ) if is_sim == 'true' else ""
 
         # In sim mode launch sowbot_sim (real Nav2 + topo nav + UI) instead of

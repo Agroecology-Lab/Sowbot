@@ -160,4 +160,5 @@ def test_worldgen_mounts_keep_container_entry_points(managed_repo, simulation):
     for mount in script_mounts:
         assert Path(mount.split(':')[0]).is_file()
     assert ('python3 /workspace/get_maize_topo.py' in command[-1]) is simulation
-    assert ('bash /workspace/worldgen.sh' in command[-1]) is simulation
+    # The world is built by Launch Sim or Rebuild, never at boot.
+    assert 'worldgen.sh' not in command[-1]
