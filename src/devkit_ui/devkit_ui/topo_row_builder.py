@@ -135,10 +135,10 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
     Each usable swath becomes an IN and an OUT node joined by edges in both directions
     using ``settings.row_action``. The pose of each node faces along the row, from IN towards OUT
     (the bearing to the next node, and for OUT that of the last segment). IN and OUT only name the ends:
-    a row is travelled either way, so every node accepts any final yaw and no goal asks for a turn. With contour mode, rows also get intermediate
-    waypoints every ``settings.waypoint_interval_m`` meters of arc length, including
-    two-point swaths; rows shorter than one interval, and all rows without contour
-    mode, keep a single entry-to-exit edge.
+    a row is travelled either way, so every node accepts any final yaw and no goal asks for a turn.
+    With contour mode, rows also get intermediate waypoints every ``settings.waypoint_interval_m``
+    meters of arc length, including two-point swaths; rows shorter than one interval, and all rows
+    without contour mode, keep a single entry-to-exit edge.
 
     Consecutive built rows are joined OUT to the next row's IN in both directions. The
     swaths arrive in snake order, so that pairing is known by construction and no
