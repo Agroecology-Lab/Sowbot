@@ -47,6 +47,11 @@ class MissionSqliteStore:
     """Owns the mission list and its SQLite persistence."""
 
     def __init__(self, path: str, on_write_done: Callable[[str], None] | None = None) -> None:
+        """Open the database at path and create or upgrade its mission schema.
+
+        on_write_done receives a status message after an add, update or delete is committed.
+        SQLite initialization errors propagate.
+        """
         self._path     = path
         self._on_write_done = on_write_done or (lambda _: None)
         # Every public method holds this lock, reads included, because the connection is shared
@@ -109,11 +114,12 @@ class MissionSqliteStore:
             map_hash: str | None = None,
             groups: list | None = None,
             state: str = 'idle') -> str | None:
-        """Add a mission. Returns its allocated id, or None on failure.
-        Status carries the reason either way.
+        """Add a mission and return its allocated id.
 
-        The keyword-only arguments are for remote missions. A repeated external_id raises
-        sqlite3.IntegrityError. ValueError for an unknown source or state."""
+        The keyword-only arguments set the source, remote identity and initial state. A repeated
+        non-null external_id raises sqlite3.IntegrityError. ValueError for an unknown source or
+        state. SQLite and JSON serialization errors propagate; callback errors propagate after
+        the commit."""
 
         if source not in SOURCES:
             raise ValueError(f'unknown source {source!r}')

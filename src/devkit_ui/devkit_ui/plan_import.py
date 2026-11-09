@@ -99,6 +99,8 @@ def parse_plan(text, robot_ll=None, max_distance_m=DEFAULT_MAX_DISTANCE_M) -> Pl
 
     Multi-field plans use the first field's origin and parameters, preserve row
     order, and mark breaks between fields as well as consecutive row fragments.
+    Their result includes the original (field, row, fragment) identity for each swath;
+    single-field plans have no LiteFarm row identities.
     If ``robot_ll`` is given as (latitude, longitude) in degrees, reject a plan
     whose row-endpoint center is more than ``max_distance_m`` meters away.
 

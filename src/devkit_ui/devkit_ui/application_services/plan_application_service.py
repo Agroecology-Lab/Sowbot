@@ -116,7 +116,9 @@ class PlanApplicationService:
         whose row-endpoint center is more than 2,000 meters from the robot.
         Simulation skips these GPS checks.
         A file that names a farm_map_id must be a published farm map whose content hash
-        matches its rows. Its planned rows carry the hash8, which saving writes to the map.
+        matches its rows, docks and routes. Its planned rows carry the hash8; saving stamps it
+        only if the resulting map qualifies as that farm map. The two parsers must agree on
+        the row identities and geometry or the import returns an error.
         PlanError and FarmMapError become a failed outcome with their message; other parser
         errors propagate.
         """

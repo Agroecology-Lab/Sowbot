@@ -157,12 +157,12 @@ class TopologyEditService:
         lf_rows, if given, holds one LiteFarm (field, row, frag) per swath and is written to
         the row nodes' metadata.
         docks and routes, if given, are the farm map's FarmDock and FarmRoute entries. Each dock is
-        saved as a node, joined to the row end its route names (see topo_dock_builder).
+        saved as a node; usable routes join it to their named row ends (see topo_dock_builder).
         map_hash8, if given, is the hash8 of the farm map the swaths came from. It is stamped
         into the saved map only when the save leaves the map holding exactly that farm map's
         rows and docks: no swath dropped or skipped, no route left out, and no other row, dock
-        or route nodes left in the map. Otherwise the map is marked as edited and the success
-        text says so.
+        or route nodes left in the map. Eligibility is checked again against the saved map
+        when persisting; otherwise the map is marked as edited.
         Hardware anchors rows to the GPS fix and odometry position (odom_xy). Simulation
         anchors them to origin_ll at (0, 0), because the sim GPS fix is a datum that is
         not where the field was drawn. A GPS status below zero only logs a warning.
@@ -363,7 +363,8 @@ class TopologyEditService:
         A route whose row end was not built is left out and noted in warnings.
 
         Raises:
-            TopologyEditError: Two docks or route points get the same node name.
+            TopologyEditError: A dock or route name collides, a route target is invalid,
+                or route endpoint coordinates do not match the named nodes.
         """
         if not docks:
             return None

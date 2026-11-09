@@ -52,10 +52,14 @@ def build_dock_nodes(docks: tuple | list, routes: tuple | list, anchor: RowAncho
     A route ends at a row node named ``F<field>R<row>N<n>``. It is found through the ``lf_field``,
     ``lf_row`` and ``lf_frag`` metadata of ``row_nodes`` using the exact exported endpoint identity
     resolved by the farm map reader. The first and last points of a route are the dock and the row end, so only
-    the points between them become nodes. Nothing is mutated or persisted.
+    the points between them become nodes. Routes without a matching row end or dock are listed as
+    skipped. Matched row nodes receive the exported endpoint name in their ``lf_node`` metadata;
+    nothing is persisted.
 
     Raises:
-        ValueError: Two docks or route points get the same node name.
+        ValueError: Generated names collide, a target is not an exported row endpoint, or route
+            endpoint coordinates do not match the named nodes. Earlier row-node metadata changes
+            are not rolled back.
     """
     build = DockBuild()
     ends: dict[str, NodeID] = {}
@@ -100,6 +104,9 @@ def apply_dock_nodes(doc: TopoDoc, build: DockBuild, prefix: str, overwrite: boo
     With ``overwrite``, the dock and route nodes an earlier save with this prefix made are removed first.
     Names taken by unrelated nodes are rejected before mutation. Each link adds an edge from the row end to
     the route, when both are in ``doc``. Call it after the rows are applied.
+
+    Raises ValueError before mutation for a name collision or a link that does not refer to the
+    intended nodes.
     """
     for name, node in build.nodes.items():
         if doc.has_node(name):

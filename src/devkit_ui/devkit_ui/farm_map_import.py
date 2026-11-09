@@ -261,7 +261,10 @@ def parse_farm_map(text: str, *, accept_retired: bool = False) -> FarmMap:
     Checks: version 1; ``multi_field``; a ``farm_map_id`` and ``content_hash`` in the allowed format; status
     ``published`` (``retired`` only with ``accept_retired``, because a retired map has been replaced); every row has
     a field and row number, belongs to this map and is named ``F<field>R<row>``; fields are listed in
-    ``field_numbers``; each field's rows are together; and the hash recomputed from the rows equals ``content_hash``.
+    ``field_numbers``; each field's rows are together; and the hash recomputed from the rows, docks
+    and routes equals ``content_hash``. Dock and route names must be unique within their respective
+    kinds, and each route must start at a dock in the map. A route's target is resolved when it
+    names an exported row endpoint.
 
     Raise FarmMapError with a reason a person can read. The hash is checked last, so a bad file says what is
     wrong with it before saying only that the hash differs.

@@ -240,6 +240,7 @@ class MissionStore:
         Return None and set status for an empty external_id or map_hash, rows and groups of
         different lengths, a validation error, or an external_id already stored; look it up
         with find_by_external_id first to answer a repeat.
+        SQLite and JSON serialization errors propagate.
         """
         err = ('ERROR: empty external_id' if not external_id else
                'ERROR: empty map_hash' if not map_hash else
@@ -403,9 +404,10 @@ class MissionStore:
     # ── derived views (lock-free snapshots) ──────────────────────────────
 
     def today_queue(self) -> list[tuple[str, str, str, dict]]:
-        """Active+due missions expanded into (mission_id, row_id, action,
-        action_params) tuples in declaration order. Lock-free; the executor
-        walks this list and dispatches each tuple in sequence."""
+        """Expand active, due local missions into (mission_id, row_id, action,
+        action_params) tuples in declaration order. Remote missions and missions
+        with unknown actions are excluded. Lock-free; the executor walks this list
+        and dispatches each tuple in sequence."""
         now = now_utc()
         out: list[tuple[str, str, str, dict]] = []
         for m in self._store.missions:

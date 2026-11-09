@@ -205,6 +205,7 @@ class TopoNode:
         }
 
     def patch_role(self, role: str) -> None:
+        """Set the row role in both the node's properties and metadata."""
         self._properties = self._properties._replace(row_role=role)
         self._meta['row_role'] = role
 
@@ -301,6 +302,7 @@ class TopoDoc:
 
     @property
     def meta(self) -> dict:
+        """Return the document's mutable metadata."""
         return self._meta
 
     @property
@@ -394,7 +396,8 @@ class TopoDoc:
 
     def clone_empty(self, map_name: str | None = None) -> 'TopoDoc':
         """Clones the document and returns a new document with no nodes.
-        Retains metadata, actions, definitions, and transformation."""
+        Retains metadata, actions, definitions, and transformation. If a farm map hash
+        is present, the clone is marked as edited."""
         doc = TopoDoc(
             name=map_name or self._name,
             metric_map=self._metric_map,

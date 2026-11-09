@@ -75,7 +75,7 @@ def resolve_steps(topo_doc, queue: list) -> list[MissionStep]:
     Map row IDs are converted to integers; distinct entries for one row are rejected.
     The last exit node for each row wins. Entry names take precedence over row ID aliases.
     Raises MissionError if there is no map, a name is not an entry node, or any queued row
-    lacks an entry or exit node.
+    lacks an entry or exit node. An infinite map row ID raises OverflowError.
     """
     if not topo_doc:
         raise MissionError('no topology map loaded')
