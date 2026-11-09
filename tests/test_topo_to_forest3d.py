@@ -221,9 +221,18 @@ def test_strip_model_collisions_keeps_visuals(tmp_path):
 
 
 def test_strip_model_collisions_leaves_other_categories(tmp_path):
-    """Crop models keep their collisions when weeds are stripped."""
-    d = tmp_path / 'crop' / 'plant'
+    """Models in other categories keep their collisions."""
+    d = tmp_path / 'irrigation' / 'pipe'
     d.mkdir(parents=True)
-    (d / 'model.sdf').write_text(_WEED_SDF.format(n='plant'))
+    (d / 'model.sdf').write_text(_WEED_SDF.format(n='pipe'))
     assert t.strip_model_collisions(tmp_path, 'weed') == 0
     assert len(list(ET.parse(d / 'model.sdf').getroot().iter('collision'))) == 1
+
+
+def test_strip_model_collisions_crop_category(tmp_path):
+    """Crop models can be stripped the same way as weeds."""
+    d = tmp_path / 'crop' / 'maize_1'
+    d.mkdir(parents=True)
+    (d / 'model.sdf').write_text(_WEED_SDF.format(n='maize_1'))
+    assert t.strip_model_collisions(tmp_path, 'crop') == 1
+    assert list(ET.parse(d / 'model.sdf').getroot().iter('collision')) == []

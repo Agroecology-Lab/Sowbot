@@ -1465,9 +1465,10 @@ if __name__ == '__main__':
                 args.world_out,
                 Path(args.models_path) / 'ground' / 'mesh' / 'terrain.stl')
 
-        # Step 5: Weeds are visual only so the robot drives over them.
+        # Step 5: Weeds and crops are visual only so the robot drives over them.
         if args.models_path:
-            strip_model_collisions(args.models_path, 'weed')
+            for _cat in ('weed', 'crop'):
+                strip_model_collisions(args.models_path, _cat)
 
         # Step 6: replace model://crop/ URIs to point at the user-selected model.
         if args.world_out and args.crop_model:
