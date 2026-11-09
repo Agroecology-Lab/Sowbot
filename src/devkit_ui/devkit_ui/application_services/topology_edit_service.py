@@ -15,7 +15,7 @@ from typing import Any
 from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
-from devkit_ui.constants import NAV_ACTION
+from devkit_ui.constants import NAV_ACTION, YAW_GOAL_TOLERANCE
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties, Vector2
 from devkit_ui.topo_dock_builder import (
     DOCK_PREFIX_KEY,
@@ -89,9 +89,9 @@ class TopologyEditService:
         connect_to = self._connect_target(doc, current_node, selected_node)
         is_row = row_id is not None
         if is_row:
-            edge_action, xy_tol, yaw_tol, vert_r = row_action, 0.1, 0.05, 0.5
+            edge_action, xy_tol, yaw_tol, vert_r = row_action, 0.1, YAW_GOAL_TOLERANCE, 0.5
         else:
-            edge_action, xy_tol, yaw_tol, vert_r = NAV_ACTION, 0.3, 0.1, 1.0
+            edge_action, xy_tol, yaw_tol, vert_r = NAV_ACTION, 0.3, YAW_GOAL_TOLERANCE, 1.0
 
         gps_meta: dict = {}
         if gps is not None and gps.status.status >= 0:

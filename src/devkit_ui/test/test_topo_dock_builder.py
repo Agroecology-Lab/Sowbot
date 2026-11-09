@@ -1,6 +1,7 @@
 import math
 import unittest
 
+from devkit_ui.constants import YAW_GOAL_TOLERANCE
 from devkit_ui.farm_map_import import FarmDock
 from devkit_ui.topo_dock_builder import DockBuildSettings, build_dock_nodes
 from devkit_ui.topo_row_builder import RowAnchor
@@ -34,8 +35,8 @@ class TestDockOrientation(unittest.TestCase):
             with self.subTest(heading=heading):
                 self.assertEqual(orientation(dock_node(heading)), expected)
 
-    def test_a_dock_with_a_heading_keeps_the_tight_yaw_tolerance(self) -> None:
-        self.assertEqual(dock_node(0.0).properties.yaw_goal_tolerance, 0.1)
+    def test_a_dock_with_a_heading_uses_the_shared_yaw_tolerance(self) -> None:
+        self.assertEqual(dock_node(0.0).properties.yaw_goal_tolerance, YAW_GOAL_TOLERANCE)
 
     def test_a_dock_without_a_heading_accepts_any_yaw(self) -> None:
         """Verify no heading means identity pose and no demanded turn, not a hidden +x requirement."""

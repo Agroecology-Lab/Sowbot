@@ -1,3 +1,5 @@
+import math
+
 NODE_NAME = 'nicegui'
 
 # Row edges default to geometry-only traversal: it works with no crop present,
@@ -6,6 +8,11 @@ NODE_NAME = 'nicegui'
 ROW_ACTION = 'row_traversal'
 VISION_ROW_ACTION = 'limbic_row_follow'
 NAV_ACTION = 'navigate_to_pose'
+
+# Final heading accepted at a row or dock node, 45 degrees in radians. A tight value (0.05 rad was
+# one control step of the rotate-to-heading spin) made the controller oscillate at the node until
+# the progress checker aborted the goal.
+YAW_GOAL_TOLERANCE = round(math.radians(45), 3)
 
 # Field 27's actual GPS extent, derived from maps/recon_logs/recon.csv (the
 # real Agri-Field-Dataset field-27 mesh, Zenodo 7805321 — France, ~372m x

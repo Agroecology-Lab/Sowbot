@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 
 from devkit_f2c_planner.f2c_planner import f2c_latlon_to_xy, f2c_xy_to_latlon
-from devkit_ui.constants import NAV_ACTION
+from devkit_ui.constants import NAV_ACTION, YAW_GOAL_TOLERANCE
 from devkit_ui.models import (
     NodeID,
     TopoDoc,
@@ -93,7 +93,7 @@ def _make_node(name: str, x: float, y: float, role: str, lat: float, lon: float,
         pose=TopoPose(x=x, y=y, orientation=yaw_to_orientation(yaw)),
         properties=TopoProperties(
             xy_goal_tolerance=0.1,
-            yaw_goal_tolerance=0.05,
+            yaw_goal_tolerance=YAW_GOAL_TOLERANCE,
             dropped_by='webui_f2c',
             timestamp=settings.timestamp,
             gps_lat=round(lat, 7),

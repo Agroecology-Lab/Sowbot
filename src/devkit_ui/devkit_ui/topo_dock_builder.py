@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 
 from devkit_f2c_planner.f2c_planner import f2c_latlon_to_xy
-from devkit_ui.constants import NAV_ACTION
+from devkit_ui.constants import NAV_ACTION, YAW_GOAL_TOLERANCE
 from devkit_ui.models import (
     NodeID,
     TopoDoc,
@@ -29,7 +29,6 @@ DOCK_PREFIX_KEY = 'dock_prefix'
 _NODE_VERTS = (Vector2(x=-1.0, y=-1.0), Vector2(x=1.0, y=-1.0), Vector2(x=1.0, y=1.0), Vector2(x=-1.0, y=1.0))
 # A dock or route point with no heading accepts any final yaw.
 ANY_YAW_TOLERANCE = math.pi
-HEADED_YAW_TOLERANCE = 0.1
 
 
 @dataclass(frozen=True)
@@ -199,7 +198,7 @@ def _make_node(name: str, anchor: RowAnchor, east: float, north: float, lat: flo
                       orientation=yaw_to_orientation(0.0 if yaw is None else yaw)),
         properties=TopoProperties(
             xy_goal_tolerance=0.3,
-            yaw_goal_tolerance=ANY_YAW_TOLERANCE if yaw is None else HEADED_YAW_TOLERANCE,
+            yaw_goal_tolerance=ANY_YAW_TOLERANCE if yaw is None else YAW_GOAL_TOLERANCE,
             dropped_by='webui_f2c',
             timestamp=settings.timestamp,
             gps_lat=round(lat, 7),
