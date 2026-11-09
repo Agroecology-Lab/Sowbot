@@ -237,6 +237,12 @@ class TestRowOrientation(unittest.TestCase):
         self.assertAlmostEqual(yaw_of(build.nodes[chain[0]]), 0.0, places=4)
         self.assertAlmostEqual(yaw_of(build.nodes[chain[-1]]), math.pi / 2, places=4)
 
+    def test_every_row_node_accepts_any_yaw_because_rows_are_travelled_both_ways(self) -> None:
+        build = build_row_nodes([swath((0.0, 0.0), (9.0, 0.0), (9.0, 9.0))], ANCHOR,
+                                settings(contour_used=True))
+
+        self.assertEqual({n.properties.yaw_goal_tolerance for n in build.nodes.values()}, {math.pi})
+
     def test_a_node_on_top_of_the_exit_keeps_the_row_heading(self) -> None:
         """Verify coincident nodes take a neighbouring segment's heading, not yaw 0 (+x)."""
         north = math.pi / 2

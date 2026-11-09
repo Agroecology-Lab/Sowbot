@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 
 from devkit_f2c_planner.f2c_planner import f2c_latlon_to_xy, f2c_xy_to_latlon
-from devkit_ui.constants import NAV_ACTION, YAW_GOAL_TOLERANCE
+from devkit_ui.constants import ANY_YAW_TOLERANCE, NAV_ACTION
 from devkit_ui.models import (
     NodeID,
     TopoDoc,
@@ -84,7 +84,8 @@ def _make_node(name: str, x: float, y: float, role: str, lat: float, lon: float,
     """Create one row node carrying its row identity in both properties and metadata.
 
     lf is the LiteFarm (field, row, frag) of the swath, written to the metadata as lf_field,
-    lf_row and lf_frag. yaw is the goal heading in radians from map +x, counter-clockwise.
+    lf_row and lf_frag. yaw is the pose heading in radians from map +x, counter-clockwise. The node accepts
+    any final yaw, since a row is travelled in either direction.
     """
     node = TopoNode(
         name=name,
@@ -93,7 +94,7 @@ def _make_node(name: str, x: float, y: float, role: str, lat: float, lon: float,
         pose=TopoPose(x=x, y=y, orientation=yaw_to_orientation(yaw)),
         properties=TopoProperties(
             xy_goal_tolerance=0.3,
-            yaw_goal_tolerance=YAW_GOAL_TOLERANCE,
+            yaw_goal_tolerance=ANY_YAW_TOLERANCE,
             dropped_by='webui_f2c',
             timestamp=settings.timestamp,
             gps_lat=round(lat, 7),
@@ -133,8 +134,8 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
 
     Each usable swath becomes an IN and an OUT node joined by edges in both directions
     using ``settings.row_action``. The pose of each node faces along the row, from IN towards OUT
-    (the bearing to the next node, and for OUT that of the last segment), so rows running along
-    map -x do not ask the robot to turn round at their ends. With contour mode, rows also get intermediate
+    (the bearing to the next node, and for OUT that of the last segment). IN and OUT only name the ends:
+    a row is travelled either way, so every node accepts any final yaw and no goal asks for a turn. With contour mode, rows also get intermediate
     waypoints every ``settings.waypoint_interval_m`` meters of arc length, including
     two-point swaths; rows shorter than one interval, and all rows without contour
     mode, keep a single entry-to-exit edge.
@@ -210,8 +211,8 @@ def build_row_nodes(swaths: list, anchor: RowAnchor, settings: RowBuildSettings)
                 wlat, wlon = f2c_xy_to_latlon(wx, wy, anchor.lat, anchor.lon)
                 waypoints.append((name, round(anchor.x + wx, 3), round(anchor.y + wy, 3), wlat, wlon))
 
-        # Every node faces along the row from IN towards OUT, so a robot that arrives travelling
-        # that way is already aligned and the goal checker does not ask for a spin.
+        # Every node faces along the row from IN towards OUT. The goal checker accepts any yaw,
+        # because the robot may arrive travelling either way.
         yaws = _bearings([(in_x, in_y), *((x, y) for _, x, y, _, _ in waypoints), (out_x, out_y)])
         waypoint_names: list[NodeID] = []
         for (name, x, y, wlat, wlon), yaw in zip(waypoints, yaws[1:-1], strict=True):

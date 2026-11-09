@@ -14,6 +14,9 @@ NAV_ACTION = 'navigate_to_pose'
 # the progress checker aborted the goal.
 YAW_GOAL_TOLERANCE = round(math.radians(45), 3)
 
+# Final heading tolerance of a node that demands no heading: a half turn, so any yaw is accepted.
+ANY_YAW_TOLERANCE = math.pi
+
 # Field 27's actual GPS extent, derived from maps/recon_logs/recon.csv (the
 # real Agri-Field-Dataset field-27 mesh, Zenodo 7805321 — France, ~372m x
 # 252m footprint, downsampled to a ~6.5m grid — replacing an earlier

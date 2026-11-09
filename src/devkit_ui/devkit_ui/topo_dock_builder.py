@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 
 from devkit_f2c_planner.f2c_planner import f2c_latlon_to_xy
-from devkit_ui.constants import NAV_ACTION, YAW_GOAL_TOLERANCE
+from devkit_ui.constants import ANY_YAW_TOLERANCE, NAV_ACTION, YAW_GOAL_TOLERANCE
 from devkit_ui.models import (
     NodeID,
     TopoDoc,
@@ -27,8 +27,6 @@ from devkit_ui.topo_row_builder import RowAnchor
 # Meta key on every dock and route node: the prefix of the save that made it.
 DOCK_PREFIX_KEY = 'dock_prefix'
 _NODE_VERTS = (Vector2(x=-1.0, y=-1.0), Vector2(x=1.0, y=-1.0), Vector2(x=1.0, y=1.0), Vector2(x=-1.0, y=1.0))
-# A dock or route point with no heading accepts any final yaw.
-ANY_YAW_TOLERANCE = math.pi
 
 
 @dataclass(frozen=True)
