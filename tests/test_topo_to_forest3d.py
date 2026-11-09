@@ -3,6 +3,7 @@ import json
 import math
 import sys
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from itertools import pairwise
 from pathlib import Path
 
@@ -297,3 +298,76 @@ def test_readonly_weeds_are_staged_and_world_redirected(tmp_path):
     uris = [el.text for el in ET.parse(world).iter('uri')]
     assert uris == [(staged / 'weed' / 'weed1' / 'model.sdf').as_uri(), 'model://ground']
     assert t.stage_readonly_weeds(staged, tmp_path / 'unused', world) == staged
+
+
+@pytest.mark.parametrize('category', ['crop', 'weed'])
+@pytest.mark.parametrize('link_kind', ['file', 'directory', 'category', 'hardlink'])
+@pytest.mark.parametrize('has_collision', [True, False])
+def test_strip_model_collisions_isolates_linked_plants(tmp_path, category, link_kind, has_collision):
+    source = tmp_path / 'irrigation' / 'pipe'
+    source.mkdir(parents=True)
+    original = _WEED_SDF.format(n='pipe')
+    if not has_collision:
+        root = ET.fromstring(original)
+        link = root.find('model/link')
+        link.remove(link.find('collision'))
+        original = ET.tostring(root, encoding='unicode')
+    (source / 'model.sdf').write_text(original)
+    plant = tmp_path / category / 'plant'
+    if link_kind == 'category':
+        plant.parent.symlink_to(source.parent, target_is_directory=True)
+        plant = plant.parent / 'pipe'
+    else:
+        plant.parent.mkdir()
+        if link_kind == 'directory':
+            plant.symlink_to(source, target_is_directory=True)
+        else:
+            plant.mkdir()
+            if link_kind == 'file':
+                (plant / 'model.sdf').symlink_to(source / 'model.sdf')
+            else:
+                (plant / 'model.sdf').hardlink_to(source / 'model.sdf')
+
+    assert t.strip_model_collisions(tmp_path, category) == int(has_collision)
+    assert (source / 'model.sdf').read_text() == original
+    assert list(ET.parse(plant / 'model.sdf').getroot().iter('collision')) == []
+    assert not (plant / 'model.sdf').is_symlink()
+    assert t.strip_model_collisions(tmp_path, category) == 0
+
+
+@pytest.mark.parametrize('failure', [OSError, KeyboardInterrupt])
+@pytest.mark.parametrize('stage', ['write', 'replace'])
+def test_strip_model_collisions_preserves_original_on_write_failure(tmp_path, monkeypatch, failure, stage):
+    plant = tmp_path / 'crop' / 'plant'
+    plant.mkdir(parents=True)
+    sdf = plant / 'model.sdf'
+    original = _WEED_SDF.format(n='plant')
+    sdf.write_text(original)
+    open_temporary = t.tempfile.NamedTemporaryFile
+
+    @contextmanager
+    def failing_temporary(**kwargs):
+        with open_temporary(**kwargs) as handle:
+            write = handle.write
+
+            def fail_write(text):
+                write(text[:20])
+                raise failure('interrupted write')
+
+            monkeypatch.setattr(handle, 'write', fail_write)
+            yield handle
+
+    def fail_replace(path, target):
+        assert path.parent == sdf.parent
+        assert target == sdf
+        assert list(ET.parse(path).getroot().iter('collision')) == []
+        raise failure('interrupted replacement')
+
+    if stage == 'write':
+        monkeypatch.setattr(t.tempfile, 'NamedTemporaryFile', failing_temporary)
+    else:
+        monkeypatch.setattr(Path, 'replace', fail_replace)
+    with pytest.raises(failure):
+        t.strip_model_collisions(tmp_path, 'crop')
+    assert sdf.read_text() == original
+    assert list(plant.iterdir()) == [sdf]

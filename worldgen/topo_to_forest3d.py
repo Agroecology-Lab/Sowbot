@@ -23,6 +23,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -1144,13 +1145,31 @@ def patch_model_mesh_scale(models_path, category, model_name, user_factor):
           f"(base × {user_factor:.3f})")
 
 
+def _materialize_plant_directory(path):
+    """Give a linked plant directory its own files before editing them."""
+    if not path.is_symlink():
+        return
+    target = path.readlink()
+    with tempfile.TemporaryDirectory(dir=path.parent) as staging:
+        copy = Path(staging) / 'model'
+        shutil.copytree(path, copy)
+        path.unlink()
+        try:
+            copy.rename(path)
+        except BaseException:
+            path.symlink_to(target, target_is_directory=True)
+            raise
+
+
 def strip_model_collisions(models_path, category):
     """Remove every <collision> from the models under models_path/category.
 
     Weeds are visual only: the robot must drive over them, so they must not
     take part in physics. A weed model with a <collision> (an imported one, or
     a stock one that gained a collision mesh) is a solid obstacle to the
-    tracks. Rewrites a model.sdf only if it had a collision. Return the number
+    tracks. Materializes linked plant models so other categories retain their
+    collisions. Writes through a temporary file before replacing model.sdf.
+    Rewrites a model.sdf if it had a collision or shares its file. Return the number
     of <collision> elements removed. Missing folders count as zero; an
     unparsable model.sdf is skipped with a warning. Weed includes are followed
     only within the weed directory. Bytes outside collisions are preserved.
@@ -1160,14 +1179,16 @@ def strip_model_collisions(models_path, category):
     root_dir = Path(models_path) / category
     if not root_dir.is_dir():
         return 0
+    _materialize_plant_directory(root_dir)
     removed = 0
     pending = sorted(root_dir.glob('*/model.sdf'))
     visited = set()
     while pending:
-        sdf_path = pending.pop().resolve()
-        if sdf_path in visited or not sdf_path.is_relative_to(root_dir.resolve()):
+        sdf_path = pending.pop().absolute()
+        if sdf_path in visited or not sdf_path.is_relative_to(root_dir.absolute()):
             continue
         visited.add(sdf_path)
+        _materialize_plant_directory(sdf_path.parent)
         original = sdf_path.read_bytes()
         try:
             tree = _ET.fromstring(original)
@@ -1181,8 +1202,18 @@ def strip_model_collisions(models_path, category):
                 if target is not None and target.is_file():
                     pending.append(target)
         stripped, found = _remove_collision_spans(original)
-        if found:
-            sdf_path.write_bytes(stripped)
+        if found or sdf_path.is_symlink() or sdf_path.stat().st_nlink > 1:
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=sdf_path.parent, suffix='.sdf',
+                                                 mode='wb', delete=False) as temporary:
+                    temporary_path = Path(temporary.name)
+                    temporary.write(stripped)
+                temporary_path.chmod(sdf_path.stat().st_mode)
+                temporary_path.replace(sdf_path)
+            finally:
+                if temporary_path is not None:
+                    temporary_path.unlink(missing_ok=True)
             print(f"Removed {found} collision(s) from {sdf_path}")
             removed += found
     return removed
