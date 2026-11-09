@@ -389,7 +389,7 @@ python3 tools/agbot-diagnostic.py full
 
 ### 2. The Limbic System (Executive)
 * **Hardware:** Avaota A1 #1 (Allwinner T527).
-* **Software:** ROS 2 Jazzy + `topological_navigation` (AOC branch).
+* **Software:** ROS 2 Jazzy + `topological_navigation` (`main`).
 * **Role:** Navigation Executive.
 * **Function:** Runs the Nav2-based Topological Navigation stack.
   Manages `NavigateToPose` actions and Action on Condition (AOC) logic.
@@ -458,7 +458,7 @@ It would replace ArduPilot on the controller, which is the current path.
 | **devkit_bringup** | local | MIT | ✅ | *None (Config/Launch)* | |
 | **sowbot_row_follow** | caatingarobotics | BSD-2-Clause | ✅ | [de Silva et al., 2024](https://arxiv.org/abs/2209.14003) | Triangle Scan Method (TSM) for visual crop row navigation; ©PRBonn + ©Agroecology Lab |
 | **caatingarobotics** *(devkit_simulation, caatinga_nav, caatinga_vision)* | [samuk/caatingarobotics](https://github.com/samuk/caatingarobotics) (cloned in the Dockerfile); upstream work by [joaodemouragy-hash/caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics) | Apache-2.0 | ✅ | *None (Fork Infrastructure)* | row_follow is the BSD-2-Clause exception, above |
-| **topological_navigation** | LCAS (`aoc_refactor`) | Apache-2.0 (©LCAS) | ✅ | [Fentanes et al., 2015](https://www.researchgate.net/publication/282752920_Now_or_later_Predicting_and_maximising_success_of_navigation_actions_from_long-term_experience) | High-level planner; derived from the EU STRANDS long-term autonomy project framework |
+| **topological_navigation** | LCAS (`main`) | Apache-2.0 (©LCAS) | ✅ | [Fentanes et al., 2015](https://www.researchgate.net/publication/282752920_Now_or_later_Predicting_and_maximising_success_of_navigation_actions_from_long-term_experience) | High-level planner; derived from the EU STRANDS long-term autonomy project framework |
 | **fusioncore** | manankharwar | Apache-2.0 | ✅ | [Kharwar, 2026](https://arxiv.org/abs/2605.25239) | GNSS fusion; patched in-build; retain NOTICE if present |
 | **Forest3D** | unitsSpaceLab | GPL (©UNITS Space Lab) | Do not ship in final product | [Cottiga,S., Bourr, K., & Seriani, S. (2026)](https://kbourr.com/#publications)| Sim-only — 3D forestry /agriculture simulation environment |
 | **ublox_dgnss** | aussierobots | Apache-2.0 | ✅ | *None (Hardware Driver)* | GNSS driver |
