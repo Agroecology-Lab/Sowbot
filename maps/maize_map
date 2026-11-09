@@ -90,7 +90,7 @@ nodes:
       row_id: 1
       row_role: entry
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -140,7 +140,7 @@ nodes:
       row_id: 1
       row_role: exit
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -189,7 +189,7 @@ nodes:
       row_id: 2
       row_role: entry
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -235,7 +235,7 @@ nodes:
       row_id: 2
       row_role: exit
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -284,7 +284,7 @@ nodes:
       row_id: 3
       row_role: entry
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -333,7 +333,7 @@ nodes:
       row_id: 3
       row_role: exit
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -382,7 +382,7 @@ nodes:
       row_id: 4
       row_role: entry
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -431,7 +431,7 @@ nodes:
       row_id: 4
       row_role: exit
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -480,7 +480,7 @@ nodes:
       row_id: 5
       row_role: entry
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -529,7 +529,7 @@ nodes:
       row_id: 5
       row_role: exit
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -582,7 +582,7 @@ nodes:
       row_id: 6
       row_role: entry
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:
@@ -625,7 +625,7 @@ nodes:
       row_id: 6
       row_role: exit
       timestamp: 09-11-2026_13-29-05
-      xy_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.785
     verts: []
 - meta:

@@ -92,7 +92,7 @@ def _make_node(name: str, x: float, y: float, role: str, lat: float, lon: float,
         edges=[],
         pose=TopoPose(x=x, y=y, orientation=yaw_to_orientation(yaw)),
         properties=TopoProperties(
-            xy_goal_tolerance=0.1,
+            xy_goal_tolerance=0.3,
             yaw_goal_tolerance=YAW_GOAL_TOLERANCE,
             dropped_by='webui_f2c',
             timestamp=settings.timestamp,

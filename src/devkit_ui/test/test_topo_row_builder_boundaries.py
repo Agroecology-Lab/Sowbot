@@ -84,7 +84,7 @@ class TestBuildBoundaries(unittest.TestCase):
         lat, lon = swath((0, 5))[0]
         self.assertEqual(properties['gps_lat'], round(lat, 7))
         self.assertEqual(properties['gps_lon'], round(lon, 7))
-        self.assertEqual(properties['xy_goal_tolerance'], 0.1)
+        self.assertEqual(properties['xy_goal_tolerance'], 0.3)
         self.assertEqual(properties['yaw_goal_tolerance'], YAW_GOAL_TOLERANCE)
         for key, value in {
             'row_id': 9, 'row_role': 'waypoint', 'gps_fix_type': 2,
