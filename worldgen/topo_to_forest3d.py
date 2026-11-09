@@ -17,9 +17,13 @@ generates raised beds (crop rows) with furrows between — the driving lanes.
 import argparse
 import json
 import math
+import os
 import re
+import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -1141,6 +1145,165 @@ def patch_model_mesh_scale(models_path, category, model_name, user_factor):
           f"(base × {user_factor:.3f})")
 
 
+def _materialize_plant_directory(path):
+    """Give a linked plant directory its own files before editing them."""
+    if not path.is_symlink():
+        return
+    target = path.readlink()
+    with tempfile.TemporaryDirectory(dir=path.parent) as staging:
+        copy = Path(staging) / 'model'
+        shutil.copytree(path, copy)
+        path.unlink()
+        try:
+            copy.rename(path)
+        except BaseException:
+            path.symlink_to(target, target_is_directory=True)
+            raise
+
+
+def strip_model_collisions(models_path, category):
+    """Remove every <collision> from the models under models_path/category.
+
+    Weeds are visual only: the robot must drive over them, so they must not
+    take part in physics. A weed model with a <collision> (an imported one, or
+    a stock one that gained a collision mesh) is a solid obstacle to the
+    tracks. Materializes linked plant models so other categories retain their
+    collisions. Writes through a temporary file before replacing model.sdf.
+    Rewrites a model.sdf if it had a collision or shares its file. Return the number
+    of <collision> elements removed. Missing folders count as zero; an
+    unparsable model.sdf is skipped with a warning. Weed includes are followed
+    only within the weed directory. Bytes outside collisions are preserved.
+    """
+    import xml.etree.ElementTree as _ET
+
+    root_dir = Path(models_path) / category
+    if not root_dir.is_dir():
+        return 0
+    _materialize_plant_directory(root_dir)
+    removed = 0
+    pending = sorted(root_dir.glob('*/model.sdf'))
+    visited = set()
+    while pending:
+        sdf_path = pending.pop().absolute()
+        if sdf_path in visited or not sdf_path.is_relative_to(root_dir.absolute()):
+            continue
+        visited.add(sdf_path)
+        _materialize_plant_directory(sdf_path.parent)
+        original = sdf_path.read_bytes()
+        try:
+            tree = _ET.fromstring(original)
+        except _ET.ParseError as exc:
+            print(f"WARNING: cannot parse {sdf_path} — collisions left in "
+                  f"place: {exc}", file=sys.stderr)
+            continue
+        if category == 'weed':
+            for uri in tree.findall('.//include/uri'):
+                target = _weed_include_path(uri.text or '', sdf_path.parent, root_dir)
+                if target is not None and target.is_file():
+                    pending.append(target)
+        stripped, found = _remove_collision_spans(original)
+        if found or sdf_path.is_symlink() or sdf_path.stat().st_nlink > 1:
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=sdf_path.parent, suffix='.sdf',
+                                                 mode='wb', delete=False) as temporary:
+                    temporary_path = Path(temporary.name)
+                    temporary.write(stripped)
+                temporary_path.chmod(sdf_path.stat().st_mode)
+                temporary_path.replace(sdf_path)
+            finally:
+                if temporary_path is not None:
+                    temporary_path.unlink(missing_ok=True)
+            print(f"Removed {found} collision(s) from {sdf_path}")
+            removed += found
+    return removed
+
+
+def _weed_include_path(uri, parent, weed_root):
+    """Resolve local weed includes without following shared asset references."""
+    uri = uri.strip()
+    if uri.startswith('model://weed/'):
+        target = weed_root / uri.removeprefix('model://weed/')
+    elif uri.startswith('file://'):
+        target = Path(uri.removeprefix('file://'))
+        if not target.is_absolute():
+            target = parent / target
+    elif '://' not in uri:
+        target = parent / uri
+    else:
+        return None
+    target = target.resolve()
+    if not target.is_relative_to(weed_root.resolve()):
+        return None
+    return target / 'model.sdf' if target.is_dir() else target
+
+
+def _remove_collision_spans(original):
+    """Use XML byte offsets to preserve everything outside collision elements."""
+    from xml.parsers import expat
+
+    parser = expat.ParserCreate()
+    spans = []
+    stack = []
+    found = 0
+    tag = re.compile(rb'''<(?:[^>"']|"[^"]*"|'[^']*')*>''')
+
+    def start(name, _attrs):
+        nonlocal found
+        if name == 'collision':
+            found += 1
+            begin = parser.CurrentByteIndex
+            opening = tag.match(original, begin)
+            stack.append((begin, opening.end() if opening.group().endswith(b'/>') else None))
+
+    def end(name):
+        if name == 'collision':
+            begin, finish = stack.pop()
+            if not stack:
+                finish = finish or tag.match(original, parser.CurrentByteIndex).end()
+                spans.append((begin, finish))
+
+    parser.StartElementHandler = start
+    parser.EndElementHandler = end
+    parser.Parse(original, True)
+    for begin, finish in reversed(spans):
+        original = original[:begin] + original[finish:]
+    return original, found
+
+
+def stage_readonly_weeds(models_path, base_dir, world_path):
+    """Copy read-only weeds and redirect world/local includes to writable copies."""
+    weed_root = Path(models_path) / 'weed'
+    files = [weed_root, *weed_root.rglob('*')] if weed_root.is_dir() else []
+    if all(os.access(p, os.W_OK) and p.stat().st_mode & 0o222 for p in files):
+        return Path(models_path)
+    staged_models = Path(base_dir).resolve() / 'visual_models'
+    staged_root = staged_models / 'weed'
+    shutil.copytree(weed_root, staged_root, dirs_exist_ok=True)
+    for path in [staged_root, *staged_root.rglob('*')]:
+        path.chmod(path.stat().st_mode | stat.S_IWUSR)
+
+    def redirect(match, parent):
+        target = _weed_include_path(match[2], parent, weed_root)
+        if target is None:
+            # Keep relative references to shared assets valid after moving weeds.
+            uri = match[2].strip()
+            if '://' not in uri:
+                return match[1] + (parent / uri).resolve().as_uri() + match[3]
+            return match[0]
+        relative = target.relative_to(weed_root.resolve())
+        return match[1] + (staged_root / relative).as_uri() + match[3]
+
+    uri_pattern = re.compile(r'(<uri>)([^<]+)(</uri>)')
+    for source in weed_root.rglob('*.sdf'):
+        destination = staged_root / source.relative_to(weed_root)
+        destination.write_text(uri_pattern.sub(lambda m, parent=source.parent: redirect(m, parent), source.read_text()))
+    if world_path:
+        world = Path(world_path)
+        world.write_text(uri_pattern.sub(lambda m: redirect(m, world.parent), world.read_text()))
+    return staged_models
+
+
 def write_spawn_pose(x, y, z, output_path):
     """Write the robot spawn pose so sim.launch.py can read it at startup."""
     Path(output_path).write_text(f"{x} {y} {z}\n")
@@ -1428,6 +1591,12 @@ if __name__ == '__main__':
                 args.world_out,
                 Path(args.models_path) / 'ground' / 'mesh' / 'terrain.stl')
 
+        # Step 5: Weeds and crops are visual only so the robot drives over them.
+        if args.models_path:
+            weed_models_path = stage_readonly_weeds(args.models_path, base_dir, args.world_out)
+            strip_model_collisions(weed_models_path, 'weed')
+            strip_model_collisions(args.models_path, 'crop')
+
         # Step 6: replace model://crop/ URIs to point at the user-selected model.
         if args.world_out and args.crop_model:
             patch_crop_model_uri(args.world_out, args.crop_model)
@@ -1450,6 +1619,7 @@ if __name__ == '__main__':
                 _model = _cat_model_map.get(_cat)
                 if _model:
                     patch_model_mesh_scale(
-                        args.models_path, _cat, _model, args.plant_scale)
+                        weed_models_path if _cat == 'weed' else args.models_path,
+                        _cat, _model, args.plant_scale)
 
         print("Done.")

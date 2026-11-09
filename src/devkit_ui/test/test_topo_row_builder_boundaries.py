@@ -3,7 +3,7 @@
 import copy
 import unittest
 
-from devkit_ui.constants import NAV_ACTION, ROW_ACTION
+from devkit_ui.constants import ANY_YAW_TOLERANCE, NAV_ACTION, ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 from devkit_ui.topo_row_builder import add_missing_edges, apply_row_nodes, build_row_nodes, plan_row_repair
 from test_topo_row_builder import ANCHOR, settings, straight_rows, swath, targets
@@ -84,8 +84,8 @@ class TestBuildBoundaries(unittest.TestCase):
         lat, lon = swath((0, 5))[0]
         self.assertEqual(properties['gps_lat'], round(lat, 7))
         self.assertEqual(properties['gps_lon'], round(lon, 7))
-        self.assertEqual(properties['xy_goal_tolerance'], 0.1)
-        self.assertEqual(properties['yaw_goal_tolerance'], 0.05)
+        self.assertEqual(properties['xy_goal_tolerance'], 0.3)
+        self.assertEqual(properties['yaw_goal_tolerance'], ANY_YAW_TOLERANCE)
         for key, value in {
             'row_id': 9, 'row_role': 'waypoint', 'gps_fix_type': 2,
             'gps_hdop': None, 'timestamp': '01-01-2026_00-00-00', 'dropped_by': 'webui_f2c',

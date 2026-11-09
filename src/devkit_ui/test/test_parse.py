@@ -6,7 +6,7 @@ from deepdiff import DeepDiff
 
 from devkit_ui.constants import NAV_ACTION, ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoNode
-from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
+from devkit_ui.parse import _topo_from_dict, dump_topo_yaml, parse_topo_yaml
 
 
 class TestParseTopo(unittest.TestCase):
@@ -75,3 +75,34 @@ class TestParseTopo(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestOrientationValidation(unittest.TestCase):
+    @staticmethod
+    def doc_with(orientation: dict | None) -> dict:
+        pose = {'position': {'x': 0.0, 'y': 0.0}}
+        if orientation is not None:
+            pose['orientation'] = orientation
+        return {'nodes': [{'node': {'name': 'A', 'pose': pose, 'edges': []}, 'meta': {}}]}
+
+    def orientation(self, orientation: dict | None) -> dict:
+        node = _topo_from_dict(self.doc_with(orientation)).get_node('A')
+        return node.to_dict()['node']['pose']['orientation']
+
+    def test_an_absent_or_empty_orientation_is_the_identity(self) -> None:
+        identity = {'x': 0.0, 'y': 0.0, 'z': 0.0, 'w': 1.0}
+
+        self.assertEqual(self.orientation(None), identity)
+        self.assertEqual(self.orientation({}), identity)
+
+    def test_a_partial_orientation_with_a_nonzero_quaternion_is_kept(self) -> None:
+        self.assertEqual(self.orientation({'z': 1.0, 'w': 0.0}), {'x': 0.0, 'y': 0.0, 'z': 1.0, 'w': 0.0})
+
+    def test_a_partial_orientation_that_makes_the_zero_quaternion_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, 'node A.*not a valid quaternion'):
+            _topo_from_dict(self.doc_with({'w': 0.0}))
+
+    def test_a_nonfinite_orientation_is_rejected(self) -> None:
+        for value in (float('nan'), float('inf')):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                _topo_from_dict(self.doc_with({'z': value, 'w': 1.0}))

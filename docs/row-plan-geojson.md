@@ -53,7 +53,9 @@ They are part of the farm map's `content_hash` and are also checked for form.
   The exact exported identity is preserved; an arbitrary nonzero index is not an exit alias.
 - Supplied route endpoints must match the named dock and row endpoint at 7 decimal places.
 - A route whose row is not in the map is skipped with a warning. Its dock is still saved.
-- `heading_deg` is stored in the dock node's metadata and is not used for its pose.
+- `heading_deg` is stored in the dock node's metadata and sets its pose heading. It is a compass bearing, degrees
+  clockwise from north, so 90 faces east (map +x). A dock with a null `heading_deg`, and every route waypoint, has
+  `yaw_goal_tolerance` of pi, so the robot is not asked to turn for a heading the map does not give.
 
 ## Hash
 

@@ -3,6 +3,7 @@ import json
 import math
 import sys
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from itertools import pairwise
 from pathlib import Path
 
@@ -197,3 +198,176 @@ def test_extract_rows_projects_unnumbered_waypoints_along_reversed_chord():
     ]}
     (row,) = t.extract_rows(nodes)
     assert row['path'] == [(10, 10), (8, 7), (2, 3), (0, 0)]
+
+
+_WEED_SDF = (
+    '<sdf version="1.8"><model name="{n}"><static>true</static>'
+    '<link name="link"><collision name="c"><geometry><box><size>1 1 1</size>'
+    '</box></geometry></collision><visual name="v"><geometry><box>'
+    '<size>1 1 1</size></box></geometry></visual></link></model></sdf>')
+
+
+def test_strip_model_collisions_keeps_visuals(tmp_path):
+    """Weed models lose their collisions but keep their visuals."""
+    for name in ('weed1', 'weed2'):
+        d = tmp_path / 'weed' / name
+        d.mkdir(parents=True)
+        (d / 'model.sdf').write_text(_WEED_SDF.format(n=name))
+    assert t.strip_model_collisions(tmp_path, 'weed') == 2
+    for name in ('weed1', 'weed2'):
+        root = ET.parse(tmp_path / 'weed' / name / 'model.sdf').getroot()
+        assert list(root.iter('collision')) == []
+        assert len(list(root.iter('visual'))) == 1
+    assert t.strip_model_collisions(tmp_path, 'weed') == 0
+
+
+def test_strip_model_collisions_leaves_other_categories(tmp_path):
+    """Models in other categories keep their collisions."""
+    d = tmp_path / 'irrigation' / 'pipe'
+    d.mkdir(parents=True)
+    (d / 'model.sdf').write_text(_WEED_SDF.format(n='pipe'))
+    assert t.strip_model_collisions(tmp_path, 'weed') == 0
+    assert len(list(ET.parse(d / 'model.sdf').getroot().iter('collision'))) == 1
+
+
+def test_strip_model_collisions_crop_category(tmp_path):
+    """Crop models can be stripped the same way as weeds."""
+    d = tmp_path / 'crop' / 'maize_1'
+    d.mkdir(parents=True)
+    (d / 'model.sdf').write_text(_WEED_SDF.format(n='maize_1'))
+    assert t.strip_model_collisions(tmp_path, 'crop') == 1
+    assert list(ET.parse(d / 'model.sdf').getroot().iter('collision')) == []
+
+
+def test_strip_collisions_preserves_original_bytes(tmp_path, capsys):
+    model = tmp_path / 'weed' / 'weed1'
+    model.mkdir(parents=True)
+    collision = b'<collision name="a > b"><geometry/></collision>'
+    original = (b'<?xml version="1.0"?>\r\n<!-- keep <collision/> -->\r\n'
+                b'<sdf><model name="caf\xc3\xa9"><link>' + collision
+                + b'<collision name="empty" /> <!-- tail -->'
+                b'<visual><![CDATA[<collision/>]]></visual></link></model></sdf>')
+    sdf = model / 'model.sdf'
+    sdf.write_bytes(original)
+    assert t.strip_model_collisions(tmp_path, 'weed') == 2
+    assert sdf.read_bytes() == original.replace(collision, b'').replace(b'<collision name="empty" />', b'')
+    # A malformed direct model keeps the existing warning/skip behavior.
+    (tmp_path / 'weed' / 'bad').mkdir()
+    bad = tmp_path / 'weed' / 'bad' / 'model.sdf'
+    bad.write_text('<sdf>')
+    assert t.strip_model_collisions(tmp_path, 'weed') == 0
+    assert bad.read_text() == '<sdf>'
+    assert 'cannot parse' in capsys.readouterr().err
+
+
+def test_strip_follows_only_weed_includes(tmp_path):
+    weed = tmp_path / 'weed' / 'weed1'
+    weed.mkdir(parents=True)
+    child = weed / 'parts' / 'included.sdf'
+    child.parent.mkdir()
+    child.write_text(_WEED_SDF.format(n='child'))
+    shared = tmp_path / 'crop' / 'shared'
+    shared.mkdir(parents=True)
+    shared_sdf = shared / 'model.sdf'
+    shared_sdf.write_text(_WEED_SDF.format(n='crop'))
+    original = shared_sdf.read_bytes()
+    (weed / 'model.sdf').write_text(
+        '<sdf><model name="weed"><include><uri>parts/included.sdf</uri></include>'
+        '<include><uri>model://crop/shared</uri></include>'
+        f'<include><uri>{shared.as_uri()}</uri></include></model></sdf>')
+    assert t.strip_model_collisions(tmp_path, 'weed') == 1
+    assert not list(ET.parse(child).getroot().iter('collision'))
+    assert shared_sdf.read_bytes() == original
+
+
+def test_readonly_weeds_are_staged_and_world_redirected(tmp_path):
+    models = tmp_path / 'models'
+    weed = models / 'weed' / 'weed1'
+    weed.mkdir(parents=True)
+    sdf = weed / 'model.sdf'
+    sdf.write_text(_WEED_SDF.format(n='weed'))
+    sdf.chmod(0o444)
+    original = sdf.read_bytes()
+    world = tmp_path / 'scene.world'
+    world.write_text('<sdf><world><include><uri>model://weed/weed1</uri></include>'
+                     '<include><uri>model://ground</uri></include></world></sdf>')
+    staged = t.stage_readonly_weeds(models, tmp_path / 'generated', world)
+    assert staged != models
+    assert t.strip_model_collisions(staged, 'weed') == 1
+    assert sdf.read_bytes() == original
+    uris = [el.text for el in ET.parse(world).iter('uri')]
+    assert uris == [(staged / 'weed' / 'weed1' / 'model.sdf').as_uri(), 'model://ground']
+    assert t.stage_readonly_weeds(staged, tmp_path / 'unused', world) == staged
+
+
+@pytest.mark.parametrize('category', ['crop', 'weed'])
+@pytest.mark.parametrize('link_kind', ['file', 'directory', 'category', 'hardlink'])
+@pytest.mark.parametrize('has_collision', [True, False])
+def test_strip_model_collisions_isolates_linked_plants(tmp_path, category, link_kind, has_collision):
+    source = tmp_path / 'irrigation' / 'pipe'
+    source.mkdir(parents=True)
+    original = _WEED_SDF.format(n='pipe')
+    if not has_collision:
+        root = ET.fromstring(original)
+        link = root.find('model/link')
+        link.remove(link.find('collision'))
+        original = ET.tostring(root, encoding='unicode')
+    (source / 'model.sdf').write_text(original)
+    plant = tmp_path / category / 'plant'
+    if link_kind == 'category':
+        plant.parent.symlink_to(source.parent, target_is_directory=True)
+        plant = plant.parent / 'pipe'
+    else:
+        plant.parent.mkdir()
+        if link_kind == 'directory':
+            plant.symlink_to(source, target_is_directory=True)
+        else:
+            plant.mkdir()
+            if link_kind == 'file':
+                (plant / 'model.sdf').symlink_to(source / 'model.sdf')
+            else:
+                (plant / 'model.sdf').hardlink_to(source / 'model.sdf')
+
+    assert t.strip_model_collisions(tmp_path, category) == int(has_collision)
+    assert (source / 'model.sdf').read_text() == original
+    assert list(ET.parse(plant / 'model.sdf').getroot().iter('collision')) == []
+    assert not (plant / 'model.sdf').is_symlink()
+    assert t.strip_model_collisions(tmp_path, category) == 0
+
+
+@pytest.mark.parametrize('failure', [OSError, KeyboardInterrupt])
+@pytest.mark.parametrize('stage', ['write', 'replace'])
+def test_strip_model_collisions_preserves_original_on_write_failure(tmp_path, monkeypatch, failure, stage):
+    plant = tmp_path / 'crop' / 'plant'
+    plant.mkdir(parents=True)
+    sdf = plant / 'model.sdf'
+    original = _WEED_SDF.format(n='plant')
+    sdf.write_text(original)
+    open_temporary = t.tempfile.NamedTemporaryFile
+
+    @contextmanager
+    def failing_temporary(**kwargs):
+        with open_temporary(**kwargs) as handle:
+            write = handle.write
+
+            def fail_write(text):
+                write(text[:20])
+                raise failure('interrupted write')
+
+            monkeypatch.setattr(handle, 'write', fail_write)
+            yield handle
+
+    def fail_replace(path, target):
+        assert path.parent == sdf.parent
+        assert target == sdf
+        assert list(ET.parse(path).getroot().iter('collision')) == []
+        raise failure('interrupted replacement')
+
+    if stage == 'write':
+        monkeypatch.setattr(t.tempfile, 'NamedTemporaryFile', failing_temporary)
+    else:
+        monkeypatch.setattr(Path, 'replace', fail_replace)
+    with pytest.raises(failure):
+        t.strip_model_collisions(tmp_path, 'crop')
+    assert sdf.read_text() == original
+    assert list(plant.iterdir()) == [sdf]
