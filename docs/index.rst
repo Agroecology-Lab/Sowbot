@@ -17,6 +17,7 @@ Welcome to the documentation for the **Feldfreund DevKit ROS (Sowbot)** platform
 
    cpp_api
    python_api
+   _generated/launch_files
 
 .. toctree::
    :maxdepth: 2

@@ -30,8 +30,15 @@ jobs:
 
       - name: Build Sphinx HTML
         run: |
-          sphinx-build --keep-going -b html docs docs/_build/html
+          set -o pipefail
+          mkdir -p docs/_build
+          sphinx-build --keep-going -b html docs docs/_build/html 2>&1 | tee docs/_build/sphinx.log
           touch docs/_build/html/.nojekyll
+
+      - name: Check every package under src/ is in the docs
+        # Fails if a package has no page, or a module failed to import. Without
+        # this, --keep-going lets a broken import drop out of the published docs.
+        run: python3 docs/check_coverage.py docs/_build/sphinx.log
 
       - name: Deploy Docs to Sowbot_Data Repo
         # Pinned to the commit `main` pointed at on 2026-10-18 (tag v1.7.3). This step receives DOCS_DEPLOY_TOKEN.

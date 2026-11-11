@@ -4,20 +4,21 @@ import sys
 # ------------------------------------------------------------------------------
 # Path Setup
 # ------------------------------------------------------------------------------
-# Each ROS 2 ament_python package here nests its importable module one level
-# below its colcon package folder (src/<pkg>/<pkg>/...), so adding "../src"
-# alone only exposes namespace packages like "devkit_driver" with no
-# submodules underneath. Add each package's own folder to sys.path instead,
-# so "import devkit_driver" resolves straight to src/devkit_driver/devkit_driver/.
+# Every package under src/ is found by docs/_packages.py. A ROS 2 ament_python
+# package nests its importable module one level below its colcon folder
+# (src/<pkg>/<pkg>/...), and a plain Python package such as devkit-meshcore-avoid
+# nests it under src/<pkg>/pkg/<module>/. Either way, the folder that holds the
+# module goes on sys.path, so "import devkit_driver" or "import sowbot_avoid" works.
+# Packages with no importable module (launch files, config scripts) get a generated
+# page of source listings, _generated/launch_files.rst.
 sys.path.insert(0, os.path.abspath(".."))
-_SRC_ROOT = os.path.abspath("../src")
-for _pkg in [
-    "devkit_driver",
-    "devkit_f2c_planner",
-    "devkit_mavlink_bridge",
-    "devkit_ui",
-]:
-    sys.path.insert(0, os.path.join(_SRC_ROOT, _pkg))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _packages import discover, write_file_pages  # noqa: E402
+
+_IMPORTABLE, _FILE_ONLY = discover()
+for _root in sorted(set(_IMPORTABLE.values()), key=str):
+    sys.path.insert(0, str(_root))
+write_file_pages(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_generated"), _FILE_ONLY)
 
 # autodoc actually imports these modules to pull docstrings. The CI runner has
 # no ROS 2 install and no access to the hardware-specific / simulation deps
@@ -32,6 +33,8 @@ autodoc_mock_imports = [
     "nav_msgs",
     "std_msgs",
     "std_srvs",
+    "diagnostic_msgs",
+    "rtcm_msgs",
     "nav2_msgs",
     "nav2_simple_commander",
     "tf2_ros",
@@ -46,6 +49,7 @@ autodoc_mock_imports = [
     "feldfreund_devkit",
     "sowbot_sim",
     "topological_nav_simulator",
+    "meshcore",
 ]
 
 # ------------------------------------------------------------------------------
