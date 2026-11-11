@@ -1,8 +1,8 @@
 # Robot mission intake spec 
 
-Status: draft. Built so far: the SQLite store with the remote-mission columns, `MissionStore.add_remote` and `find_by_external_id`, SQLite-assigned ids that are never reused, ending any mission left running by a restart, no delete of a running mission, `run_saved` with outcome recording, name-based `resolve_steps`, locked store reads, the structured mission result, and `today_queue()` skipping remote missions. The farm map import into the topo map with `hash8`, the edit hook that clears it, and the (field, row) lookup are built. Not built: the stall watchdog, the intake, the link layer and its wifi carrier, the charge and park missions, the battery stop, and the station. Nothing calls `add_remote` yet.
+Status: draft. Built so far: the SQLite store with the remote-mission columns, `MissionStore.add_remote` and `find_by_external_id`, SQLite-assigned ids that are never reused, ending any mission left running by a restart, no delete of a running mission, `run_saved` with outcome recording, name-based `resolve_steps`, locked store reads, the structured mission result, and `today_queue()` skipping remote missions. The farm map import into the topo map with `hash8`, the edit hook that clears it, and the (field, row) lookup are built. Not built: the stall watchdog, the intake, the link layer and its wifi carrier, the charge, park and autonomous return routines, the battery return, resume from a waypoint, and the station. Nothing calls `add_remote` yet.
 
-Read from Sowbot mission-refactor at 1885cbb plus the farm map import change (7 Nov 2026). **That code was not re-read for rev 5.** Everything about wifi, charging, docking, `soc`, `z` and the battery stop is new and is a proposal; none of it exists. The store was simplified earlier: YAML backend removed, no epochs, no `task_id`, random station-chosen mission ids. The mission, farm map import, plan import and row lookup tests pass (217 tests) with pytest. Nothing ran under colcon, under ROS or on hardware. Companion: Station service spec rev 5, which defines the messages. This spec follows it.
+Read from Sowbot mission-refactor at 1885cbb plus the farm map import change (7 Nov 2026). **That code was not re-read for rev 5.** Everything about wifi, charging, docking, `soc`, the autonomous return and the resume point is new and is a proposal; none of it exists. The store was simplified earlier: YAML backend removed, no epochs, no `task_id`, random station-chosen mission ids. The mission, farm map import, plan import and row lookup tests pass (217 tests) with pytest. Nothing ran under colcon, under ROS or on hardware. Companion: Station service spec rev 5, which defines the messages. This spec follows it.
 
 Messages are named in plain words here: mission, cancel, status query, accepted, rejected, end report and hello. The [station spec gives the exact formats.](https://github.com/Agroecology-Lab/Sowbot_Station/blob/main/README.md)
 
@@ -10,18 +10,19 @@ Messages are named in plain words here: mission, cancel, status query, accepted,
 
 Let one station send a mission to a robot over a link (wifi first, MeshCore possible later) and get the outcome back. The messages are the station spec's: one ASCII line of at most 158 bytes, independent of the carrier. Missions made on the robot and missions sent from the station share one store, one start path and one result record.
 
-Remote missions are of three kinds: `field` (rows from the farm map), `charge` (drive to the shared charger and dock) and `park` (drive to the robot's own wait bay). The station schedules the charger queue. The robot only does what it is told.
+Remote missions are of three kinds: `field` (rows from the farm map), `charge` (drive to the shared charger and dock) and `park` (drive to the robot's own wait bay). The station schedules the charger queue. Between dock visits the robot is out of contact and runs on its own: it returns to its bay by itself at the end of every mission and when charge falls to its return level.
 
 The topological map stays the source of truth for rows. Every robot holds the same map, and nothing about rows is kept outside it. The charger and bay locations are not rows and are kept outside the imported map (see "Dock and bay locations").
 
-This is not a safety function. E-stop and the independent safety subsystem are unchanged. Remote cancel is best effort. The station's dock zone lock avoids sending two robots into the dock area at once. It does not detect or stop a collision.
+This is not a safety function. E-stop and the independent safety subsystem are unchanged. Remote cancel is best effort. Separating robots near the dock is avoid's job over MeshCore (simulation only so far). The station does not detect or stop a collision.
 
 ## Assumptions
 
 - Station traffic goes over wifi at first and must also work over MeshCore later. Each robot has one MeshCore radio, used for avoid only for now (channel, no acks). If station traffic moves to MeshCore it shares that radio (direct messages, with ack).
-- A robot is stopped when it receives a mission. It moves and sends avoid frames only while on a mission.
-- 2 to 4 robots over about 1 mile square, sharing one charger with four wait bays next to it. Bay *n* belongs to robot *n*. Slow robots, long rows, missions lasting hours.
-- Wifi coverage over the farm is not measured. A robot completes its mission with no station contact, and keeps its end report until the carrier reports it delivered.
+- **There is no wifi in the field.** The station reaches a robot only within about 10 m of it. The charger and all four bays are in range. A robot completes its mission with no station contact and keeps its end report until the carrier reports it delivered.
+- A robot is stopped when it receives a mission. It moves and sends avoid frames only while on a mission. **Every move counts as a mission for avoid, including the autonomous return.**
+- 2 to 4 robots over about 1 mile square, sharing one charger. Each has its own wait bay beside it (bay *n* for robot *n*), used before or after charging. Slow robots, long rows, missions lasting hours.
+- There are one-way in and out routes between the field and the dock area (keep left). The layout is not decided.
 - The robot sends nothing unprompted except a reply to a mission message (accepted or rejected), an end report when a mission ends, and a hello message on boot. Nothing is retried on a timer.
 
 ## Map generation
@@ -60,7 +61,7 @@ LiteFarm: published farm map (GeoJSON, content_hash)
 |  edit service: add/delete node/row, f2c save, repair                 |
 |     -> built: any edit sets hash8 to "-" (robot then rejects "map") |
 |                                                                      |
-|  WRITES: dock layer [new]: charger, own bay, dock zone               |
+|  WRITES: dock layer [new]: charger, own bay, routes                  |
 |     separate from the topo map so hash8 is untouched                 |
 |                                                                      |
 |  WRITES: missions.db (SQLite, /workspace/maps/missions.db)           |
@@ -121,10 +122,12 @@ lf_frag sorted by row_id), so the station never needs robot row ids.
 
 - **Intake is carrier-independent.** It takes verified lines and sends lines, and the carrier is an adapter. Wifi is the first adapter, in `devkit_ui`. A MeshCore adapter can be added later without touching intake. The 158-byte line and the no-timers rule from the MeshCore design are kept.
 - **Radio ownership is deferred, not removed.** It matters only when a MeshCore adapter is built (section 6).
-- **Fleet is 2 to 4 robots** sharing one charger and four wait bays.
-- **New mission actions** `charge` and `park`, with no rows, no groups and no map hash check. `soc` and an in-dock-zone flag `z` added to the accepted and progress reply, and `soc` to hello. New reject reason `dock`, and `battery` as a reject and end reason.
-- **Battery stop** at a row boundary, a station-visible outcome that does not hold the task.
-- **Dock and bay locations** live in a robot-local layer outside the imported topo map, so `hash8` stays valid.
+- **No station contact in the field.** The robot is autonomous between dock visits. Mid-mission queries and cancels reach it only at the dock. The stored end report is collected when it is back in range.
+- **Autonomous return.** At the end of every mission and at the return level, the robot drives to its own bay. It counts as moving for avoid.
+- **New mission actions** `charge` and `park`, with no rows, no groups and no map hash check. `soc` added to the accepted and progress reply and to hello, hello states `bay`, `charger`, `busy`, `other`. New reject reason `dock`, and `battery` as a reject and end reason.
+- **Battery return resumes from the last waypoint.** The robot stops at the return level, records the last waypoint reached in the interrupted row (`resume_wp`), and the next mission starts that row there (`@k`).
+- **Dock and bay locations and the in and out routes** live in a robot-local layer outside the imported topo map, so `hash8` stays valid.
+- **No dock zone, no `z`.** Separation near the dock is avoid's job.
 
 ## Changes from rev 2
 
@@ -152,11 +155,11 @@ Built and tested against the repo's farm map fixture and a real LiteFarm export.
 
 Not built, and not decided.
 
-- The charger pose, the robot's own bay pose, its bay number and the dock zone (a radius or polygon around the charger and all four bays) are stored in a robot-local dock layer, as a small file next to the topo map. The topo map is not touched.
-- Reason: adding dock nodes to the imported topo map is an edit and turns `hash8` into `-`, which blocks every field mission. The alternative is to put them in the LiteFarm farm map as locations, so the hash covers them. That changes the farm map import, which currently refuses anything that is not a row.
-- Navigation to the charger and bay uses the same Nav2 goals as rows. The dock layer only supplies poses.
-- The layer is per robot (its bay differs), so it is not copied with the topo map.
-- A robot with no dock layer rejects `charge` and `park` with the reason `dock`.
+- The charger pose, the robot's own bay pose and number, and the in and out routes (named waypoints, one-way, keep left) are stored in a robot-local dock layer, a small file next to the topo map. The topo map is not touched.
+- Reason: adding them to the imported topo map is an edit and turns `hash8` into `-`, which blocks every field mission. The alternative is to put them in the LiteFarm farm map as locations, so the hash covers them. That changes the farm map import, which currently refuses anything that is not a row.
+- Navigation to the charger, the bay and along the routes uses the same Nav2 goals as rows. The layer only supplies poses and waypoints.
+- The layer is per robot (its bay differs), so it is not copied with the topo map. The routes are the same on every robot.
+- A robot with no dock layer rejects `charge` and `park` with the reason `dock`, and cannot return home by itself.
 
 ### Robot comms
 
@@ -169,9 +172,9 @@ Not built. No code reads or sends any of these messages. The first carrier is wi
 |  | docker: LiteFarm    |<--------->| docker: Station service        |  |
 |  |                     |           |                                |  |
 |  |  API                |  POST     |  poll loop (tasks)             |  |
-|  |  DB                 |  /login   |  dispatch + liveness           |  |
+|  |  DB                 |  /login   |  probe + dispatch              |  |
 |  |                     |           |  result mapping -> PATCH       |  |
-|  |  tasks              |  GET      |  charge queue + dock zone lock |  |
+|  |  tasks              |  GET      |  charge queue                 |  |
 |  |  row plans + rows   |  /task/:farm_id                            |  |
 |  |  published farm map |  /row_plan/task/:id/rows                   |  |
 |  |  (content_hash)     |  /row_plan/:id                             |  |
@@ -187,7 +190,7 @@ Not built. No code reads or sends any of these messages. The first carrier is wi
 |                                    +--------+-----------+-----------+  |
 +=============================================|===========|=============+
                                               |           |
-                                     farm wifi (LAN)      |
+                                     wifi, 10 m only      |
                                               |           | HTTP
                          one-line text        |           v
                          messages, <=158 B    |     +-----------+
@@ -199,7 +202,7 @@ Not built. No code reads or sends any of these messages. The first carrier is wi
         M|mid|hash8|action|field|rows     --> |
         Q|mid   (hello if mid=0)           --> |
         C|mid                              --> |
-        <-- A|mid|n|soc|z  R|mid|why   E|mid|...   H|hash8|state|soc
+        <-- A|mid|n|soc    R|mid|why   E|mid|...   H|hash8|state|soc
                                               |
               +--------------------+----------+----------+
               v                    v                     v
@@ -218,7 +221,7 @@ Not built. No code reads or sends any of these messages. The first carrier is wi
                  (robot to robot, only while on a mission)
 ```
 
-Link rules: the protocol is carrier-independent (station spec, Link Layer). On wifi, station to robot is a `POST` of one line, answered `200` on receipt, and the robot's reply line may come in the body or as a separate `POST`. Robot to station is a `POST` of one line, up to three attempts, and `2xx` is delivered. Auth is a per-robot token checked by the wifi adapter, not by intake. It is not replay protection.
+Link rules: the protocol is carrier-independent (station spec, Link Layer). Contact exists only within about 10 m of the station. On wifi, station to robot is a `POST` of one line, answered `200` on receipt, and the robot's reply line may come in the body or as a separate `POST`. Robot to station is a `POST` of one line, up to three attempts, and `2xx` is delivered. Auth is a per-robot token checked by the wifi adapter, not by intake. It is not replay protection.
 
 ### 2. One mission store
 
@@ -234,6 +237,7 @@ Built in `MissionSqliteStore`, except the changes marked new. `_ensure_schema` a
 | `steps_done`, `stage`, `reason` | result of the last run |
 | `started_at`, `ended_at` | UTC |
 | `result_sent` | remote only, whether the station has acknowledged the end report |
+| `resume_wp` | **new.** Remote only. Index of the last waypoint reached in the interrupted row, for a `battery` stop inside a row. Null otherwise |
 
 Rules:
 
@@ -253,6 +257,7 @@ Built, except the call to intake and the new kinds.
 - `resolve_steps` accepts entry node names and finds the exit through the entry's `row_id`. The integer path stays for the browser queue.
 - When the executor finishes it calls `on_result`. The application service writes the result to the store, re-arms the schedule through `record_run` and, for a remote mission, makes it inactive. Telling intake is not built.
 - **New:** `charge` and `park` do not go through `resolve_steps`. `run_saved` calls a separate routine for each (see section 7). Both still use the same lock, result record and `on_result`.
+- **New:** the first row of a remote mission may carry a start waypoint `k`. `resolve_steps` and the executor take an optional start offset for the first step: skip the entry navigation, go to waypoint `k` of that row, enable the tool, and continue to the exit. Needs the row's ordered node list from the map. Not built.
 
 ### 4. Structured result
 
@@ -265,6 +270,7 @@ Built. The mission service ends every run with a `MissionResult(ok, steps_done, 
 - An exception in the executor is reported as a failure with the reason `nav` in the stage it was in. The spec has no separate reason for it.
 - The reasons the code produces are `nav`, `timeout`, `cancel` and `estop`. `reboot` is set at boot by intake, which is not built. **New:** `battery` is set by the battery stop (section 8).
 - For `charge` and `park`, success is `E|mid|ok` with no steps. A failure uses stage `transit` with `steps_done` 0, and the reason from the same list.
+- **New:** a `battery` stop inside a row stores `resume_wp`, the index of the last waypoint reached in that row (0 is the entry). `steps_done` counts whole rows done. Tracking the last waypoint reached needs progress from the navigation layer, which nothing provides yet (see section 5).
 - A failing `on_step_done` is logged and swallowed. `on_result` retries its store writes up to three times on a SQLite `OperationalError` (for example a locked database), then reports the failure through `on_status` and the store status and raises, which the executor logs and swallows. If it still fails, the mission stays stored as running until the next restart ends it with the reason `reboot`.
 - `run_saved` writes `state=running` with `started_at` once the executor has admitted the mission and before its worker thread starts, and puts the old result back if the start fails after that. A store write that fails at that point raises out of `run_saved`; intake treats that as a failed start.
 
@@ -290,37 +296,38 @@ Not built. Intake is carrier-neutral: `handle_line(sender, line)` takes a line t
 - Provision the station as a contact on the robot's radio, and the robot on the station's. Check that avoid's `get_channel` requirement and the adapter both still work when the station contact is added or removed.
 - Send with `send_msg_with_retry` (3 attempts).
 
-### 7. Charge and park
+### 7. Charge, park and return
 
-Not built. Everything here depends on hardware facts not yet known.
+Not built. Depends on hardware facts not yet known.
 
-- **`charge`:** navigate to the charger pose from the dock layer, dock, and confirm charging has started. Success is `E|mid|ok`. The robot stops there and does nothing more. Charging itself is not a mission.
-- **`park`:** if docked, undock, then navigate to the robot's own bay pose. The `field` slot of the message carries the bay number. The robot rejects with `dock` if it is not its own bay number. Success is `E|mid|ok`.
-- **Unknown, needed before either can be built:** how a robot docks and undocks (a Nav2 goal to a pose, a dedicated docking routine, or a driver), and how it knows charging has started (charger signal, current sense, or a battery-state topic). Without a confirmation signal `charge` can only report arrival, and the station would report a charge that never started.
-- Both missions start from anywhere. `charge` can start from the field and `park` from the charger. A field mission can start from a bay.
+- **Return (autonomous):** at the end of every field mission, and after a battery stop, the robot drives to its own bay: to the in route, along it, then to the bay pose. The station does not command it and cannot see or cancel it until the robot is in range. It counts as moving for avoid (section 9). It has no mission record. Its end report is the one the mission already stored.
+- **`charge`:** from the bay, navigate to the charger pose from the dock layer, dock, and confirm charging has started. Success is `E|mid|ok`. The robot stops there and does nothing more. Charging itself is not a mission.
+- **`park`:** undock, then navigate to the robot's own bay pose. The `field` slot of the message carries the bay number. The robot rejects with `dock` if it is not its own bay number. Success is `E|mid|ok`.
+- **Unknown, needed before `charge` or the return can be built:** how a robot docks and undocks (a Nav2 goal to a pose, a dedicated docking routine, or a driver), and how it knows charging has started (charger signal, current sense, or a battery-state topic). Without a confirmation signal `charge` can only report arrival, and the station would report a charge that never started.
+- Both missions start from the bay or the charger. A field mission starts from a bay.
 - Both go through the same checks as any mission for busy, estop and nav.
-- A `charge` or `park` mission that fails leaves the robot where it stopped. The station holds the dock zone and queue and flags the operator. The robot does not retry.
+- A `charge` or `park` mission that fails leaves the robot where it stopped. The station holds the charger and queue and flags the operator. The robot does not retry.
+- A robot that cannot reach its bay (stuck, or no dock layer) is `other` when next in range. Nothing reports it before then.
 
-### 8. Battery stop and state of charge
+### 8. Battery return and state of charge
 
 Not built. The robot's battery source is not identified.
 
-- `soc` is whole percent, from whatever battery state the robot exposes. Not read: whether it is a ROS topic, a driver value or nothing yet. If it is not available, the battery stop and the `soc` fields cannot be built.
-- The station configures `charge_below`, `charge_to`, `min_mission` and `critical`. The robot has its own stop level for the battery stop, set as a parameter. Keep the two consistent: the robot stop level should be above the station's `critical`.
-- **Battery stop:** after each step finishes, the mission service compares `soc` with the stop level. At or below it, it stops before the next step and reports stage `transit`, reason `battery`, with `steps_done` as normal. This is a row boundary, so the station marks the rows done and leaves the rest pending, with no aborted row.
-- If the battery fails inside a step, the step cannot be stopped cleanly. The robot reports stage `row` and reason `battery`. The station treats it as a failure during a row: that row is aborted and the task is held.
-- **Mission size:** nothing stops the station sending a mission longer than one charge. A long row can take the robot below the stop level inside the step. The check at accept time (`battery`, below) only reads the starting charge, not the energy needed. Energy per row is unmeasured (open item 4).
-- The robot reports `soc` in the progress reply and in the hello message. Between those it reports nothing, so the station's value can be hours old during a field mission.
+- `soc` is whole percent, from whatever battery state the robot exposes. Not read: whether it is a ROS topic, a driver value or nothing yet. If it is not available, the battery return and the `soc` fields cannot be built.
+- **`return_soc`** is a robot parameter, 20% at first. It is the reserve needed to reach the charger. At or below it, the robot cancels its goal at once, notes the last waypoint reached, ends the mission (stage `row`, reason `battery`, `resume_wp` set; or stage `transit` if between rows), and returns to its bay. It does not finish the row: the reserve is for getting home.
+- A fixed level is wrong for a far row. The reserve should be the energy to reach the charger from the robot's position, plus a margin. Not designed. Until then `return_soc` must be set for the farthest row. The station cannot correct it from outside the field.
+- **Start check:** the robot rejects a mission with `battery` when `soc` is below its start level (above `return_soc`). This reads the starting charge only, not the energy the mission needs. Energy per row is unmeasured (open item 4).
+- **Resume:** a mission whose first row carries `@k` starts that row at waypoint `k`. The stretch between waypoint `k` and the stop point is worked twice (for sowing, sown twice). The extent is set by waypoint spacing. A straight row with no waypoints between entry and exit has only `k` = 0, so the whole row is redone. Long rows may need waypoints at regular spacing in the map import (setting not built).
+- The robot reports `soc` in the accepted and progress reply and in the hello message. The station reads it only at the dock.
 
-### 9. Dock zone
+### 9. Dock area and routes
 
-Not built. The station holds the dock zone lock. The robot's part is to say whether it is inside.
+Not built. There is no zone and no station lock.
 
-- The dock zone (charger and four bays) is defined in the dock layer.
-- Every accepted or progress reply carries `z`: 1 if the robot's pose is inside the zone, 0 if outside. If localisation is lost or there is no pose, `z` is 1.
-- For a field mission sent from a bay, the station queries the mission every `dock_poll` until `z` is 0 (or the mission ends or is rejected), then releases the lock. The robot sends nothing extra, so no new message and no new state.
-- A `park` mission leaving the charger needs no `z`: its end report releases the lock.
-- Not decided: the zone shape and margin. They need the real layout of the charger and bays.
+- The in and out routes are in the dock layer. Returns, `charge` and `park` use them.
+- Avoid separates robots near the dock. Every move broadcasts and listens, including the autonomous return. Today avoid runs only on a mission, so the return needs to be treated as one.
+- Idle robots (in bays, on the charger) do not broadcast. Avoid cannot see them. The layout must keep the routes clear of the bays and the charger.
+- Not decided: the layout. `sowbot_avoid` is simulation only.
 
 ## Intake behaviour
 
@@ -340,37 +347,38 @@ Checks run in this order, each with its own rejection reason:
 2. estop: the confirmed soft e-stop is active.
 3. map: for a `field` action only, the map is edited, or hash8 differs from the map's hash8.
 4. action: not in `ACTIONS`, and not `charge` or `park`.
-5. row: for a `field` action only, a (field, row) is missing from the map, is duplicated, or lacks an entry or exit node. Run the same resolution as `resolve_steps` here.
+5. row: for a `field` action only, a (field, row) is missing from the map, is duplicated, or lacks an entry or exit node, or `@k` is not a waypoint of the first row. Run the same resolution as `resolve_steps` here.
 6. dock: for `charge` or `park` only, there is no dock layer, or no charger pose, or `park` names a bay that is not this robot's.
-7. battery: for a `field` or `charge` action, `soc` is not available, or is below the robot's own stop level. Not applied to `park`, since a robot that has reached the charger must be able to leave it.
+7. battery: for a `field` or `charge` action, `soc` is not available, or is below the robot's start level (above its return level). Not applied to `park`, since a robot at the charger must be able to leave it.
 8. nav: navigation is unavailable.
 
-Then write the mission with `add_remote` (stored idle) and call `run_saved`, which marks it running. If `start()` delivers an ERROR on the calling thread, delete the record and reject the mission with the reason `nav` (or `busy` for "mission already running"). The record is idle again by then, so `delete` allows it. Otherwise accept it, reporting no rows done and the current `soc` and `z`.
+Then write the mission with `add_remote` (stored idle) and call `run_saved`, which marks it running. If `start()` delivers an ERROR on the calling thread, delete the record and reject the mission with the reason `nav` (or `busy` for "mission already running"). The record is idle again by then, so `delete` allows it. Otherwise accept it, reporting no rows done and the current `soc`.
 
 The domain service takes its own lock when starting, so a simultaneous start from the web UI loses cleanly and shows up as that ERROR.
 
 ### While running
 
-- A status query for the mission returns a progress reply: the mission is accepted and running, with the number of whole rows done, the current `soc` and `z`. This is the only progress the robot reports, and only when asked.
+- A status query for the mission returns a progress reply: the mission is accepted and running, with the number of whole rows done and the current `soc`. This is the only progress the robot reports, and only when asked.
+- In the field the robot is out of contact, so queries and cancels reach it only while it is at the dock. A cancel cannot be sent to a robot already in the field.
 - A cancel message for the running mission calls `cancel()`. The outcome comes back in the end report with the reason `cancel`. Cancelling an ended mission re-sends its end report. Cancelling an unknown mission is rejected with the reason `unknown`.
 - Nothing else is sent. No timers, no progress broadcasts.
 
 ### Ending
 
-The result is already in the store when the executor finishes. Send the end report through `send_line` without blocking the executor thread. If the carrier reports it failed, `result_sent` stays false and the end report is re-sent at the station's next status query or hello exchange. There is no resend timer: the station's regular status query recovers a lost end report.
+The result is already in the store when the executor finishes. Send the end report through `send_line` (up to three attempts in the adapter) without blocking the executor thread. In the field every send fails, which is expected: `result_sent` stays false and the robot does not retry on a timer. When the robot is back in range the station probes it, sends a hello request, then a status query for any open mission, and the stored end report is re-sent. A report the carrier does not deliver is re-sent at the next query or hello exchange.
 
 - If all rows are done (or a `charge` or `park` finished), send a successful end report.
-- Otherwise send a failed end report giving the number of whole rows done, the stage and the reason.
+- Otherwise send a failed end report giving the number of whole rows done, the stage and the reason. For reason `battery` in stage `row`, add `resume_wp` as `k`.
 
 ### Boot
 
-The store already ended any mission stored as running, with the reason `reboot` and its stored `steps_done`, when it was attached. Built. Intake then sends a hello message (map hash, state idle, `soc`), then an end report for each remote mission whose `result_sent` is false. The robot does not resume after a restart. A status query for mission 0 gets a hello reply.
+The store already ended any mission stored as running, with the reason `reboot` and its stored `steps_done`, when it was attached. Built. Intake then sends a hello message (map hash, state, `soc`), then an end report for each remote mission whose `result_sent` is false. The robot does not resume after a restart. A status query for mission 0 gets a hello reply. The hello state is `bay` or `charger` when the robot is idle at its own bay pose or on the charger, `busy` while on a mission or returning, and `other` if idle anywhere else.
 
 ## Limits
 
 None of these is enforced yet, because there is no intake.
 
-- Messages are at most 158 bytes. `rows` holds integers and ascending ranges only, at most 200 rows per mission (tune after testing).
+- Messages are at most 158 bytes. `rows` holds integers and ascending ranges only, at most 200 rows per mission (tune after testing). The first row may carry `@k`.
 - One mission at a time, as the domain service enforces.
 - A mission carries one action and its default params. Per-row actions are not supported.
 
@@ -391,7 +399,7 @@ Not written yet:
 - Import: a farm map with a split row gives distinct row ids and keeps field, row and fragment in node metadata. This needs the import path to be built first.
 - Dock layer: an import and an edit to the topo map leave the dock layer alone, and a dock layer change leaves `hash8` alone.
 - Reports: an unsent end report is re-sent at the next status query and at boot, and a repeated report does no harm.
-- Battery stop: stops between steps with `transit` and `battery`, and reports `row` and `battery` when it fails inside a step.
+- Battery return: stops at the return level, reports `battery` with stage `row` and `resume_wp` (or `transit` between rows), and returns to the bay by the in route. A mission with `@k` starts that row at that waypoint, and a bad `@k` is rejected with `row`.
 - Simulation: an in-process fake carrier (like `LoopBus`) in place of the station for intake, then the wifi adapter with an HTTP test client, then the Gazebo multi-row mission, including a failed transit, a cancel and a `charge` then `park` cycle with a fake charger.
 - On the real session before relying on it: wifi drop-outs during a mission and during the end report, the endpoint under the web server's auth, and docking with the real charger.
 - No claim is made about behaviour on a wifi link, a charger or a radio until it has run on one.
@@ -399,16 +407,17 @@ Not written yet:
 ## Open items
 
 1. Replay protection. The mission id makes a repeat harmless while the record exists. A robot whose database was wiped would accept an old message as new, and the shared token does not stop a replay on the LAN. Not solved.
-2. Parked robots may be invisible to avoid, since idle robots do not broadcast. With charging this now includes robots queued in the field and robots in their bays. Depends on whether idle robots listen, and on zero-hop range.
+2. Parked robots are invisible to avoid, since idle robots do not broadcast. This includes robots in bays and on the charger. The autonomous return must broadcast and listen. The layout must keep the routes clear.
 3. Who owns the robot's path when avoid side-steps onto another row's waypoint (mission runner or avoid driver).
-4. Energy per row is unmeasured, so mission size against battery is a guess. A battery stop at a row boundary needs `soc` between steps, and a long row can still empty the battery inside a step.
+4. Energy per row is unmeasured, so mission size against battery is a guess. The return reserve should come from distance to the charger, not a fixed 20%.
 5. The avoid route (node ids) must be derived from the nodes along each row (entry, waypoints, exit). Not designed.
-6. Station and robot clocks are not trusted. The station records its own receive time as `completed_at`.
-7. The battery source is not identified. Without a `soc` reading there is no battery stop and no `soc` field.
+6. Station and robot clocks are not trusted. The station records its own receive time as `completed_at`, which is when the robot returned to range.
+7. The battery source is not identified. Without a `soc` reading there is no battery return and no `soc` field.
 8. Docking and undocking, and the signal that charging has started, are not defined (section 7).
-9. Where the dock layer lives: a robot-local file (assumed here) or the LiteFarm farm map. Decide before any dock work.
-10. The dock zone shape, and what the robot does when localisation is lost inside it (section 9).
-11. Whether the station endpoint sits behind `web_auth` or needs its own listener.
-12. Wifi coverage is unmeasured. A robot out of range completes its mission and holds its reports. The station sees only silence.
-13. Where robots wait for the charger is undecided in the station spec. This spec assumes they stay where they stopped.
-14. A later MeshCore adapter: radio ownership (section 6), an airtime budget for the dock and charge polling, and the carried-over MeshCore facts are untested.
+9. Where the dock layer lives (robot-local file, assumed here, or the LiteFarm farm map), including the routes. Decide before any dock work.
+10. Whether the station endpoint sits behind `web_auth` or needs its own listener.
+11. The 10 m wifi reach must cover the charger, the bays and the point where a returning robot first reappears. Not measured. The end report is collected only there.
+12. Resume needs the last waypoint reached, which the mission runner does not track. A straight row has no waypoints between entry and exit, so a resume redoes the whole row.
+13. A robot dead or stuck in the field is found only by an operator or an overdue alarm. The alarm needs an expected mission duration, which nothing provides.
+14. The autonomous return has no mission record. If it fails, nothing reports it until the robot is in range, and its hello then says `other`.
+15. A later MeshCore adapter: radio ownership (section 6), an airtime budget for the dock and charge polling, and the carried-over MeshCore facts are untested.
