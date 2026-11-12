@@ -3,9 +3,9 @@
 | Skill | Format | Source | Licence |
 |---|---|---|---|
 | [agricultural-robotics](#agricultural-robotics) | `.skill` | Agroecology Lab - This repo | MIT |
-| [iso13849-plr-checklist-reviewer](#iso13849-plr-checklist-reviewer) | `.skill` | Probably https://github.com/jherrodthomas/robotics-skills-suite (reviewer name unconfirmed) | MIT (repo) |
+| [iso13849-plr-checklist-reviewer](#iso13849-plr-checklist-reviewer) | `.skill` | https://github.com/jherrodthomas/robotics-skills-suite (reviewer name unconfirmed) | MIT (repo) |
 | [nav2-config-builder](#nav2-config-builder) | `.skill` | https://github.com/jherrodthomas/robotics-skills-suite | MIT (repo) |
-| [python-coding](#python-coding) | Agroecology Lab | This repo | MIT |
+| [python-coding](#python-coding) | `.skill`  | Agroecology Lab -This repo | MIT |
 | [python-pro](#python-pro) | `.skill` | https://github.com/Jeffallan/claude-skills/tree/main/skills/python-pro | MIT |
 | [robium-ros2](#robium-ros2) | `.skill` | https://github.com/robium-ai/robium (commit `ce94495`) | MIT |
 | [robotics-software-principles](#robotics-software-principles) | `.skill` | https://github.com/arpitg1304/robotics-agent-skills (`skills/robotics-software-principles`) | Apache-2.0 (`LICENSE.txt` in archive) |
