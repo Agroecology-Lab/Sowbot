@@ -12,6 +12,7 @@
 | [ros2-engineering-skills](#ros2-engineering-skills) | `.skill` | https://github.com/dbwls99706/ros2-engineering-skills (v1.7.1) | Apache-2.0 |
 | [ros2-system-architecture-builder](#ros2-system-architecture-builder) | `.skill` | https://github.com/jherrodthomas/robotics-skills-suite | MIT (repo) |
 | [ros2-testing](#ros2-testing) | `.skill` | https://github.com/Ekumen-OS/ros2_testing_workshop_roscon_es_25 | Apache-2.0 |
+| [henki-ros2-best-practices](#henki-ros2-best-practices) | proposed skill (not in `skills/`) | https://github.com/henki-robotics/henki_ros2_best_practices (commit `2db5b52`, 2026-02-17) | Apache-2.0 |
 
 ## agricultural-robotics
 
@@ -92,3 +93,12 @@
 - Core rules: separate logic from ROS, inject dependencies, narrow interfaces, testing pyramid, no arbitrary sleeps, isolate tests with `ROS_DOMAIN_ID`, enforce in CI.
 - Covers: GoogleTest/GoogleMock, pytest, node tests (parameters, topics, services, lifecycle), `launch_testing`, flaky-test fixes, pre-commit, GitHub Actions.
 - References: `unit-and-node-tests.md`, `python-tests.md`, `integration-e2e-ci.md`.
+
+## henki-ros2-best-practices
+ 
+- Converted from the Henki Robotics best-practices document. `AGENTS.md` already references the upstream repo as a convention source.
+- Sections: Nodes, Launch files, Parameters and config, Logging, Message interfaces, Actions and services, Code style, Performance, Executors and callback groups, Dependencies, Documentation, Testing.
+- Key rules: single-responsibility nodes with logic in a separate class; XML launch files with no hardcoded parameters; YAML config under `config/`; throttled logging; reuse `common_interfaces`, custom messages in `_msgs` packages, no `std_msgs` primitives; services under 1 s, actions otherwise with enum error codes; `SingleThreadedExecutor` by default; C++ composable nodes with intra-process communication for large data; dependencies in `package.xml`, `.repos` pinned to a commit or tag; per-package README; 90-100% coverage and no arbitrary sleeps in tests.
+- Modes: write and review.
+ 
+
