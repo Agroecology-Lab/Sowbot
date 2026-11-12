@@ -66,6 +66,7 @@ Re-apply it after re-vendoring and keep the following steps numbered 6 to 8.
     Use alongside the engineering skill whenever ROS 2 code or tests are touched.
   - `skills/robium-ros2*.skill` — diagnostic guidance for ROS 2, Nav2, Gazebo, RViz2/Foxglove and deployment faults.
     Use before guessing at "topic exists but no data" or "robot will not move" reports.
+    Diagnostic only. Where it conflicts with [Henki ROS 2 Best Practices](#ros-2-development) on how code is written or structured, follow Henki (for example launch files: robium defaults to Python, Henki prefers XML).
   - `skills/robotics-software-principles.skill` — general design principles for robotics modules.
     Use for architecture decisions and code review of robotics code.
   - `skills/python-coding/SKILL.md` — Python environment setup and coding rules for this repository.
