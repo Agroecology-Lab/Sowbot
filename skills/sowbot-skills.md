@@ -1,9 +1,9 @@
-# Sowbot `skills/` (branch `caatinga-dev`)
+# Sowbot `skills/` 
 
 | Skill | Format | Source | Licence |
 |---|---|---|---|
 | [agricultural-robotics](#agricultural-robotics) | `.skill` | Agroecology Lab - This repo | MIT |
-| [iso13849-plr-checklist-reviewer](#iso13849-plr-checklist-reviewer) | `.skill` | https://github.com/jherrodthomas/robotics-skills-suite (reviewer name unconfirmed) | MIT (repo) |
+| [iso13849-plr-checklist-reviewer](#iso13849-plr-checklist-reviewer) | `.skill` | https://github.com/jherrodthomas/robotics-skills-suite | MIT  |
 | [nav2-config-builder](#nav2-config-builder) | `.skill` | https://github.com/jherrodthomas/robotics-skills-suite | MIT (repo) |
 | [python-coding](#python-coding) | `.skill`  | Agroecology Lab -This repo | MIT |
 | [python-pro](#python-pro) | `.skill` | https://github.com/Jeffallan/claude-skills/tree/main/skills/python-pro | MIT |
@@ -12,7 +12,7 @@
 | [ros2-engineering-skills](#ros2-engineering-skills) | `.skill` | https://github.com/dbwls99706/ros2-engineering-skills (v1.7.1) | Apache-2.0 |
 | [ros2-system-architecture-builder](#ros2-system-architecture-builder) | `.skill` | https://github.com/jherrodthomas/robotics-skills-suite | MIT (repo) |
 | [ros2-testing](#ros2-testing) | `.skill` | https://github.com/Ekumen-OS/ros2_testing_workshop_roscon_es_25 | Apache-2.0 |
-| [henki-ros2-best-practices](#henki-ros2-best-practices) | proposed skill (not in `skills/`) | https://github.com/henki-robotics/henki_ros2_best_practices (commit `2db5b52`, 2026-02-17) | Apache-2.0 |
+| [henki-ros2-best-practices](#henki-ros2-best-practices) | `.skill` | https://github.com/henki-robotics/henki_ros2_best_practices  | Apache-2.0 |
 
 ## agricultural-robotics
 
