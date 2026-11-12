@@ -13,6 +13,7 @@
 | [ros2-system-architecture-builder](#ros2-system-architecture-builder) | `.skill` | https://github.com/jherrodthomas/robotics-skills-suite | MIT (repo) |
 | [ros2-testing](#ros2-testing) | `.skill` | https://github.com/Ekumen-OS/ros2_testing_workshop_roscon_es_25 | Apache-2.0 |
 | [henki-ros2-best-practices](#henki-ros2-best-practices) | `.skill` | https://github.com/henki-robotics/henki_ros2_best_practices  | Apache-2.0 |
+| [docker-ros2-development](#docker-ros2-development) | candidate (not in `skills/`) | https://github.com/arpitg1304/robotics-agent-skills/tree/main/skills/docker-ros2-development (commit `f9bc546`, 2026-08-11) | Apache-2.0 (repo `LICENSE`) |
 
 ## agricultural-robotics
 
@@ -102,3 +103,18 @@
 - Modes: write and review.
  
 
+## docker-ros2-development
+ 
+- Scope: Docker-based ROS 2 development. Covers Humble, Jazzy and Rolling on Ubuntu 22.04 and 24.04 base images.
+- Image hierarchy and multi-stage Dockerfiles (dev, build, runtime stages).
+- docker-compose for multi-container systems: health-check dependencies, profiles for dev vs deploy.
+- DDS discovery across containers: CycloneDDS and FastDDS XML configs (unicast), shared-memory transport.
+- Networking modes: host, bridge, macvlan, with a decision table.
+- GPU passthrough with NVIDIA Container Toolkit.
+- Display forwarding: X11, Wayland, headless rendering.
+- Volume mounts and workspace overlays, ccache.
+- USB device passthrough: cameras, serial devices, udev rules, dynamic attachment.
+- Dev container configuration.
+- CI/CD: GitHub Actions workflow, layer caching, build matrix across distros.
+- 8 anti-patterns (single container, bridge networking without DDS config, building in the runtime image, mounting the whole workspace, root containers, layer-cache order, hardcoded `ROS_DOMAIN_ID`, missing `setup.bash` in entrypoint) and a 12-point deployment checklist.
+- Relevance: Sowbot runs a two-computer split over CycloneDDS
