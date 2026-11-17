@@ -54,6 +54,7 @@ class FakeNode:
         self.timers = []
         self.publishers = {}
         self.subscriptions = {}
+        self.services = {}
 
     def declare_parameter(self, name, default):
         """Store a parameter's test override or its declared default."""
@@ -76,6 +77,10 @@ class FakeNode:
     def get_clock(self):
         """Return a clock double whose time converts to a fixed stamp."""
         return SimpleNamespace(now=lambda: SimpleNamespace(to_msg=lambda: 'stamp'))
+
+    def create_service(self, _service_type, name, callback):
+        """Record a service callback under its name."""
+        self.services[name] = callback
 
     def create_timer(self, period, callback):
         """Record a timer for inspection without scheduling its callback."""
@@ -125,6 +130,7 @@ with patch.dict(sys.modules, {
         **_fake_package('nav_msgs', Odometry=FakeMsg),
         **_fake_package('rtcm_msgs', Message=FakeMsg),
         **_fake_package('sensor_msgs', NavSatFix=FakeMsg),
+        **{'std_srvs': ModuleType('std_srvs'), 'std_srvs.srv': SimpleNamespace(Trigger=object)},
         **_fake_package('diagnostic_msgs', DiagnosticArray=FakeMsg, KeyValue=FakeMsg,
                         DiagnosticStatus=FakeDiagnosticStatus)}):
     from devkit_mavlink_bridge import mavlink_bridge_node
@@ -205,7 +211,7 @@ class BridgeNodeTest(unittest.TestCase):
         node._poll_link()
 
     def sent(self):
-        """Return (vx, yaw_rate) of each SET_POSITION_TARGET message sent."""
+        """Return (vx, yaw_rate) as sent on the wire, where yaw_rate is clockwise-positive."""
         send = self.connection.mav.set_position_target_local_ned_send
         return [(c.kwargs['vx'], c.kwargs['yaw_rate']) for c in send.call_args_list]
 
@@ -222,7 +228,7 @@ class BridgeNodeTest(unittest.TestCase):
 
         self.pending.append(_heartbeat())
         node._republish()
-        self.assertEqual(self.sent()[-1], (0.5, 0.2))
+        self.assertEqual(self.sent()[-1], (0.5, -0.2))
 
         self.now += 3.5
         self.command(node, 0.5, 0.2)
@@ -235,7 +241,7 @@ class BridgeNodeTest(unittest.TestCase):
         node = self.make(require_fc_heartbeat=False)
         self.command(node, 0.5, 0.2)
         node._republish()
-        self.assertEqual(self.sent(), [(0.5, 0.2)])
+        self.assertEqual(self.sent(), [(0.5, -0.2)])
 
     def test_other_ground_stations_and_our_own_echo_do_not_count(self):
         """Verify only a real autopilot's heartbeat marks the link ok."""
@@ -256,7 +262,7 @@ class BridgeNodeTest(unittest.TestCase):
 
         self.pending.append(_heartbeat(source_system=7))
         node._republish()
-        self.assertEqual(self.sent()[-1], (0.5, 0.2))
+        self.assertEqual(self.sent()[-1], (0.5, -0.2))
 
     def test_other_systems_do_not_keep_the_selected_controller_alive(self):
         """Verify other heartbeats cannot extend or restore the selected controller's link."""
@@ -269,7 +275,7 @@ class BridgeNodeTest(unittest.TestCase):
                 self.pending.append(_heartbeat(source_system=42))
                 self.command(node, 0.5, 0.2)
                 node._republish()
-                expected = (0.5, 0.2) if elapsed == 2.0 else (0.0, 0.0)
+                expected = (0.5, -0.2) if elapsed == 2.0 else (0.0, 0.0)
                 self.assertEqual(self.sent()[-1], expected)
 
     def test_unset_target_accepts_only_eligible_discovery_heartbeats(self):
@@ -285,14 +291,14 @@ class BridgeNodeTest(unittest.TestCase):
                 self.assertEqual(self.sent()[-1], (0.0, 0.0))
                 self.pending.append(_heartbeat(source_system=42))
                 node._republish()
-                self.assertEqual(self.sent()[-1], (0.5, 0.2))
+                self.assertEqual(self.sent()[-1], (0.5, -0.2))
 
     def test_velocity_is_clamped_to_the_limits(self):
         """Verify an excessive command is limited before it reaches the flight controller."""
         node = self.make(require_fc_heartbeat=False, max_linear_x_mps=1.0, max_angular_z_radps=0.5)
         self.command(node, 9.0, -9.0)
         node._republish()
-        self.assertEqual(self.sent(), [(1.0, -0.5)])
+        self.assertEqual(self.sent(), [(1.0, 0.5)])
 
     def test_stale_command_is_zeroed(self):
         """Verify the command watchdog still forces zero."""
@@ -360,6 +366,12 @@ class BridgeNodeTest(unittest.TestCase):
             with self.subTest(overrides=overrides), self.assertRaises(ValueError):
                 self.make(**overrides)
 
+    def test_quoted_endpoint_is_normalized(self):
+        """The serial connection receives the device path without surrounding quotes."""
+        with patch.dict(os.environ, {'MAVLINK_ENDPOINT': ' " /dev/ttyACM2 " '}):
+            self.make()
+        mavlink_bridge_node.mavutil.mavlink_connection.assert_called_with('/dev/ttyACM2', baud=115200)
+
     def test_placeholder_endpoint_is_rejected(self):
         """Verify the placeholder connection string is not accepted."""
         with patch.dict(os.environ, {'MAVLINK_ENDPOINT': 'TODO_SERIAL_DEVICE_HERE'}), \
@@ -406,7 +418,7 @@ class InboundTest(BridgeNodeTest):
         self.pending += [_attitude(), _ekf_status(), _heartbeat()]
         self.command(node, 0.5, 0.2)
         node._republish()
-        self.assertEqual(self.sent(), [(0.5, 0.2)])
+        self.assertEqual(self.sent(), [(0.5, -0.2)])
 
     def test_odometry_is_published_in_ros_frames(self):
         """Verify position, orientation and body-frame twist are converted from NED and FRD."""
@@ -677,10 +689,195 @@ class InboundTest(BridgeNodeTest):
         node._poll_link()
         self.assertEqual(len(self.pending), 100)
 
+    def test_status_text_is_logged_by_severity(self):
+        """Verify flight controller STATUSTEXT reaches the log at a matching level."""
+        node = self.make()
+        self.feed(node, _heartbeat(),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_CRITICAL, text='PreArm: Fence breach\x00\x00'),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_WARNING, text='EKF variance'),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_INFO, text=b'Mode GUIDED'))
+        records = [r for r in node.get_logger().records if 'flight controller:' in r[1]]
+        self.assertEqual(records, [('error', 'flight controller: PreArm: Fence breach'),
+                                   ('warn', 'flight controller: EKF variance'),
+                                   ('info', 'flight controller: Mode GUIDED')])
+
+    def call(self, node, service):
+        """Call a registered Trigger service and return its response."""
+        return node.services[service](None, SimpleNamespace())
+
+    def command_longs(self):
+        """Return (command, params) of each COMMAND_LONG sent, ignoring message-interval requests."""
+        send = self.connection.mav.command_long_send
+        return [(c.args[2], c.args[4:]) for c in send.call_args_list
+                if c.args[2] != MAV.MAV_CMD_SET_MESSAGE_INTERVAL]
+
+    def guided_node(self, allow=True, armed=False, mode=15):
+        """Return a node with a live link whose flight controller reports the given mode and arming."""
+        node = self.make(allow_arm_from_ros=allow)
+        base_mode = MAV.MAV_MODE_FLAG_SAFETY_ARMED if armed else 0
+        self.feed(node, _heartbeat(base_mode=base_mode, custom_mode=mode))
+        return node
+
+    def test_arm_and_guided_refuse_unless_permitted_but_disarm_does_not(self):
+        """Verify arming and mode changes are off by default and disarm is not gated."""
+        node = self.guided_node(allow=False)
+        for service in ('fc/arm', 'fc/set_guided'):
+            response = self.call(node, service)
+            self.assertFalse(response.success, service)
+            self.assertIn('allow_arm_from_ros', response.message)
+        self.assertEqual(self.command_longs(), [])
+        self.assertTrue(self.call(node, 'fc/disarm').success)
+        self.assertEqual(self.command_longs(), [(MAV.MAV_CMD_COMPONENT_ARM_DISARM, (0, 0, 0, 0, 0, 0, 0))])
+
+    def test_arm_sends_a_plain_arm_command_in_guided(self):
+        """Verify arming sends param1=1 with the force value left at zero."""
+        node = self.guided_node()
+        self.assertTrue(self.call(node, 'fc/arm').success)
+        self.assertEqual(self.command_longs(), [(MAV.MAV_CMD_COMPONENT_ARM_DISARM, (1, 0, 0, 0, 0, 0, 0))])
+
+    def test_arm_is_refused_outside_guided_or_without_a_link_or_while_commanded(self):
+        """Verify arming cannot start motion, run in another mode, or go to a silent controller."""
+        self.assertIn('not in GUIDED', self.call(self.guided_node(mode=4), 'fc/arm').message)
+        node = self.guided_node()
+        self.command(node, 0.3, 0.0)
+        self.assertIn('nonzero cmd_vel', self.call(node, 'fc/arm').message)
+        self.now += 10.0
+        self.assertIn('no live flight controller heartbeat', self.call(node, 'fc/arm').message)
+        self.assertEqual(self.command_longs(), [])
+        self.assertEqual(self.sent(), [])
+
+    def test_arm_clears_velocity_before_command_for_zero_or_stale_watchdog(self):
+        """Replace any retained controller target before issuing the arm command."""
+        for state in ('absent', 'zero', 'stale'):
+            with self.subTest(state=state):
+                node = self.guided_node()
+                if state == 'zero':
+                    self.command(node, 0.0, 0.0)
+                elif state == 'stale':
+                    self.command(node, 0.3, 0.1)
+                    self.now += node._watchdog.timeout_s + 0.1
+                    self.feed(node, _heartbeat(custom_mode=15))
+                self.connection.mav.reset_mock()
+                self.assertTrue(self.call(node, 'fc/arm').success)
+                self.assertEqual(self.sent(), [(0.0, 0.0)])
+                calls = self.connection.mav.mock_calls
+                self.assertEqual([c[0] for c in calls],
+                                 ['set_position_target_local_ned_send', 'command_long_send'])
+                self.assertEqual(calls[1].args[2], MAV.MAV_CMD_COMPONENT_ARM_DISARM)
+
+    def test_arm_refuses_when_zero_target_write_fails(self):
+        """A failed target reset must never be followed by an arm command."""
+        node = self.guided_node()
+        self.connection.mav.set_position_target_local_ned_send.side_effect = OSError('write failed')
+        response = self.call(node, 'fc/arm')
+        self.assertFalse(response.success)
+        self.assertIn('zero velocity target write failed', response.message)
+        self.assertEqual(self.command_longs(), [])
+
+    def test_arm_when_already_armed_sends_nothing(self):
+        """Verify an armed rover is not sent another arm command."""
+        node = self.guided_node(armed=True)
+        response = self.call(node, 'fc/arm')
+        self.assertTrue(response.success)
+        self.assertEqual(self.command_longs(), [])
+
+    def test_set_guided_sends_the_rover_custom_mode(self):
+        """Verify the mode request uses the custom-mode flag and Rover's GUIDED number."""
+        node = self.guided_node(mode=4)
+        self.assertTrue(self.call(node, 'fc/set_guided').success)
+        self.assertEqual(self.command_longs(),
+                         [(MAV.MAV_CMD_DO_SET_MODE, (MAV.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, 15, 0, 0, 0, 0, 0))])
+
+    def test_a_failed_write_is_not_reported_as_sent(self):
+        """Verify a serial error makes the service fail instead of claiming the command went out."""
+        node = self.guided_node()
+        self.connection.mav.command_long_send.side_effect = OSError('write failed')
+        response = self.call(node, 'fc/arm')
+        self.assertFalse(response.success)
+        self.assertIn('not sent', response.message)
+
+    def test_arm_and_mode_acknowledgements_are_logged(self):
+        """Verify the flight controller's answer to an arm or mode request reaches the log."""
+        node = self.guided_node()
+        self.feed(node,
+                  _message('COMMAND_ACK', command=MAV.MAV_CMD_COMPONENT_ARM_DISARM, result=MAV.MAV_RESULT_FAILED),
+                  _message('COMMAND_ACK', command=MAV.MAV_CMD_DO_SET_MODE, result=MAV.MAV_RESULT_ACCEPTED))
+        texts = [(lvl, t) for lvl, t in node.get_logger().records if 'arm/disarm' in t or 'mode change' in t]
+        self.assertEqual([lvl for lvl, _ in texts], ['warn', 'info'])
+        self.assertIn('refused arm/disarm', texts[0][1])
+
+    def test_all_services_require_a_live_link_even_when_velocity_gate_is_disabled(self):
+        """Disabling velocity heartbeat gating must not bypass service link checks."""
+        node = self.make(allow_arm_from_ros=True, require_fc_heartbeat=False)
+        for service in ('fc/arm', 'fc/disarm', 'fc/set_guided'):
+            with self.subTest(service=service):
+                response = self.call(node, service)
+                self.assertFalse(response.success)
+                self.assertIn('no live flight controller heartbeat', response.message)
+        self.assertEqual(self.command_longs(), [])
+
+    def test_expired_link_blocks_disarm_and_mode_until_heartbeat_recovers(self):
+        """Service commands resume only after receiving another controller heartbeat."""
+        node = self.guided_node()
+        self.now += 10.0
+        for service in ('fc/disarm', 'fc/set_guided'):
+            self.assertFalse(self.call(node, service).success)
+        self.assertEqual(self.command_longs(), [])
+        self.feed(node, _heartbeat(custom_mode=15))
+        self.assertTrue(self.call(node, 'fc/disarm').success)
+
+    def test_pure_rotation_blocks_arm_until_command_expires(self):
+        """Yaw alone counts as motion; stale motion does not prevent a later arm."""
+        node = self.guided_node()
+        self.command(node, 0.0, -0.2)
+        response = self.call(node, 'fc/arm')
+        self.assertFalse(response.success)
+        self.assertIn('nonzero cmd_vel', response.message)
+        self.assertEqual(self.command_longs(), [])
+        self.now += 0.6
+        self.assertTrue(self.call(node, 'fc/arm').success)
+        self.assertEqual(self.command_longs(), [(MAV.MAV_CMD_COMPONENT_ARM_DISARM, (1, 0, 0, 0, 0, 0, 0))])
+
+    def test_fresh_zero_command_permits_arm(self):
+        """An explicit stop clears a previous motion command without waiting for expiry."""
+        node = self.guided_node()
+        self.command(node, 0.4, 0.2)
+        self.command(node, 0.0, 0.0)
+        self.assertTrue(self.call(node, 'fc/arm').success)
+
+    def test_disarm_is_allowed_during_motion_outside_guided(self):
+        """The motion and GUIDED checks for arming must not prevent disarming."""
+        node = self.guided_node(allow=False, armed=True, mode=4)
+        self.command(node, 0.5, 0.2)
+        self.assertTrue(self.call(node, 'fc/disarm').success)
+        self.assertEqual(self.command_longs(), [(MAV.MAV_CMD_COMPONENT_ARM_DISARM, (0, 0, 0, 0, 0, 0, 0))])
+
+    def test_failed_disarm_and_mode_writes_report_failure(self):
+        """Both services expose transport failures and recover on the next request."""
+        node = self.guided_node()
+        for service in ('fc/disarm', 'fc/set_guided'):
+            with self.subTest(service=service):
+                self.connection.mav.command_long_send.side_effect = OSError('link lost')
+                response = self.call(node, service)
+                self.assertFalse(response.success)
+                self.assertIn('not sent', response.message)
+                self.connection.mav.command_long_send.side_effect = None
+                self.assertTrue(self.call(node, service).success)
+
+    def test_status_text_error_boundary_and_invalid_ascii(self):
+        """Severity ERROR remains an error and malformed controller text is printable."""
+        node = self.make()
+        self.feed(node, _heartbeat(),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_ERROR, text=b'PreArm: \xff\x00'),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_NOTICE, text='  Ready  '))
+        records = [r for r in node.get_logger().records if 'flight controller:' in r[1]]
+        self.assertEqual(records, [('error', 'flight controller: PreArm: \ufffd'),
+                                   ('info', 'flight controller: Ready')])
+
     def test_unknown_message_types_are_ignored(self):
         """Verify traffic the bridge does not use, including corrupt frames, is skipped."""
         node = self.make()
-        self.feed(node, _heartbeat(), _message('BAD_DATA'), _message('STATUSTEXT'))
+        self.feed(node, _heartbeat(), _message('BAD_DATA'), _message('VIBRATION'))
         self.assertEqual(self.published(node, 'fc/odom'), [])
 
     def test_inbound_parameters_must_be_positive_and_finite(self):
@@ -872,7 +1069,7 @@ class InboundTest(BridgeNodeTest):
         """Verify the bounded poll leaves useful queued messages for the next callback."""
         node = self.make()
         self.good_state(node)
-        self.pending += [_message('STATUSTEXT') for _ in range(200)] + [_local_position()]
+        self.pending += [_message('VIBRATION') for _ in range(200)] + [_local_position()]
         node._poll_link()
         self.assertEqual(len(self.pending), 1)
         self.assertEqual(self.published(node, 'fc/odom'), [])

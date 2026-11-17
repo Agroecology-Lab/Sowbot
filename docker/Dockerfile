@@ -110,6 +110,7 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rosbag2-storage-mcap \
         ros-jazzy-rtcm-msgs \
+        ros-jazzy-ntrip-client \
         ros-jazzy-nmea-msgs \
         ros-jazzy-libcurl-vendor \
         ros-jazzy-topic-tools \
@@ -135,7 +136,8 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-web-video-server \
         python3-matplotlib \
         python3-serial python3-requests python3-yaml && \
-      break || (echo "Stage 3.2 attempt $i failed, retrying in 15s..." && sleep 15); \
+      break || { [ "$i" -lt 5 ] || exit 1; \
+        echo "Stage 3.2 attempt $i failed, retrying in 15s..."; sleep 15; }; \
     done && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -449,6 +451,7 @@ RUN apt-get update && \
         novnc \
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rtcm-msgs \
+        ros-jazzy-ntrip-client \
         ros-jazzy-nmea-msgs \
         ros-jazzy-libcurl-vendor \
         ros-jazzy-interactive-markers \
@@ -458,7 +461,8 @@ RUN apt-get update && \
         ros-jazzy-navigation2 \
         ros-jazzy-topic-tools \
         usbutils libusb-1.0-0-dev && \
-      break || (echo "Stage 10 apt attempt $i failed, retrying in 15s..." && sleep 15); \
+      break || { [ "$i" -lt 5 ] || exit 1; \
+        echo "Stage 10 apt attempt $i failed, retrying in 15s..."; sleep 15; }; \
     done && \
     # Remove only the cv_bridge/image_geometry FILES (numpy-1.x .so + python),
     # NOT the apt packages — `apt-get remove ros-jazzy-cv-bridge` cascades into

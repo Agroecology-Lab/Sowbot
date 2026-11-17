@@ -9,7 +9,7 @@ from types import ModuleType
 from unittest.mock import patch
 
 LAUNCH_FILE = Path(__file__).parents[1] / 'src' / 'devkit_bringup' / 'launch' / 'devkit.launch.py'
-ENV_KEYS = ('MAVLINK_ENDPOINT', 'MAP_ORIGIN_LAT', 'MAP_ORIGIN_LON', 'MAP_YAW_DEG',
+ENV_KEYS = ('MAVLINK_ENDPOINT', 'NTRIP_ENABLED', 'MAP_ORIGIN_LAT', 'MAP_ORIGIN_LON', 'MAP_YAW_DEG',
             'GPS_PORT_ROVER', 'GPS_PORT_ROVER1', 'MCU_PORT', 'TMAP2_FILE')
 
 
@@ -102,7 +102,8 @@ def _bridge_group(description):
 class TestMavlinkBridgeInclude(unittest.TestCase):
     def test_bridge_is_included_with_an_endpoint(self):
         """Verify MAVLINK_ENDPOINT includes mavlink_bridge.launch.py."""
-        self.assertTrue(_includes_bridge(_description(MAVLINK_ENDPOINT='/dev/ttyACM2')))
+        for endpoint in ('/dev/ttyACM2', '" /dev/ttyACM2 "'):
+            self.assertTrue(_includes_bridge(_description(MAVLINK_ENDPOINT=endpoint)))
 
     def test_bridge_is_not_included_without_an_endpoint(self):
         """Verify no endpoint means no bridge include."""
@@ -198,6 +199,43 @@ class TestMapOdom(unittest.TestCase):
                     {'MAP_ORIGIN_LAT': '51', 'MAP_ORIGIN_LON': '1', 'MAP_YAW_DEG': 'nan'}):
             with self.subTest(env=env), self.assertRaises(RuntimeError):
                 _description(**env)
+
+
+class TestNtripGate(unittest.TestCase):
+    def test_ntrip_runs_for_the_bridge_without_an_sbc_receiver(self):
+        """Verify NTRIP_ENABLED with a bridge endpoint starts ntrip_client although GPS_PORT_ROVER is virtual."""
+        nodes = _nodes(_description(MAVLINK_ENDPOINT='/dev/ttyACM2', NTRIP_ENABLED='true',
+                                    GPS_PORT_ROVER='virtual'), package='ntrip_client')
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0].kwargs['parameters'], [
+            '/share/devkit_bringup/config/ntrip.yaml',
+            str(LAUNCH_FILE.parent.parent / 'config' / 'ntrip_secrets.yaml')])
+        self.assertEqual(type(nodes[0].kwargs['condition']).__name__, 'UnlessCondition')
+
+    def test_ntrip_stays_off_when_disabled(self):
+        """Verify the bridge endpoint alone does not start ntrip_client."""
+        self.assertEqual(_nodes(_description(MAVLINK_ENDPOINT='/dev/ttyACM2'), package='ntrip_client'), [])
+
+    def test_ntrip_parameters_load_secrets_after_public_configuration(self):
+        """Credentials created in the source tree override the installed public defaults."""
+        (node,) = _nodes(_description(MAVLINK_ENDPOINT='/dev/ttyACM2', NTRIP_ENABLED='true'),
+                         package='ntrip_client')
+        self.assertEqual(node.kwargs['name'], 'ntrip_client_node')
+        self.assertEqual(node.kwargs['parameters'], [
+            '/share/devkit_bringup/config/ntrip.yaml',
+            str(LAUNCH_FILE.resolve().parents[1] / 'config' / 'ntrip_secrets.yaml'),
+        ])
+
+    def test_quoted_mavlink_endpoint_enables_bridge_and_ntrip(self):
+        """Quoted .env values must select the same hardware path as bare endpoints."""
+        description = _description(MAVLINK_ENDPOINT='  "/dev/ttyACM2"  ', NTRIP_ENABLED='true')
+        self.assertTrue(_includes_bridge(description))
+        self.assertEqual(len(_nodes(description, package='ntrip_client')), 1)
+
+    def test_ntrip_stays_off_without_any_receiver_or_bridge(self):
+        """Verify NTRIP_ENABLED alone, with virtual ports and no endpoint, starts nothing."""
+        self.assertEqual(_nodes(_description(NTRIP_ENABLED='true', GPS_PORT_ROVER='virtual'),
+                                package='ntrip_client'), [])
 
 
 if __name__ == '__main__':

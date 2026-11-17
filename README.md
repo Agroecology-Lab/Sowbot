@@ -37,7 +37,7 @@ This repository provides the drivers and orchestration for the Sowbot platform, 
 |    SUPERVISORY: not the rated stop function             |
 |---------------------------------------------------------|
 | - Motion execution       - EKF3, sole estimator        |
-| - Geofence (GUIDED)         (FusionCore: shadow)       |
+| - Geofence (GUIDED)         (FusionCore: not run)      |
 | - Failsafes: GCS/GPS     - Arming state machine         |
 |   loss, EKF variance     - Pre-arm checks               |
 | - Dual F9P RTK (UART)                                   |
@@ -105,7 +105,7 @@ Related [Safety Roadmap](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga
 | M6 | Gazebo simulation | `sowbot_sim.launch.py` + `sim_nav.launch.py` fully restructured. `kill_fake_nav2_on_clock` implemented. `use_sim_time=True` now threaded through topo stack. Gazebo does not model track slip, so these results do not carry over to the tracked hardware. **Multi-row mission following demonstrated end-to-end (see video above).** | Done | 4 | 2026 |
 | M7 | Sentor safety monitoring | `sowbot_monitor.yaml` fully authored (e-stop, bumpers, battery, camera, odom, neo_vision heartbeat, node monitors). `sentor_node.py` wired into `devkit.launch.py`. Pending: smoke-test on live hardware; battery voltage cutoff needs field confirmation (`# TODO: CONFIRM` in YAML). GNSS fix and heading monitors report only; no response is defined yet. | Blocked: hardware smoke test, battery cutoff | 3 | 2026 |
 | M8 | Visual crop-row navigation | `sowbot_row_follow` package implemented. ExG+Otsu, visual servo, `limbic_row_follow_node.py` as Nav2 action server. Cancel and heartbeat-loss safety. TSM row-swap hold with 6-second debounce implemented. Tested and iterated against a lettuce crop in the UK. | Tested on lettuce. No metrics published | 4 | 2026 |
-| M9 | ArduPilot on LEVIA-H7 controller path | Replaces ESP32/Lizard. `devkit_mavlink_bridge` commands zero when `cmd_vel` is stale and publishes EKF3 state and GPS status (`fc/odom`, `fc/ekf_fix`, `fc/gps1/fix`, `fc/gps2/fix`, `fc/diagnostics`); unit-tested against doubles, not yet run against a flight controller. EKF3 is the sole estimator and FusionCore is shadow only (`src/devkit_mavlink_bridge/mavlink.md`). LEVIA-H7 is unvalidated and has no confirmed ArduPilot hwdef (safety_roadmap.md O31). | WIP, bring-up | 2 | 2026 |
+| M9 | ArduPilot on LEVIA-H7 controller path | Replaces ESP32/Lizard. `devkit_mavlink_bridge` commands zero when `cmd_vel` is stale and publishes EKF3 state and GPS status (`fc/odom`, `fc/ekf_fix`, `fc/gps1/fix`, `fc/gps2/fix`, `fc/diagnostics`); unit-tested against doubles, not yet run against a flight controller. EKF3 is the sole estimator and FusionCore is not launched with the bridge (`src/devkit_mavlink_bridge/mavlink.md`). LEVIA-H7 is unvalidated and has no confirmed ArduPilot hwdef (safety_roadmap.md O31). | WIP, bring-up | 2 | 2026 |
 | M10 | MeshCore robot-to-robot avoidance | `src/devkit-meshcore-avoid` (`sowbot_avoid`). Simulation only; never run on hardware. Not a safety function. Not referenced by the Docker build, `manage.py` or the launch files. | Sim only. Blocked: hardware test, integration | 2 | 2026 |
 | M11 | LiteFarm interface (optional) | Imports a LiteFarm farm map (rows, docks, routes; `content_hash` checked, `hash8` stamped into the topo map). Exports row plans as GeoJSON (System tab, Tools card; `row_plan_cli`). `row_plan_cli --import-to` POSTs to `/row_plan/import`; no UI button for the POST. Format: `docs/row-plan-geojson.md`. | Implemented, optional. Unit-tested without hardware | 3 | 2026 |
 | M12 | Remote missions | Mission store and spec (`missions.md`). No intake, radio link or base station; `add_remote` has no callers. | Partial, spec only | 2 | 2026 |
@@ -218,6 +218,8 @@ xhost +local:docker
 ./manage.py
 ```
 Access http://localhost to access the WebUI
+
+On a real robot with the LEVIA-H7 flight controller, create `.env` from `.env.example` first. See "Real robot bring-up" in `src/devkit_mavlink_bridge/mavlink.md`.
 
 **The dashboard has a joystick and a soft e-stop and listens on port 80 of the robot.**
 Set `SOWBOT_UI_PASSWORD` in `.env` to require a password (HTTP Basic, user name ignored).

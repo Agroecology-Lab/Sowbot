@@ -1,0 +1,44 @@
+# ArduRover parameters for the Sowbot LEVIA-H7, from src/devkit_mavlink_bridge/mavlink.md.
+#
+# PROPOSED. Not loaded on any flight controller, and the LEVIA-H7 hwdef is unconfirmed (O31).
+# Names are for Rover 4.6 or later. Before 4.6 the GPS parameters had no instance number:
+# use GPS_TYPE and GPS_TYPE2 instead of GPS1_TYPE and GPS2_TYPE. A name the firmware does not
+# know is skipped by the loader, so confirm each value took by reading it back.
+# Load over the board's USB with a ground station (Mission Planner, QGroundControl or MAVProxy
+# "param load"), not through the bridge, which owns the telemetry port and does not set parameters.
+# Reboot afterwards: SERIALn_PROTOCOL and GPSn_TYPE need it.
+
+# Serial ports (mavlink.md Wiring). GPS1 is the lowest-numbered GPS port, so the moving-base
+# base stays on SERIAL2 and the rover on SERIAL3. SERIAL5_BAUD 115 is 115200, the bridge default.
+SERIAL2_PROTOCOL,5
+SERIAL3_PROTOCOL,5
+SERIAL5_PROTOCOL,2
+SERIAL5_BAUD,115
+
+# Dual F9P moving baseline: base then rover.
+GPS1_TYPE,17
+GPS2_TYPE,18
+
+# Geofence. FENCE_ACTION 2 is HOLD for Rover (RTL or SmartRTL need a good position, which a fence
+# breach may mean we lack). FENCE_TYPE 4 is the polygon bit; the polygon itself is not a parameter,
+# load it with tools/upload_fence.py. With the fence enabled, Rover needs a GPS lock to arm, and
+# does not accept mode changes while in breach.
+FENCE_ENABLE,1
+FENCE_TYPE,4
+FENCE_ACTION,2
+
+# Failsafes. FS_GCS_ENABLE 1 runs FS_ACTION when the flight controller stops receiving MAVLink
+# heartbeats for FS_TIMEOUT seconds. The bridge sends those heartbeats, so this covers the bridge
+# or SBC dying and not an operator losing the dashboard. FS_ACTION 2 and FS_EKF_ACTION 1 are HOLD.
+FS_GCS_ENABLE,1
+FS_ACTION,2
+FS_TIMEOUT,2
+FS_EKF_ACTION,1
+
+# Deliberately not set here: measure or verify first.
+# - EKF3 yaw source for the moving-baseline heading, and GPS1_MB_TYPE / GPS1_MB_OFS_X/Y/Z
+#   (antenna offsets from a measurement). See "To check" in mavlink.md.
+# - GUID_TIMEOUT: the bridge's watchdog assumes 3 s, and the Copter default is 3 s. Confirm the
+#   parameter exists on the Rover firmware you flashed and what it does before relying on it.
+# - FENCE_MARGIN, FS_EKF_THRESH: defaults are used.
+# - ARMING_CHECK: leave at its default. Do not disable the GPS check while the fence is enabled.

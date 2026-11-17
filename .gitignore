@@ -77,3 +77,4 @@ web/devkit_ui/
 
 # Local lint output
 pylint_out.txt
+src/devkit_bringup/config/ntrip_secrets.yaml

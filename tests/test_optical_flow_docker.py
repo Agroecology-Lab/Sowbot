@@ -196,3 +196,22 @@ git() {
 }
 sleep() { :; }
 '''
+
+
+@pytest.mark.parametrize('stage', ['Stage 3.2', 'Stage 10 apt'])
+@pytest.mark.parametrize('failures', [0, 1, 4, 5])
+def test_apt_retries_propagate_exhaustion(docker_instructions, tmp_path, stage, failures):
+    """Execute the actual APT loop and verify success, exhaustion and retry delays."""
+    command = run_instruction(docker_instructions, stage)
+    loop = re.search(r'for i in 1 2 3 4 5; do .*?done', command).group()
+    apt = tmp_path / 'apt-get'
+    apt.write_text('#!/bin/sh\nattempt=0\n[ ! -f attempts ] || read -r attempt < attempts\n'
+                   'attempt=$((attempt + 1))\nprintf "%s\\n" "$attempt" > attempts\n'
+                   'exit "$((attempt <= FAILURES))"\n')
+    apt.chmod(0o755)
+    result = run_shell(loop, tmp_path, prelude=r'''
+sleep() { printf '%s\n' "$1" >> sleeps; }
+''', FAILURES=str(failures), PATH=f'{tmp_path}:{os.environ["PATH"]}')
+    assert (result.returncode != 0) == (failures == 5), result.stderr
+    sleeps = tmp_path / 'sleeps'
+    assert (sleeps.read_text().splitlines() if sleeps.exists() else []) == ['15'] * min(failures, 4)
