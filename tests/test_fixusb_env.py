@@ -283,3 +283,13 @@ def test_process_endpoint_is_persisted_with_virtual_ports(fixusb, tmp_path, monk
     assert values['MAVLINK_ENDPOINT'] == '/dev/ttyACM2'
     for key in ('GPS_PORT_ROVER', 'GPS_PORT_ROVER1', 'MCU_PORT'):
         assert values[key] == 'virtual'
+
+
+@pytest.mark.parametrize('endpoint', ['""', "''", ' " \' " '])
+def test_quote_only_process_endpoint_clears_existing_endpoint(fixusb, tmp_path, monkeypatch, endpoint):
+    """Persist the empty override so later launches agree with detected hardware."""
+    _, values = _run_export(
+        fixusb, tmp_path, monkeypatch, 'MAVLINK_ENDPOINT=/dev/old\n', _devices(fixusb), endpoint=endpoint)
+    assert values['MAVLINK_ENDPOINT'] == ''
+    assert values['GPS_PORT_ROVER'] == '/dev/ttyACM0'
+    assert values['MCU_PORT'] == '/dev/ttyACM1'

@@ -115,7 +115,16 @@ Use `./manage.py`, not a hand-written `docker run`. It regenerates part of `.env
 3. Bench, wheels off the ground. Power the LEVIA-H7 and its receivers. Do not arm yet.
 4. Run `./manage.py`. It runs `sudo python3 tools/fixusb.py`, which asks for the safety acknowledgement the first time and so cannot be started unattended. It then starts the stack.
 5. Check the log for `flight controller armed/disarmed, custom_mode`, STATUSTEXT lines from the flight controller, and `fc/diagnostics` (link, EKF3 flags, GPS fix type). Check `fc/gps1/fix` and `fc/gps2/fix`. With NTRIP on, `fc/gps1/fix` should reach RTK float or fixed.
-6. Load `params/sowbot_rover.parm` and the fence (see Fence and parameters below), then arm and select GUIDED. Use a ground station on the board's USB port or the RC transmitter. The bridge's `fc/arm` and `fc/set_guided` services do the same but are off until `MAVLINK_ALLOW_ARM=true` (see Arm, disarm and GUIDED). Until the rover is armed in GUIDED, `cmd_vel` has no effect.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:db0abc231b3a14c410603447ab5f43b7119269731f8a7e1534ac542d20355c3f -->
+
+6. Load `params/sowbot_rover.parm` and the fence (see Fence and parameters below), then arm and select GUIDED using a ground station on the board's USB port or the RC transmitter.
+   When using the bridge services, call `fc/set_guided` first, confirm the rover is in GUIDED from the heartbeat log, and then call `fc/arm`.
+   These services are off until `MAVLINK_ALLOW_ARM=true` (see Arm, disarm and GUIDED).
+   Until the rover is armed in GUIDED, `cmd_vel` has no effect.
+
+<!-- /coderabbit-ai-generated:v1 -->
 7. Follow the bench, hard standing and field steps in `docs/field-validation.md`. Do not enable `--restart` or any boot-time start until the stop sources in that document have been measured (O33, O36).
 
 `.env` has two kinds of key. `tools/fixusb.py` rewrites the first on every launch and keeps the second as written.
@@ -195,7 +204,15 @@ Three `std_srvs/Trigger` services, off the same MAVLink link. Not run against a 
 
 - `allow_arm_from_ros` defaults to false. Set `MAVLINK_ALLOW_ARM=true` in `.env` or pass the launch argument.
 - `success: true` means the command was written to the link, not that the flight controller accepted it. The `COMMAND_ACK` result and the next heartbeat are logged ("flight controller accepted/refused arm/disarm"), and the reason for a refusal arrives as STATUSTEXT. A failed serial write returns `success: false`.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:6b5752305efed1c61b367cc4feb216a92ed6b5d214f014707aca75af7b0fb78f -->
+
+- Before sending an arm command, the bridge sends a zero velocity target even if `cmd_vel` is stale or zero.
+  If that write fails, arming is refused.
 - Arming never uses the 21196 force value, so the flight controller's pre-arm checks always apply.
+
+<!-- /coderabbit-ai-generated:v1 -->
 - `fc/disarm` is not gated, so any node on the ROS graph can call it. The flight controller decides whether to obey it while the rover is moving. That is not confirmed.
 - With the fence enabled, Rover does not accept mode changes while in breach, so `fc/set_guided` will not recover a rover that has stopped at the fence.
 - Any node on the ROS graph can call `fc/arm` once permitted. The DDS configuration and the dashboard password are the only access control.
@@ -240,5 +257,14 @@ RTCM reaches the flight controller only if something publishes `rtcm`. `ntrip_cl
 
 <!-- /coderabbit-ai-generated:v1 -->
 - Fence and failsafes. `params/sowbot_rover.parm` and `tools/upload_fence.py` now set and upload them, but neither has run against a flight controller or SITL. The fence breach and failsafe behaviour above is a plan until exercised on the vehicle (O22). `GUID_TIMEOUT` is not set, and the "GUID_TIMEOUT ~1 s" in the diagram above is not confirmed for Rover: the Copter default is 3 s, which is what the bridge's watchdog assumes.
-- Arm, disarm and GUIDED services. Check on the bench that the flight controller refuses `fc/arm` outside GUIDED and with a pre-arm failure, and what it does with `fc/disarm` while moving.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:111dbcaccd73caa88a515733e1afab960ee4aac202c49b0e1de3e591b736b9f2 -->
+
+- Arm, disarm and GUIDED services.
+  On the bench, call `fc/arm` outside GUIDED and verify the bridge rejects it without sending a command to the flight controller.
+  Separately, in GUIDED with no fresh nonzero `cmd_vel` and a pre-arm failure present, call `fc/arm`, confirm the command reaches the flight controller, and check its refusal through COMMAND_ACK and STATUSTEXT.
+  Check what the flight controller does with `fc/disarm` while moving.
+
+<!-- /coderabbit-ai-generated:v1 -->
 - Wheel encoders are in the architecture diagram but have no connector in the wiring section. Add one or drop them.

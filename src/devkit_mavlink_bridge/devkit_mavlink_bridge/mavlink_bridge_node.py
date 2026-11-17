@@ -488,6 +488,16 @@ class MavlinkBridgeNode(Node):
             response.success = True
             response.message = 'already armed'
         else:
+            fields = twist_to_position_target(
+                linear_x=0.0,
+                angular_z=0.0,
+                time_boot_ms=(time.monotonic_ns() // 1_000_000) & 0xFFFFFFFF,
+                target_system=self._mav.target_system,
+                target_component=self._mav.target_component,
+            )
+            if not self._send(self._mav.mav.set_position_target_local_ned_send, **fields):
+                response.message = 'refused: zero velocity target write failed'
+                return response
             # param2 stays 0: never 21196, which would skip the flight controller's arming checks.
             return self._send_command(response, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
                                       1, 0, 0, 0, 0, 0, 0, verb='arm')

@@ -744,6 +744,35 @@ class InboundTest(BridgeNodeTest):
         self.now += 10.0
         self.assertIn('no live flight controller heartbeat', self.call(node, 'fc/arm').message)
         self.assertEqual(self.command_longs(), [])
+        self.assertEqual(self.sent(), [])
+
+    def test_arm_clears_velocity_before_command_for_zero_or_stale_watchdog(self):
+        """Replace any retained controller target before issuing the arm command."""
+        for state in ('absent', 'zero', 'stale'):
+            with self.subTest(state=state):
+                node = self.guided_node()
+                if state == 'zero':
+                    self.command(node, 0.0, 0.0)
+                elif state == 'stale':
+                    self.command(node, 0.3, 0.1)
+                    self.now += node._watchdog.timeout_s + 0.1
+                    self.feed(node, _heartbeat(custom_mode=15))
+                self.connection.mav.reset_mock()
+                self.assertTrue(self.call(node, 'fc/arm').success)
+                self.assertEqual(self.sent(), [(0.0, 0.0)])
+                calls = self.connection.mav.mock_calls
+                self.assertEqual([c[0] for c in calls],
+                                 ['set_position_target_local_ned_send', 'command_long_send'])
+                self.assertEqual(calls[1].args[2], MAV.MAV_CMD_COMPONENT_ARM_DISARM)
+
+    def test_arm_refuses_when_zero_target_write_fails(self):
+        """A failed target reset must never be followed by an arm command."""
+        node = self.guided_node()
+        self.connection.mav.set_position_target_local_ned_send.side_effect = OSError('write failed')
+        response = self.call(node, 'fc/arm')
+        self.assertFalse(response.success)
+        self.assertIn('zero velocity target write failed', response.message)
+        self.assertEqual(self.command_longs(), [])
 
     def test_arm_when_already_armed_sends_nothing(self):
         """Verify an armed rover is not sent another arm command."""

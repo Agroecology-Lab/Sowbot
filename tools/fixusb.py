@@ -465,7 +465,7 @@ def scan_and_export():
         'NTRIP_ENABLED': ntrip_enabled,
     }
 
-    if endpoint:
+    if endpoint or os.environ.get('MAVLINK_ENDPOINT'):
         managed['MAVLINK_ENDPOINT'] = endpoint
 
     write_env_atomically(env_path, render_env(managed, existing_text))

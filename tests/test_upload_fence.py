@@ -89,6 +89,27 @@ def test_ambiguous_or_missing_polygon_is_refused(tool):
             tool.load_polygon(document, role, field)
 
 
+def test_null_geometry_and_properties_are_nonmatches(tool):
+    """Ignore null feature members while retaining the matching polygon."""
+    geometry = {'type': 'Polygon', 'coordinates': [[[-2, 51], [-1, 51], [-1, 52]]]}
+    document = {'features': [
+        {'geometry': None, 'properties': {'role': 'fence'}},
+        {'geometry': geometry, 'properties': None},
+        {'geometry': geometry, 'properties': {'role': 'fence'}},
+    ]}
+    assert tool.load_polygon(document, 'fence') == [(51, -2), (51, -1), (52, -1)]
+
+
+def test_polygon_with_interior_ring_is_refused(tool):
+    """Do not silently turn a polygon with a hole into an inclusion fence."""
+    document = {'features': [{'geometry': {'type': 'Polygon', 'coordinates': [
+        [[-2, 51], [-1, 51], [-1, 52]],
+        [[-1.9, 51.1], [-1.8, 51.1], [-1.8, 51.2]],
+    ]}, 'properties': {'role': 'fence'}}]}
+    with pytest.raises(tool.FenceError, match='interior rings'):
+        tool.load_polygon(document, 'fence')
+
+
 def test_swapped_coordinates_are_caught(tool):
     """Verify a [lat, lon] file (latitude beyond 90) is rejected rather than uploaded."""
     document = {'features': [{'geometry': {'type': 'Polygon', 'coordinates': [[[51, 120], [51, 121], [52, 121]]]},

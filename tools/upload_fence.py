@@ -40,13 +40,16 @@ def load_polygon(document: dict, role: str, field: int | None = None) -> list[tu
     more than one. Raise FenceError for no match, several matches, or fewer than three vertices.
     """
     matches = [f for f in document.get('features', [])
-               if f.get('geometry', {}).get('type') == 'Polygon'
-               and f.get('properties', {}).get('role') == role
+               if (f.get('geometry') or {}).get('type') == 'Polygon'
+               and (f.get('properties') or {}).get('role') == role
                and (field is None or f['properties'].get('field') == field)]
     if len(matches) != 1:
         raise FenceError(f'expected one Polygon with role={role!r}'
                          f'{"" if field is None else f" and field={field}"}, found {len(matches)}')
-    ring = matches[0]['geometry']['coordinates'][0]
+    rings = matches[0]['geometry']['coordinates']
+    if len(rings) != 1:
+        raise FenceError('a fence polygon must have exactly one exterior ring and no interior rings')
+    ring = rings[0]
     vertices = [(float(lat), float(lon)) for lon, lat in (point[:2] for point in ring)]
     if len(vertices) > 1 and vertices[0] == vertices[-1]:
         vertices.pop()
