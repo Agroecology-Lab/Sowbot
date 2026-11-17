@@ -36,6 +36,15 @@ class TwistToPositionTargetTest(unittest.TestCase):
         fields = twist_to_position_target(0.0, 0.0, time_boot_ms=0)
         self.assertEqual((fields['vx'], fields['yaw_rate']), (0.0, 0.0))
 
+    def test_reverse_velocity_does_not_change_yaw_conversion(self):
+        """FRD yaw conversion is independent of whether the rover travels backwards."""
+        for yaw in (-0.7, 0.0, 0.7):
+            with self.subTest(yaw=yaw):
+                fields = twist_to_position_target(-0.5, yaw, time_boot_ms=123)
+                self.assertEqual(fields['vx'], -0.5)
+                self.assertEqual(fields['yaw_rate'], -yaw)
+                self.assertEqual(fields['time_boot_ms'], 123)
+
 
 if __name__ == '__main__':
     unittest.main()

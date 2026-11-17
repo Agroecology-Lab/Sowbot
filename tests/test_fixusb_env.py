@@ -293,3 +293,15 @@ def test_quote_only_process_endpoint_clears_existing_endpoint(fixusb, tmp_path, 
     assert values['MAVLINK_ENDPOINT'] == ''
     assert values['GPS_PORT_ROVER'] == '/dev/ttyACM0'
     assert values['MCU_PORT'] == '/dev/ttyACM1'
+
+
+@pytest.mark.parametrize(('process', 'expected'), [
+    ('/dev/new', '/dev/new'),
+    ('', '/dev/from-file'),
+    ('  " /dev/quoted "  ', '/dev/quoted'),
+    ('todo_serial_device_here', ''),
+])
+def test_endpoint_resolution_process_precedence(fixusb, monkeypatch, process, expected):
+    """Process settings take precedence, while an empty value falls back to .env."""
+    monkeypatch.setenv('MAVLINK_ENDPOINT', process)
+    assert fixusb.mavlink_endpoint('MAVLINK_ENDPOINT=/dev/from-file\n') == expected

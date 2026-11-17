@@ -806,6 +806,74 @@ class InboundTest(BridgeNodeTest):
         self.assertEqual([lvl for lvl, _ in texts], ['warn', 'info'])
         self.assertIn('refused arm/disarm', texts[0][1])
 
+    def test_all_services_require_a_live_link_even_when_velocity_gate_is_disabled(self):
+        """Disabling velocity heartbeat gating must not bypass service link checks."""
+        node = self.make(allow_arm_from_ros=True, require_fc_heartbeat=False)
+        for service in ('fc/arm', 'fc/disarm', 'fc/set_guided'):
+            with self.subTest(service=service):
+                response = self.call(node, service)
+                self.assertFalse(response.success)
+                self.assertIn('no live flight controller heartbeat', response.message)
+        self.assertEqual(self.command_longs(), [])
+
+    def test_expired_link_blocks_disarm_and_mode_until_heartbeat_recovers(self):
+        """Service commands resume only after receiving another controller heartbeat."""
+        node = self.guided_node()
+        self.now += 10.0
+        for service in ('fc/disarm', 'fc/set_guided'):
+            self.assertFalse(self.call(node, service).success)
+        self.assertEqual(self.command_longs(), [])
+        self.feed(node, _heartbeat(custom_mode=15))
+        self.assertTrue(self.call(node, 'fc/disarm').success)
+
+    def test_pure_rotation_blocks_arm_until_command_expires(self):
+        """Yaw alone counts as motion; stale motion does not prevent a later arm."""
+        node = self.guided_node()
+        self.command(node, 0.0, -0.2)
+        response = self.call(node, 'fc/arm')
+        self.assertFalse(response.success)
+        self.assertIn('nonzero cmd_vel', response.message)
+        self.assertEqual(self.command_longs(), [])
+        self.now += 0.6
+        self.assertTrue(self.call(node, 'fc/arm').success)
+        self.assertEqual(self.command_longs(), [(MAV.MAV_CMD_COMPONENT_ARM_DISARM, (1, 0, 0, 0, 0, 0, 0))])
+
+    def test_fresh_zero_command_permits_arm(self):
+        """An explicit stop clears a previous motion command without waiting for expiry."""
+        node = self.guided_node()
+        self.command(node, 0.4, 0.2)
+        self.command(node, 0.0, 0.0)
+        self.assertTrue(self.call(node, 'fc/arm').success)
+
+    def test_disarm_is_allowed_during_motion_outside_guided(self):
+        """The motion and GUIDED checks for arming must not prevent disarming."""
+        node = self.guided_node(allow=False, armed=True, mode=4)
+        self.command(node, 0.5, 0.2)
+        self.assertTrue(self.call(node, 'fc/disarm').success)
+        self.assertEqual(self.command_longs(), [(MAV.MAV_CMD_COMPONENT_ARM_DISARM, (0, 0, 0, 0, 0, 0, 0))])
+
+    def test_failed_disarm_and_mode_writes_report_failure(self):
+        """Both services expose transport failures and recover on the next request."""
+        node = self.guided_node()
+        for service in ('fc/disarm', 'fc/set_guided'):
+            with self.subTest(service=service):
+                self.connection.mav.command_long_send.side_effect = OSError('link lost')
+                response = self.call(node, service)
+                self.assertFalse(response.success)
+                self.assertIn('not sent', response.message)
+                self.connection.mav.command_long_send.side_effect = None
+                self.assertTrue(self.call(node, service).success)
+
+    def test_status_text_error_boundary_and_invalid_ascii(self):
+        """Severity ERROR remains an error and malformed controller text is printable."""
+        node = self.make()
+        self.feed(node, _heartbeat(),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_ERROR, text=b'PreArm: \xff\x00'),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_NOTICE, text='  Ready  '))
+        records = [r for r in node.get_logger().records if 'flight controller:' in r[1]]
+        self.assertEqual(records, [('error', 'flight controller: PreArm: \ufffd'),
+                                   ('info', 'flight controller: Ready')])
+
     def test_unknown_message_types_are_ignored(self):
         """Verify traffic the bridge does not use, including corrupt frames, is skipped."""
         node = self.make()
