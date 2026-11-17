@@ -150,3 +150,109 @@ def test_upload_without_an_endpoint_is_an_error(tool, capsys):
     """Verify the tool refuses to guess a link."""
     assert tool.main(['--geojson', str(FARM_MAP), '--role', 'field', '--field', '1']) == 1
     assert '--endpoint' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('closed', [False, True])
+def test_polygon_accepts_altitude_and_optional_closing_vertex(tool, closed):
+    """GeoJSON altitude must not alter the lat/lon polygon or add a duplicate vertex."""
+    ring = [[lon, lat, 100] for lat, lon in SQUARE]
+    if closed:
+        ring.append(ring[0])
+    document = {'features': [{'properties': {'role': 'fence'},
+                              'geometry': {'type': 'Polygon', 'coordinates': [ring]}}]}
+    assert tool.load_polygon(document, 'fence') == SQUARE
+
+
+@pytest.mark.parametrize('ring', [[], [[0, 0]], [[0, 0], [1, 1]], [[0, 0], [1, 1], [0, 0]]])
+def test_polygon_requires_three_vertices_after_removing_closure(tool, ring):
+    """A repeated closing point cannot turn a two-point line into a fence."""
+    document = {'features': [{'properties': {'role': 'fence'},
+                              'geometry': {'type': 'Polygon', 'coordinates': [ring]}}]}
+    with pytest.raises(tool.FenceError, match='at least three'):
+        tool.load_polygon(document, 'fence')
+
+
+@pytest.mark.parametrize('point', [[181, 0], [-181, 0], [0, -91], [float('nan'), 0], [0, float('inf')]])
+def test_polygon_rejects_invalid_coordinates(tool, point):
+    """Reject out-of-range and nonfinite coordinates before touching the controller."""
+    document = {'features': [{'properties': {'role': 'fence'},
+                              'geometry': {'type': 'Polygon', 'coordinates': [[point, [1, 1], [2, 2]]]}}]}
+    with pytest.raises(tool.FenceError, match='outside valid'):
+        tool.load_polygon(document, 'fence')
+
+
+@pytest.mark.parametrize('axis', [0, 1])
+def test_verify_allows_rounding_but_rejects_larger_coordinate_changes(tool, axis):
+    """The tolerance applies independently to latitude and longitude."""
+    for offset, accepted in [(1e-7, True), (2e-7, False)]:
+        stored = [0.0, 0.0]
+        stored[axis] = offset
+        if accepted:
+            tool.verify([(0.0, 0.0)], [tuple(stored)])
+        else:
+            with pytest.raises(tool.FenceError, match='vertex 0'):
+                tool.verify([(0.0, 0.0)], [tuple(stored)])
+
+
+def test_download_timeout_does_not_acknowledge_incomplete_readback(tool, monkeypatch):
+    """A missing vertex must fail without acknowledging a completed download."""
+    from unittest.mock import Mock
+
+    controller = FakeController(stored_items={0: SimpleNamespace()})
+    ack = Mock()
+    monkeypatch.setattr(controller.mav, 'mission_ack_send', ack)
+    monkeypatch.setattr(controller.mav, 'mission_request_int_send', lambda *args: None)
+    with pytest.raises(tool.FenceError, match='MISSION_ITEM_INT'):
+        tool.download(controller)
+    ack.assert_not_called()
+
+
+def test_connect_ignores_ground_stations_and_learns_controller_ids(tool, monkeypatch):
+    """Only a real autopilot heartbeat may select the upload target."""
+    from unittest.mock import Mock
+
+    controller = Mock()
+    controller.recv_match.side_effect = [
+        SimpleNamespace(type=MAV.MAV_TYPE_GCS),
+        SimpleNamespace(type=MAV.MAV_TYPE_GROUND_ROVER, autopilot=MAV.MAV_AUTOPILOT_INVALID),
+        SimpleNamespace(type=MAV.MAV_TYPE_GROUND_ROVER, autopilot=MAV.MAV_AUTOPILOT_ARDUPILOTMEGA,
+                        get_srcSystem=lambda: 7, get_srcComponent=lambda: 3),
+    ]
+    connect = Mock(return_value=controller)
+    monkeypatch.setattr(mavutil, 'mavlink_connection', connect)
+    monkeypatch.setattr(tool.time, 'monotonic', lambda: 0.0)
+    assert tool._connect('synthetic-endpoint', 57600, 10.0) is controller
+    connect.assert_called_once_with('synthetic-endpoint', baud=57600)
+    assert (controller.target_system, controller.target_component) == (7, 3)
+
+
+def test_connect_timeout_reports_missing_controller(tool, monkeypatch):
+    """A heartbeat deadline expires without a real serial wait."""
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(mavutil, 'mavlink_connection', Mock())
+    ticks = iter([0.0, 11.0])
+    monkeypatch.setattr(tool.time, 'monotonic', lambda: next(ticks))
+    with pytest.raises(tool.FenceError, match='no flight controller heartbeat'):
+        tool._connect('synthetic-endpoint', 115200, 10.0)
+
+
+def test_main_uploads_and_verifies_controller_readback(tool, monkeypatch, capsys):
+    """The CLI succeeds only after uploading and reading the same fence back."""
+    controller = FakeController()
+    monkeypatch.setattr(tool, '_connect', lambda *args: controller)
+    assert tool.main(['--geojson', str(FARM_MAP), '--role', 'field', '--field', '1',
+                      '--endpoint', 'synthetic-endpoint']) == 0
+    assert len(controller.items) >= 3
+    assert 'uploaded and read back' in capsys.readouterr().out
+
+
+def test_main_readback_mismatch_returns_failure(tool, monkeypatch, capsys):
+    """An accepted upload alone must never produce the CLI success message."""
+    monkeypatch.setattr(tool, '_connect', lambda *args: FakeController())
+    monkeypatch.setattr(tool, 'download', lambda *args: [])
+    assert tool.main(['--geojson', str(FARM_MAP), '--role', 'field', '--field', '1',
+                      '--endpoint', 'synthetic-endpoint']) == 1
+    output = capsys.readouterr()
+    assert 'controller holds 0' in output.err
+    assert 'uploaded and read back' not in output.out

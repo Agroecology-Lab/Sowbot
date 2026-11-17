@@ -283,3 +283,15 @@ def test_process_endpoint_is_persisted_with_virtual_ports(fixusb, tmp_path, monk
     assert values['MAVLINK_ENDPOINT'] == '/dev/ttyACM2'
     for key in ('GPS_PORT_ROVER', 'GPS_PORT_ROVER1', 'MCU_PORT'):
         assert values[key] == 'virtual'
+
+
+@pytest.mark.parametrize(('process', 'expected'), [
+    ('/dev/new', '/dev/new'),
+    ('', '/dev/from-file'),
+    ('  " /dev/quoted "  ', '/dev/quoted'),
+    ('todo_serial_device_here', ''),
+])
+def test_endpoint_resolution_process_precedence(fixusb, monkeypatch, process, expected):
+    """Process settings take precedence, while an empty value falls back to .env."""
+    monkeypatch.setenv('MAVLINK_ENDPOINT', process)
+    assert fixusb.mavlink_endpoint('MAVLINK_ENDPOINT=/dev/from-file\n') == expected
