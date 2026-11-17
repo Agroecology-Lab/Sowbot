@@ -501,7 +501,7 @@ def generate_launch_description():
         *([Node(
             package='ntrip_client',
             executable='ntrip_client_node',
-            name='ntrip_client',
+            name='ntrip_client_node',
             parameters=[ntrip_config],
             output='screen',
             condition=real_condition if mavlink_enabled else None,

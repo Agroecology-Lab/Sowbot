@@ -200,10 +200,6 @@ class TestMapOdom(unittest.TestCase):
                 _description(**env)
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class TestNtripGate(unittest.TestCase):
     def test_ntrip_runs_for_the_bridge_without_an_sbc_receiver(self):
         """Verify NTRIP_ENABLED with a bridge endpoint starts ntrip_client although GPS_PORT_ROVER is virtual."""
@@ -220,3 +216,7 @@ class TestNtripGate(unittest.TestCase):
         """Verify NTRIP_ENABLED alone, with virtual ports and no endpoint, starts nothing."""
         self.assertEqual(_nodes(_description(NTRIP_ENABLED='true', GPS_PORT_ROVER='virtual'),
                                 package='ntrip_client'), [])
+
+
+if __name__ == '__main__':
+    unittest.main()

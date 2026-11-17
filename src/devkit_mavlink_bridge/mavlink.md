@@ -185,6 +185,14 @@ RTCM reaches the flight controller only if something publishes `rtcm`. `ntrip_cl
 - Both F9Ps now draw from +5V_SYS, plus antenna bias current. Check the rail.
 - Set FLOW_TYPE for the PixArt driver.
 - The sensor board must take 5V power and work with 3.3V SPI logic. U19 supplies 5V and the MCU pins are 3.3V.
-- Yaw source. Confirm the EKF3 yaw source is the moving-baseline GPS heading (`GPS_AUTO_CONFIG`, `EK3_SRC1_YAW`, `GPS_MB1_TYPE` and `GPS_MB1_OFS_X/Y/Z` for the antenna offsets) and measure the offsets. `manage.py` warns about `GPS_MB1_OFS_*`.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:c43c0ed2c002138d6ea92b3d78abf031f683bc6892eaab6ba3d0b61e250614d0 -->
+
+- Yaw source. Confirm the EKF3 yaw source is the moving-baseline GPS heading (`GPS_AUTO_CONFIG`, `EK3_SRC1_YAW`) and measure the antenna offsets.
+  For Rover 4.6, use `GPS1_MB_TYPE` and `GPS1_MB_OFS_X/Y/Z`; for older firmware (before 4.6), use `GPS_MB1_TYPE` and `GPS_MB1_OFS_X/Y/Z`.
+  `manage.py` warns about the offsets using the older `GPS_MB1_OFS_*` names.
+
+<!-- /coderabbit-ai-generated:v1 -->
 - Fence and failsafes. Nothing in this repo uploads a fence polygon or sets `FENCE_*`, `FS_GCS_ENABLE`, `FS_EKF_*` or `GUID_TIMEOUT`. The fence breach and failsafe behaviour above is a plan until set and exercised on the vehicle (O22).
 - Wheel encoders are in the architecture diagram but have no connector in the wiring section. Add one or drop them.
