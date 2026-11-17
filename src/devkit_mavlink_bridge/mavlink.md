@@ -95,6 +95,26 @@ stale cmd_vel             --> bridge sends zero (built)
 fence breach              --> HOLD (not RTL)
 ```
 
+## Real robot bring-up
+
+Use `./manage.py`, not a hand-written `docker run`. It regenerates part of `.env`, checks the dashboard password, picks the DDS configuration and mounts the live source. A raw `docker run --env-file .env` uses whatever the last `manage.py` run wrote.
+
+1. Build: `./manage.py full-build` (first time), or `./manage.py build`. The image needs `ros-jazzy-ntrip-client` for NTRIP.
+2. Create `.env` from `.env.example`. Set `MAVLINK_ENDPOINT` to a stable path such as `/dev/serial/by-id/...` (not `ttyACMn`, which can change), `MAVLINK_BAUD` if not 115200, `SOWBOT_UI_PASSWORD`, and `MAP_ORIGIN_LAT`, `MAP_ORIGIN_LON` and `MAP_YAW_DEG` from a survey. Set `NTRIP_ENABLED=true` only once `src/devkit_bringup/config/ntrip.yaml` is filled in.
+3. Bench, wheels off the ground. Power the LEVIA-H7 and its receivers. Do not arm yet.
+4. Run `./manage.py`. It runs `sudo python3 tools/fixusb.py`, which asks for the safety acknowledgement the first time and so cannot be started unattended. It then starts the stack.
+5. Check the log for `flight controller armed/disarmed, custom_mode`, STATUSTEXT lines from the flight controller, and `fc/diagnostics` (link, EKF3 flags, GPS fix type). Check `fc/gps1/fix` and `fc/gps2/fix`. With NTRIP on, `fc/gps1/fix` should reach RTK float or fixed.
+6. Arm and select GUIDED from a ground station on the board's USB port, or from the RC transmitter. The bridge owns the telemetry port and does neither. Until the rover is armed in GUIDED, `cmd_vel` has no effect.
+7. Follow the bench, hard standing and field steps in `docs/field-validation.md`. Do not enable `--restart` or any boot-time start until the stop sources in that document have been measured (O33, O36).
+
+`.env` has two kinds of key. `tools/fixusb.py` rewrites the first on every launch and keeps the second as written.
+
+| Rewritten every launch (do not edit) | Yours (edit once) |
+|---|---|
+| `SOWBOT_SAFETY_ACK`, `GPS_PORT_ROVER`, `GPS_PORT_ROVER1`, their `GPS_USB_PATH_*`, `GPS_TYPE_*` and `GPS_SERIAL_*`, `MCU_PORT`, `USB_CAM_*`, `AXIS_CAM_ENABLED`, `USER_ID`, `GROUP_ID`, `IS_JETSON`, `TMAP2_FILE` | `MAVLINK_ENDPOINT`, `MAVLINK_BAUD`, `SOWBOT_UI_PASSWORD`, `MAP_ORIGIN_*`, `MAP_YAW_DEG`, `DDS_INTERFACE`, `TOOLS_BIND`, `FORCE_SIM`, `FIELD_DATUM_*` (sim only). `NTRIP_ENABLED` is rewritten with its current value, so setting it once sticks |
+
+With `MAVLINK_ENDPOINT` set, `fixusb.py` writes `GPS_PORT_ROVER`, `GPS_PORT_ROVER1` and `MCU_PORT` as `virtual` whatever is plugged into the SBC, and logs the devices it ignored. Without an endpoint, a placeholder value counts as unset.
+
 ## Launch
 
 Set `MAVLINK_ENDPOINT` (and `MAVLINK_BAUD` if not 115200) in `.env`. `manage.py` then runs in hardware mode with `GPS_PORT_ROVER` and `MCU_PORT` virtual, and `devkit.launch.py` starts the bridge with `publish_tf:=true`. A placeholder value (`TODO_SERIAL_DEVICE_HERE`) is refused by `manage.py` and `devkit.launch.py`.

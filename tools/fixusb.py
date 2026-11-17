@@ -57,6 +57,20 @@ def read_env_values(text: str) -> dict:
     return values
 
 
+MAVLINK_PLACEHOLDER = 'TODO_SERIAL_DEVICE_HERE'
+
+
+def mavlink_endpoint(existing_text: str) -> str:
+    """Return the configured MAVLINK_ENDPOINT, or '' if unset or still the placeholder.
+
+    The process environment wins over .env, as for NTRIP_ENABLED: sudo strips the caller's
+    environment, so .env is normally the source. Surrounding quotes are removed.
+    """
+    value = (os.environ.get('MAVLINK_ENDPOINT')
+             or read_env_values(existing_text).get('MAVLINK_ENDPOINT') or '').strip().strip('\'"')
+    return '' if value.upper() == MAVLINK_PLACEHOLDER else value
+
+
 def render_env(managed: dict, existing_text: str) -> str:
     """Build .env text with one generated header, managed keys, then retained lines.
 
@@ -372,6 +386,21 @@ def scan_and_export():
         r1_port, r1_type, r1_serial, r1_vid = 'virtual', 'none', '', 0
     mcu_p = mcu_device if mcu_device else 'virtual'
 
+    # ArduPilot path: the flight controller carries the GNSS receivers and the MCU role, so the
+    # SBC must not claim any of them. Without this, a u-blox or ESP32 left on the SBC would start
+    # the SBC GNSS and driver path beside the MAVLink bridge. MAVLINK_ENDPOINT is an operator key.
+    env_path = Path('.env')
+    existing_text = env_path.read_text() if env_path.exists() else ''
+    endpoint = mavlink_endpoint(existing_text)
+    if endpoint:
+        claimed = [port for port in (r_port, r1_port, mcu_p) if port != 'virtual']
+        if claimed:
+            print(f'MAVLINK_ENDPOINT={endpoint} is set: ignoring SBC-side devices {claimed}; '
+                  'GPS and MCU ports are set to virtual.')
+        r_port, r_type, r_serial, r_vid = 'virtual', 'none', '', 0
+        r1_port, r1_type, r1_serial, r1_vid = 'virtual', 'none', '', 0
+        mcu_p = 'virtual'
+
     # Resolve USB bus paths for ublox receivers (libusb requires bus path, not tty)
     r_usb_path  = find_usb_bus_path(r_vid)  if r_type  == 'ublox' else 'virtual'
     r1_usb_path = find_usb_bus_path(r1_vid) if r1_type == 'ublox' else 'virtual'
@@ -405,9 +434,6 @@ def scan_and_export():
         ).returncode == 0 else 'false'
     except (subprocess.TimeoutExpired, OSError):
         axis_cam = 'false'
-
-    env_path = Path('.env')
-    existing_text = env_path.read_text() if env_path.exists() else ''
 
     # NTRIP: set to true once config/ntrip.yaml is filled in with real creds.
     # Keeps corrections disabled by default so a misconfigured ntrip.yaml

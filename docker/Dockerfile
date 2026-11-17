@@ -110,6 +110,7 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rosbag2-storage-mcap \
         ros-jazzy-rtcm-msgs \
+        ros-jazzy-ntrip-client \
         ros-jazzy-nmea-msgs \
         ros-jazzy-libcurl-vendor \
         ros-jazzy-topic-tools \
@@ -449,6 +450,7 @@ RUN apt-get update && \
         novnc \
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rtcm-msgs \
+        ros-jazzy-ntrip-client \
         ros-jazzy-nmea-msgs \
         ros-jazzy-libcurl-vendor \
         ros-jazzy-interactive-markers \

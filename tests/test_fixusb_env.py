@@ -209,3 +209,64 @@ def test_atomic_write_failure_leaves_original_intact(fixusb, tmp_path, monkeypat
         fixusb.write_env_atomically(env, 'new\n')
     assert env.read_text() == 'old\n'
     assert sorted(path.name for path in tmp_path.iterdir()) == ['.env']
+
+
+def _run_export(fixusb, tmp_path, monkeypatch, env_text, devices):
+    """Run the real export with fake serial devices and return the sanitised ports and .env values."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv('MAVLINK_ENDPOINT', raising=False)
+    monkeypatch.delenv('NTRIP_ENABLED', raising=False)
+    (tmp_path / '.env').write_text(env_text)
+    sanitised = []
+    monkeypatch.setattr(fixusb, 'check_host_tools', lambda: True)
+    monkeypatch.setattr(fixusb, 'handle_safety_disclaimer', lambda: 'true')
+    monkeypatch.setattr(fixusb, 'detect_jetson', lambda: False)
+    monkeypatch.setattr(fixusb.serial.tools.list_ports, 'comports', lambda: devices, raising=False)
+    monkeypatch.setattr(fixusb, 'sanitize_hardware', lambda port, *_: sanitised.append(port))
+    monkeypatch.setattr(fixusb, 'find_usb_bus_path', lambda vid: '1-2')
+    monkeypatch.setattr(fixusb, 'detect_camera', lambda: (str(tmp_path / 'no-camera'), 'absent'))
+    monkeypatch.setattr(
+        fixusb.subprocess, 'run', lambda *args, **kwargs: types.SimpleNamespace(returncode=1),
+    )
+    fixusb.scan_and_export()
+    return sanitised, fixusb.read_env_values((tmp_path / '.env').read_text())
+
+
+def _devices(fixusb):
+    port = types.SimpleNamespace
+    return [port(vid=fixusb.UBLOX_VID, device='/dev/ttyACM0', serial_number='U1'),
+            port(vid=fixusb.ESP32_VID, device='/dev/ttyACM1', serial_number='E1')]
+
+
+def test_sbc_devices_are_claimed_without_a_mavlink_endpoint(fixusb, tmp_path, monkeypatch):
+    """Control: with no endpoint, a u-blox and an ESP32 on the SBC are assigned as before."""
+    _, values = _run_export(fixusb, tmp_path, monkeypatch, 'FORCE_SIM=0\n', _devices(fixusb))
+    assert values['GPS_PORT_ROVER'] == '/dev/ttyACM0'
+    assert values['MCU_PORT'] == '/dev/ttyACM1'
+
+
+def test_mavlink_endpoint_forces_gps_and_mcu_ports_virtual(fixusb, tmp_path, monkeypatch):
+    """Verify the ArduPilot path never lets SBC-side receivers or an MCU through."""
+    sanitised, values = _run_export(
+        fixusb, tmp_path, monkeypatch, 'MAVLINK_ENDPOINT=/dev/serial/by-id/fc\nFORCE_SIM=0\n',
+        _devices(fixusb))
+    for key in ('GPS_PORT_ROVER', 'GPS_PORT_ROVER1', 'MCU_PORT', 'GPS_USB_PATH_ROVER'):
+        assert values[key] == 'virtual', key
+    assert values['GPS_TYPE_ROVER'] == 'none'
+    assert set(sanitised) == {'virtual'}
+    assert values['MAVLINK_ENDPOINT'] == '/dev/serial/by-id/fc'
+    assert values['FORCE_SIM'] == '0'
+
+
+@pytest.mark.parametrize('endpoint', ['', 'TODO_SERIAL_DEVICE_HERE', ' todo_serial_device_here '])
+def test_empty_or_placeholder_endpoint_changes_nothing(fixusb, tmp_path, monkeypatch, endpoint):
+    """Verify an unset or placeholder endpoint leaves detected devices assigned."""
+    _, values = _run_export(
+        fixusb, tmp_path, monkeypatch, f'MAVLINK_ENDPOINT={endpoint}\n', _devices(fixusb))
+    assert values['GPS_PORT_ROVER'] == '/dev/ttyACM0'
+    assert values['MCU_PORT'] == '/dev/ttyACM1'
+
+
+def test_quoted_endpoint_counts_as_set(fixusb):
+    """Verify quotes around the value do not hide the endpoint."""
+    assert fixusb.mavlink_endpoint('MAVLINK_ENDPOINT="/dev/ttyACM2"\n') == '/dev/ttyACM2'
