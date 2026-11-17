@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 pytest.importorskip('pymavlink')
-from pymavlink import mavutil  # noqa: E402
+from pymavlink import mavutil
 
 MAV = mavutil.mavlink
 FARM_MAP = Path(__file__).parent / 'farm-map.geojson'

@@ -7,8 +7,8 @@ PARM = Path(__file__).parents[1] / 'params' / 'sowbot_rover.parm'
 
 def _load():
     values = {}
-    for line in PARM.read_text().splitlines():
-        line = line.strip()
+    for raw_line in PARM.read_text().splitlines():
+        line = raw_line.strip()
         if not line or line.startswith('#'):
             continue
         name, _, value = line.partition(',')
