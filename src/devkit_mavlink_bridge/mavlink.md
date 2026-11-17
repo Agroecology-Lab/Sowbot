@@ -100,7 +100,18 @@ fence breach              --> HOLD (not RTL)
 Use `./manage.py`, not a hand-written `docker run`. It regenerates part of `.env`, checks the dashboard password, picks the DDS configuration and mounts the live source. A raw `docker run --env-file .env` uses whatever the last `manage.py` run wrote.
 
 1. Build: `./manage.py full-build` (first time), or `./manage.py build`. The image needs `ros-jazzy-ntrip-client` for NTRIP.
-2. Create `.env` from `.env.example`. Set `MAVLINK_ENDPOINT` to a stable path such as `/dev/serial/by-id/...` (not `ttyACMn`, which can change), `MAVLINK_BAUD` if not 115200, `SOWBOT_UI_PASSWORD`, and `MAP_ORIGIN_LAT`, `MAP_ORIGIN_LON` and `MAP_YAW_DEG` from a survey. Set `NTRIP_ENABLED=true` only once `src/devkit_bringup/config/ntrip.yaml` is filled in.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:8c8bd37a070122c2ff697cc6544829bfda3c84af67da90ce70d8eb2a3bc9cfff -->
+
+2. Create `.env` from `.env.example`. Set `MAVLINK_ENDPOINT` to a stable path such as `/dev/serial/by-id/...` (not `ttyACMn`, which can change), `MAVLINK_BAUD` if not 115200, `SOWBOT_UI_PASSWORD`, and `MAP_ORIGIN_LAT`, `MAP_ORIGIN_LON` and `MAP_YAW_DEG` from a survey. Set the caster host, port and mountpoint in `src/devkit_bringup/config/ntrip.yaml`.
+   Copy `src/devkit_bringup/config/ntrip_secrets.yaml.template` to `src/devkit_bringup/config/ntrip_secrets.yaml` and fill in its username and password.
+   This file follows the existing `config/secrets.yaml` pattern: it is gitignored and excluded from Docker builds.
+   `manage.py` mounts `src/devkit_bringup` at runtime, and the installed launch uses that mount through the image’s symlink install.
+   `devkit.launch.py` loads `ntrip.yaml` followed by `ntrip_secrets.yaml`, so credentials come from the mounted file.
+   Keep credentials out of tracked `ntrip.yaml`; set `NTRIP_ENABLED=true` only after both files are configured.
+
+<!-- /coderabbit-ai-generated:v1 -->
 3. Bench, wheels off the ground. Power the LEVIA-H7 and its receivers. Do not arm yet.
 4. Run `./manage.py`. It runs `sudo python3 tools/fixusb.py`, which asks for the safety acknowledgement the first time and so cannot be started unattended. It then starts the stack.
 5. Check the log for `flight controller armed/disarmed, custom_mode`, STATUSTEXT lines from the flight controller, and `fc/diagnostics` (link, EKF3 flags, GPS fix type). Check `fc/gps1/fix` and `fc/gps2/fix`. With NTRIP on, `fc/gps1/fix` should reach RTK float or fixed.

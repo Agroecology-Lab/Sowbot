@@ -198,7 +198,7 @@ class MavlinkBridgeNode(Node):
         self._rtcm_sequence = 0
         self._odom_blocked: str | None = 'no data yet'
 
-        mavlink_endpoint = os.environ.get(_MAVLINK_ENDPOINT_ENV, '').strip()
+        mavlink_endpoint = os.environ.get(_MAVLINK_ENDPOINT_ENV, '').strip(" \t\r\n'\"")
         if not mavlink_endpoint or mavlink_endpoint.upper() == _MAVLINK_ENDPOINT_PLACEHOLDER:
             raise ValueError(
                 f'{_MAVLINK_ENDPOINT_ENV} must be set to a valid MAVLink connection endpoint')

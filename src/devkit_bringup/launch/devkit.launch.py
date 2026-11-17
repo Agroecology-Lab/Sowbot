@@ -318,7 +318,7 @@ def _mavlink_endpoint():
     A placeholder would start the stack in hardware mode with a bridge that cannot connect,
     so stop with a clear message instead (manage.py applies the same check).
     """
-    endpoint = os.getenv('MAVLINK_ENDPOINT', '').strip()
+    endpoint = os.getenv('MAVLINK_ENDPOINT', '').strip(" \t\r\n'\"")
     if endpoint.upper() == _MAVLINK_PLACEHOLDER:
         raise RuntimeError(f'MAVLINK_ENDPOINT is still the placeholder {_MAVLINK_PLACEHOLDER}. '
                            "Set it to the flight controller's serial device or connection string, "
@@ -458,6 +458,9 @@ def generate_launch_description():
     # so operators can toggle NTRIP without touching the image.
     # To enable: set NTRIP_ENABLED=true in .env (fixusb.py writes this file).
     ntrip_config  = os.path.join(devkit_bringup_pkg, 'config', 'ntrip.yaml')
+    # Resolve the live launch symlink: secrets are created after the image build.
+    ntrip_secrets = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'config', 'ntrip_secrets.yaml')
     ntrip_enabled = os.getenv('NTRIP_ENABLED', 'false').lower() == 'true'
 
     return LaunchDescription([
@@ -495,14 +498,14 @@ def generate_launch_description():
         # ── NTRIP corrections ─────────────────────────────────────────────────
         # Delivers RTCM to ublox_dgnss (u-blox path) or to the MAVLink bridge (ArduPilot
         # path, MAVLINK_ENDPOINT set, real hardware only) when NTRIP_ENABLED=true in .env.
-        # Fill in config/ntrip.yaml (host/port/mountpoint/credentials) then
+        # Fill in config/ntrip.yaml (host/port/mountpoint) and config/ntrip_secrets.yaml then
         # set NTRIP_ENABLED=true and re-run fixusb.py to activate.
         # Requires: sudo apt install ros-jazzy-ntrip-client
         *([Node(
             package='ntrip_client',
             executable='ntrip_client_node',
             name='ntrip_client_node',
-            parameters=[ntrip_config],
+            parameters=[ntrip_config, ntrip_secrets],
             output='screen',
             condition=real_condition if mavlink_enabled else None,
         )] if (ntrip_enabled and (mavlink_enabled or (rover_port != 'virtual' and gps_type == 'ublox'))) else []),

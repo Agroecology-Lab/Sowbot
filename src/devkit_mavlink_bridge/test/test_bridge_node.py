@@ -366,6 +366,12 @@ class BridgeNodeTest(unittest.TestCase):
             with self.subTest(overrides=overrides), self.assertRaises(ValueError):
                 self.make(**overrides)
 
+    def test_quoted_endpoint_is_normalized(self):
+        """The serial connection receives the device path without surrounding quotes."""
+        with patch.dict(os.environ, {'MAVLINK_ENDPOINT': ' " /dev/ttyACM2 " '}):
+            self.make()
+        mavlink_bridge_node.mavutil.mavlink_connection.assert_called_with('/dev/ttyACM2', baud=115200)
+
     def test_placeholder_endpoint_is_rejected(self):
         """Verify the placeholder connection string is not accepted."""
         with patch.dict(os.environ, {'MAVLINK_ENDPOINT': 'TODO_SERIAL_DEVICE_HERE'}), \

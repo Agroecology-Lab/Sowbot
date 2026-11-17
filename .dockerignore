@@ -8,3 +8,4 @@ maps/
 *.swp
 .venv/
 venv/
+**/ntrip_secrets.yaml

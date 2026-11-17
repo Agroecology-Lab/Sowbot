@@ -67,7 +67,7 @@ def mavlink_endpoint(existing_text: str) -> str:
     environment, so .env is normally the source. Surrounding quotes are removed.
     """
     value = (os.environ.get('MAVLINK_ENDPOINT')
-             or read_env_values(existing_text).get('MAVLINK_ENDPOINT') or '').strip().strip('\'"')
+             or read_env_values(existing_text).get('MAVLINK_ENDPOINT') or '').strip(" \t\r\n'\"")
     return '' if value.upper() == MAVLINK_PLACEHOLDER else value
 
 
@@ -388,7 +388,8 @@ def scan_and_export():
 
     # ArduPilot path: the flight controller carries the GNSS receivers and the MCU role, so the
     # SBC must not claim any of them. Without this, a u-blox or ESP32 left on the SBC would start
-    # the SBC GNSS and driver path beside the MAVLink bridge. MAVLINK_ENDPOINT is an operator key.
+    # the SBC GNSS and driver path beside the MAVLink bridge.
+    # Persist the resolved endpoint with the virtual ports.
     env_path = Path('.env')
     existing_text = env_path.read_text() if env_path.exists() else ''
     endpoint = mavlink_endpoint(existing_text)
@@ -435,7 +436,7 @@ def scan_and_export():
     except (subprocess.TimeoutExpired, OSError):
         axis_cam = 'false'
 
-    # NTRIP: set to true once config/ntrip.yaml is filled in with real creds.
+    # NTRIP: set to true once config/ntrip_secrets.yaml contains the caster credentials.
     # Keeps corrections disabled by default so a misconfigured ntrip.yaml
     # doesn't spam connection errors on every boot. `sudo` strips the caller's
     # environment, so the previous .env value is the real source of truth.
@@ -463,6 +464,9 @@ def scan_and_export():
         'TMAP2_FILE': '/workspace/maps/mixed_test_map',
         'NTRIP_ENABLED': ntrip_enabled,
     }
+
+    if endpoint:
+        managed['MAVLINK_ENDPOINT'] = endpoint
 
     write_env_atomically(env_path, render_env(managed, existing_text))
 

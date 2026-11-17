@@ -102,7 +102,8 @@ def _bridge_group(description):
 class TestMavlinkBridgeInclude(unittest.TestCase):
     def test_bridge_is_included_with_an_endpoint(self):
         """Verify MAVLINK_ENDPOINT includes mavlink_bridge.launch.py."""
-        self.assertTrue(_includes_bridge(_description(MAVLINK_ENDPOINT='/dev/ttyACM2')))
+        for endpoint in ('/dev/ttyACM2', '" /dev/ttyACM2 "'):
+            self.assertTrue(_includes_bridge(_description(MAVLINK_ENDPOINT=endpoint)))
 
     def test_bridge_is_not_included_without_an_endpoint(self):
         """Verify no endpoint means no bridge include."""
@@ -206,6 +207,9 @@ class TestNtripGate(unittest.TestCase):
         nodes = _nodes(_description(MAVLINK_ENDPOINT='/dev/ttyACM2', NTRIP_ENABLED='true',
                                     GPS_PORT_ROVER='virtual'), package='ntrip_client')
         self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0].kwargs['parameters'], [
+            '/share/devkit_bringup/config/ntrip.yaml',
+            str(LAUNCH_FILE.parent.parent / 'config' / 'ntrip_secrets.yaml')])
         self.assertEqual(type(nodes[0].kwargs['condition']).__name__, 'UnlessCondition')
 
     def test_ntrip_stays_off_when_disabled(self):

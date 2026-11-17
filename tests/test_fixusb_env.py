@@ -211,10 +211,12 @@ def test_atomic_write_failure_leaves_original_intact(fixusb, tmp_path, monkeypat
     assert sorted(path.name for path in tmp_path.iterdir()) == ['.env']
 
 
-def _run_export(fixusb, tmp_path, monkeypatch, env_text, devices):
+def _run_export(fixusb, tmp_path, monkeypatch, env_text, devices, endpoint=None):
     """Run the real export with fake serial devices and return the sanitised ports and .env values."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv('MAVLINK_ENDPOINT', raising=False)
+    if endpoint is not None:
+        monkeypatch.setenv('MAVLINK_ENDPOINT', endpoint)
     monkeypatch.delenv('NTRIP_ENABLED', raising=False)
     (tmp_path / '.env').write_text(env_text)
     sanitised = []
@@ -267,6 +269,17 @@ def test_empty_or_placeholder_endpoint_changes_nothing(fixusb, tmp_path, monkeyp
     assert values['MCU_PORT'] == '/dev/ttyACM1'
 
 
-def test_quoted_endpoint_counts_as_set(fixusb):
+def test_quoted_endpoint_counts_as_set(fixusb, monkeypatch):
     """Verify quotes around the value do not hide the endpoint."""
+    monkeypatch.delenv('MAVLINK_ENDPOINT', raising=False)
     assert fixusb.mavlink_endpoint('MAVLINK_ENDPOINT="/dev/ttyACM2"\n') == '/dev/ttyACM2'
+
+
+@pytest.mark.parametrize('existing', ['', 'MAVLINK_ENDPOINT=/dev/old\n'])
+def test_process_endpoint_is_persisted_with_virtual_ports(fixusb, tmp_path, monkeypatch, existing):
+    """The next launch must use the same endpoint that disabled SBC hardware."""
+    _, values = _run_export(fixusb, tmp_path, monkeypatch, existing, _devices(fixusb),
+                            endpoint=' " /dev/ttyACM2 " ')
+    assert values['MAVLINK_ENDPOINT'] == '/dev/ttyACM2'
+    for key in ('GPS_PORT_ROVER', 'GPS_PORT_ROVER1', 'MCU_PORT'):
+        assert values[key] == 'virtual'
