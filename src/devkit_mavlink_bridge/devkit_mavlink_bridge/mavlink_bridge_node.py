@@ -34,6 +34,7 @@ from pymavlink import mavutil
 from rclpy.node import Node
 from rtcm_msgs.msg import Message as RtcmMessage
 from sensor_msgs.msg import NavSatFix
+from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
 
 from devkit_mavlink_bridge.modules import gps_status_handler as gps
@@ -59,6 +60,7 @@ from devkit_mavlink_bridge.modules.velocity_watchdog import CmdVelWatchdog
 # At the 1.6 m/s top speed the 3 s default alone is ~4.8 m of travel. Lowering
 # GUID_TIMEOUT on the flight controller (try ~1 s) is a second layer; measure
 # the real stopping distance, these are starting values only.
+_ROVER_GUIDED_MODE = 15  # ArduPilot Rover custom_mode for GUIDED
 _DEFAULT_REPUBLISH_PERIOD_S = 0.1
 _DEFAULT_CMD_VEL_TIMEOUT_S = 0.5
 
@@ -124,7 +126,11 @@ class MavlinkBridgeNode(Node):
         ntrip_client), forwarded as GPS_RTCM_DATA.
         With require_fc_heartbeat the bridge forwards zero velocity, and no RTCM, unless the flight
         controller's HEARTBEAT was seen within fc_heartbeat_timeout_s. MAVLINK_ENDPOINT selects the connection;
-        MAVLINK_BAUD defaults to 115200. The bridge does not arm or change mode.
+        MAVLINK_BAUD defaults to 115200.
+        Services (std_srvs/Trigger): fc/disarm is always available. fc/arm and fc/set_guided refuse
+        unless allow_arm_from_ros [false] is set. fc/arm also needs a live link, GUIDED mode and no
+        fresh nonzero cmd_vel. A response means the command was sent, not accepted: the flight
+        controller's COMMAND_ACK and heartbeat are logged.
         Raise ValueError for a nonpositive period or limit, a nonpositive or nonfinite timeout,
         a nonpositive or nonfinite rate, a missing or placeholder endpoint, or a baud value that
         cannot be parsed as an int.
@@ -152,6 +158,7 @@ class MavlinkBridgeNode(Node):
         self.declare_parameter('gps_frame_id', 'gps_link')
         self.declare_parameter('publish_tf', False)
         self.declare_parameter('rtcm_topic', 'rtcm')
+        self.declare_parameter('allow_arm_from_ros', False)
         republish_period_s = float(self.get_parameter('republish_period_s').value)
         cmd_vel_timeout_s = float(self.get_parameter('cmd_vel_timeout_s').value)
         heartbeat_period_s = float(self.get_parameter('heartbeat_period_s').value)
@@ -202,6 +209,10 @@ class MavlinkBridgeNode(Node):
         self.create_subscription(Twist, 'cmd_vel', self._on_cmd_vel, 10)
         self.create_subscription(
             RtcmMessage, str(self.get_parameter('rtcm_topic').value), self._on_rtcm, _RTCM_QUEUE_DEPTH)
+        self._allow_arm = bool(self.get_parameter('allow_arm_from_ros').value)
+        self.create_service(Trigger, 'fc/disarm', self._on_disarm)
+        self.create_service(Trigger, 'fc/arm', self._on_arm)
+        self.create_service(Trigger, 'fc/set_guided', self._on_set_guided)
         self._odom_pub = self.create_publisher(Odometry, 'fc/odom', 10)
         self._tf_broadcaster = TransformBroadcaster(self) if self.get_parameter('publish_tf').value else None
         self._ekf_fix_pub = self.create_publisher(NavSatFix, 'fc/ekf_fix', 10)
@@ -299,13 +310,18 @@ class MavlinkBridgeNode(Node):
                    mavutil.mavlink.MAV_TYPE_GCS, mavutil.mavlink.MAV_AUTOPILOT_INVALID,
                    0, 0, mavutil.mavlink.MAV_STATE_ACTIVE)
 
-    def _send(self, send, *args, **fields) -> None:
-        """Call a pymavlink send function, logging OSError (including serial errors) instead of raising."""
+    def _send(self, send, *args, **fields) -> bool:
+        """Call a pymavlink send function, logging OSError (including serial errors) instead of raising.
+
+        Return whether the send went out.
+        """
         try:
             send(*args, **fields)
         except OSError as error:
             self.get_logger().error(
                 f'MAVLink send failed: {error}', throttle_duration_sec=_SEND_ERROR_LOG_PERIOD_S)
+            return False
+        return True
 
     def _poll_link(self) -> None:
         """Read pending messages, dispatch them, and log link changes.
@@ -414,12 +430,78 @@ class MavlinkBridgeNode(Node):
             self.get_logger().info(line)
 
     def _on_command_ack(self, message) -> None:
-        """Warn when the flight controller refuses a message-interval request."""
-        if (message.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL
-                and message.result != mavutil.mavlink.MAV_RESULT_ACCEPTED):
+        """Warn when the flight controller refuses a message-interval request, and log arm and mode results."""
+        accepted = message.result == mavutil.mavlink.MAV_RESULT_ACCEPTED
+        if message.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL and not accepted:
             self.get_logger().warn(
                 f'flight controller refused a message-interval request (result {message.result})',
                 throttle_duration_sec=_SEND_ERROR_LOG_PERIOD_S)
+        names = {mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM: 'arm/disarm',
+                 mavutil.mavlink.MAV_CMD_DO_SET_MODE: 'mode change'}
+        if message.command in names:
+            log = self.get_logger().info if accepted else self.get_logger().warn
+            log(f'flight controller {"accepted" if accepted else "refused"} {names[message.command]} '
+                f'(result {message.result}); see its STATUSTEXT for the reason')
+
+    def _command_ready(self, response, needs_permission: bool):
+        """Return the response with success cleared when a command must not be sent, else None."""
+        response.success = False
+        if needs_permission and not self._allow_arm:
+            response.message = 'refused: allow_arm_from_ros is false'
+        elif self._monitor.state() != OK:
+            response.message = 'refused: no live flight controller heartbeat'
+        else:
+            return None
+        return response
+
+    def _send_command(self, response, command, *params, verb: str):
+        """Send a COMMAND_LONG to the flight controller and fill the response."""
+        sent = self._send(self._mav.mav.command_long_send,
+                          self._mav.target_system, self._mav.target_component, command, 0, *params)
+        response.success = sent
+        if sent:
+            response.message = f'{verb} sent; confirm with the armed/mode log line and the flight controller reply'
+            self.get_logger().warn(f'{verb} requested over ROS')
+        else:
+            response.message = f'{verb} not sent: MAVLink write failed'
+        return response
+
+    def _on_disarm(self, _request, response):
+        """Disarm. Always allowed: it moves the rover towards a stop. The flight controller decides whether to obey."""
+        refused = self._command_ready(response, needs_permission=False)
+        if refused:
+            return refused
+        return self._send_command(response, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+                                  0, 0, 0, 0, 0, 0, 0, verb='disarm')
+
+    def _on_arm(self, _request, response):
+        """Arm in GUIDED. Refused while a fresh nonzero cmd_vel is present, so arming cannot start motion."""
+        refused = self._command_ready(response, needs_permission=True)
+        if refused:
+            return refused
+        linear_x, angular_z, stale = self._watchdog.current()
+        if self._fc_mode != _ROVER_GUIDED_MODE:
+            response.message = 'refused: flight controller is not in GUIDED'
+        elif not stale and (linear_x or angular_z):
+            response.message = 'refused: a nonzero cmd_vel is current; stop the source first'
+        elif self._fc_armed:
+            response.success = True
+            response.message = 'already armed'
+        else:
+            # param2 stays 0: never 21196, which would skip the flight controller's arming checks.
+            return self._send_command(response, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+                                      1, 0, 0, 0, 0, 0, 0, verb='arm')
+        return response
+
+    def _on_set_guided(self, _request, response):
+        """Select GUIDED, after which the flight controller acts on forwarded cmd_vel once armed."""
+        refused = self._command_ready(response, needs_permission=True)
+        if refused:
+            return refused
+        return self._send_command(
+            response, mavutil.mavlink.MAV_CMD_DO_SET_MODE,
+            mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, _ROVER_GUIDED_MODE, 0, 0, 0, 0, 0,
+            verb='set GUIDED')
 
     def _on_attitude(self, message) -> None:
         """Keep the latest ATTITUDE_QUATERNION to pair with the next LOCAL_POSITION_NED."""

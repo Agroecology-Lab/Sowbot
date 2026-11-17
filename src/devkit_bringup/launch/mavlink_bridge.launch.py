@@ -9,6 +9,9 @@ cmd_vel. Run one controller path at a time. The connection comes from the enviro
 RTCM3 corrections are read from the rtcm_topic argument (default rtcm, what ntrip_client publishes)
 and sent on as GPS_RTCM_DATA.
 
+MAVLINK_ALLOW_ARM=true (or the allow_arm_from_ros argument) lets the fc/arm and fc/set_guided
+services act. Default false; fc/disarm always works.
+
 publish_tf (default true) makes the bridge the owner of odom -> base_link, from the flight
 controller's EKF3 pose. Set it false if another node owns that edge.
 
@@ -17,7 +20,7 @@ Limits below are starting values: measure the real stopping distance and turn ra
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -36,6 +39,7 @@ def generate_launch_description():
         'require_fc_heartbeat': ('true', bool),
         'rtcm_topic': ('rtcm', str),
         'publish_tf': ('true', bool),
+        'allow_arm_from_ros': (EnvironmentVariable('MAVLINK_ALLOW_ARM', default_value='false'), bool),
     }
     declarations = [DeclareLaunchArgument(name, default_value=default)
                     for name, (default, _) in arguments.items()]

@@ -104,14 +104,14 @@ Use `./manage.py`, not a hand-written `docker run`. It regenerates part of `.env
 3. Bench, wheels off the ground. Power the LEVIA-H7 and its receivers. Do not arm yet.
 4. Run `./manage.py`. It runs `sudo python3 tools/fixusb.py`, which asks for the safety acknowledgement the first time and so cannot be started unattended. It then starts the stack.
 5. Check the log for `flight controller armed/disarmed, custom_mode`, STATUSTEXT lines from the flight controller, and `fc/diagnostics` (link, EKF3 flags, GPS fix type). Check `fc/gps1/fix` and `fc/gps2/fix`. With NTRIP on, `fc/gps1/fix` should reach RTK float or fixed.
-6. Arm and select GUIDED from a ground station on the board's USB port, or from the RC transmitter. The bridge owns the telemetry port and does neither. Until the rover is armed in GUIDED, `cmd_vel` has no effect.
+6. Load `params/sowbot_rover.parm` and the fence (see Fence and parameters below), then arm and select GUIDED. Use a ground station on the board's USB port or the RC transmitter. The bridge's `fc/arm` and `fc/set_guided` services do the same but are off until `MAVLINK_ALLOW_ARM=true` (see Arm, disarm and GUIDED). Until the rover is armed in GUIDED, `cmd_vel` has no effect.
 7. Follow the bench, hard standing and field steps in `docs/field-validation.md`. Do not enable `--restart` or any boot-time start until the stop sources in that document have been measured (O33, O36).
 
 `.env` has two kinds of key. `tools/fixusb.py` rewrites the first on every launch and keeps the second as written.
 
 | Rewritten every launch (do not edit) | Yours (edit once) |
 |---|---|
-| `SOWBOT_SAFETY_ACK`, `GPS_PORT_ROVER`, `GPS_PORT_ROVER1`, their `GPS_USB_PATH_*`, `GPS_TYPE_*` and `GPS_SERIAL_*`, `MCU_PORT`, `USB_CAM_*`, `AXIS_CAM_ENABLED`, `USER_ID`, `GROUP_ID`, `IS_JETSON`, `TMAP2_FILE` | `MAVLINK_ENDPOINT`, `MAVLINK_BAUD`, `SOWBOT_UI_PASSWORD`, `MAP_ORIGIN_*`, `MAP_YAW_DEG`, `DDS_INTERFACE`, `TOOLS_BIND`, `FORCE_SIM`, `FIELD_DATUM_*` (sim only). `NTRIP_ENABLED` is rewritten with its current value, so setting it once sticks |
+| `SOWBOT_SAFETY_ACK`, `GPS_PORT_ROVER`, `GPS_PORT_ROVER1`, their `GPS_USB_PATH_*`, `GPS_TYPE_*` and `GPS_SERIAL_*`, `MCU_PORT`, `USB_CAM_*`, `AXIS_CAM_ENABLED`, `USER_ID`, `GROUP_ID`, `IS_JETSON`, `TMAP2_FILE` | `MAVLINK_ENDPOINT`, `MAVLINK_BAUD`, `MAVLINK_ALLOW_ARM`, `SOWBOT_UI_PASSWORD`, `MAP_ORIGIN_*`, `MAP_YAW_DEG`, `DDS_INTERFACE`, `TOOLS_BIND`, `FORCE_SIM`, `FIELD_DATUM_*` (sim only). `NTRIP_ENABLED` is rewritten with its current value, so setting it once sticks |
 
 With `MAVLINK_ENDPOINT` set, `fixusb.py` writes `GPS_PORT_ROVER`, `GPS_PORT_ROVER1` and `MCU_PORT` as `virtual` whatever is plugged into the SBC, and logs the devices it ignored. Without an endpoint, a placeholder value counts as unset.
 
@@ -170,7 +170,41 @@ Outbound, to the LEVIA-H7.
 | `rtcm` (`rtcm_topic`) | `rtcm_msgs/Message` | GPS_RTCM_DATA | One RTCM3 frame per message, as `ntrip_client` publishes it. Split into up to four 180-byte fragments; a frame over 720 bytes is dropped with a warning. Dropped while the FC heartbeat is overdue |
 | none | none | HEARTBEAT | Sent once a second as a ground station, so the GCS failsafe sees a live link |
 
-The bridge does not arm the rover or change its mode. Rover acts on these velocity targets only when armed in GUIDED, so arm and select GUIDED from a ground station or the RC transmitter. Nothing in this repo does either, and the bridge keeps forwarding `cmd_vel` while the rover is disarmed or in another mode. Watch the `flight controller armed/disarmed` log line.
+Rover acts on these velocity targets only when armed in GUIDED. The bridge keeps forwarding `cmd_vel` while the rover is disarmed or in another mode. Watch the `flight controller armed/disarmed` log line.
+
+## Arm, disarm and GUIDED
+
+Three `std_srvs/Trigger` services, off the same MAVLink link. Not run against a flight controller yet; the tests use doubles.
+
+| Service | Needs `allow_arm_from_ros` | Sends | Refused when |
+|---|---|---|---|
+| `fc/disarm` | no | MAV_CMD_COMPONENT_ARM_DISARM, param1 0 | no live flight controller heartbeat |
+| `fc/set_guided` | yes | MAV_CMD_DO_SET_MODE, custom mode 15 (Rover GUIDED) | not permitted, or no live heartbeat |
+| `fc/arm` | yes | MAV_CMD_COMPONENT_ARM_DISARM, param1 1, param2 0 | not permitted, no live heartbeat, mode is not GUIDED, or a fresh nonzero `cmd_vel` is present. Already armed: succeeds and sends nothing |
+
+- `allow_arm_from_ros` defaults to false. Set `MAVLINK_ALLOW_ARM=true` in `.env` or pass the launch argument.
+- `success: true` means the command was written to the link, not that the flight controller accepted it. The `COMMAND_ACK` result and the next heartbeat are logged ("flight controller accepted/refused arm/disarm"), and the reason for a refusal arrives as STATUSTEXT. A failed serial write returns `success: false`.
+- Arming never uses the 21196 force value, so the flight controller's pre-arm checks always apply.
+- `fc/disarm` is not gated, so any node on the ROS graph can call it. The flight controller decides whether to obey it while the rover is moving. That is not confirmed.
+- With the fence enabled, Rover does not accept mode changes while in breach, so `fc/set_guided` will not recover a rover that has stopped at the fence.
+- Any node on the ROS graph can call `fc/arm` once permitted. The DDS configuration and the dashboard password are the only access control.
+
+## Fence and parameters
+
+`params/sowbot_rover.parm` holds the serial, GPS, fence and failsafe parameters for Rover 4.6 or later, in the `NAME,value` form ground stations load. Proposed, not loaded on any flight controller. Load it over the board's USB port, reboot, and read the values back. The file leaves out the EKF3 yaw source, the moving-baseline antenna offsets (`GPS1_MB_*`) and `GUID_TIMEOUT`, which need measuring or checking against the firmware you flashed.
+
+`tools/upload_fence.py` stores one inclusion polygon on the flight controller and reads it back:
+
+```
+tools/upload_fence.py --geojson farm-map.geojson --role field --field 1 --dry-run
+tools/upload_fence.py --geojson farm-map.geojson --role field --field 1 --endpoint /dev/ttyACM0
+```
+
+- Use a link the bridge does not own, such as the board's USB port.
+- The polygon must enclose everything the rover works in, with margin, and the rover must start inside it. A field boundary used unbuffered puts the outer rows on the limit.
+- Without `FENCE_ENABLE`, `FENCE_TYPE` and `FENCE_ACTION` (in the parm file) the polygon does nothing.
+- The tool handles one inclusion polygon. It refuses to read back a fence that holds anything else.
+- Not run against a flight controller or SITL.
 
 STATUSTEXT from the flight controller (PreArm failures, fence and failsafe text) is relayed to the ROS log at a matching severity. It is not yet published as a topic or fed to `/safety/level` (O19, O22 e).
 
@@ -180,7 +214,7 @@ RTCM reaches the flight controller only if something publishes `rtcm`. `ntrip_cl
 
 - RTCM injection. GPS_INJECT_TO defaults to 127 (all receivers) and ArduPilot already skips the moving-baseline rover, so NTRIP data should reach F9P #1 only. Confirm on the bench that GPS1 reports RTK float or fixed in `fc/gps1/fix` once `rtcm` is flowing, and that the base still feeds the rover (GPS2 heading stays valid).
 - Serial load on SERIAL5. State messages at 10 Hz plus RTCM at about 1 Hz is a few kB/s by my estimate, inside 115200 baud. Measure it on the vehicle rather than trust the estimate.
-- Serial protocols are not default. Set SERIAL2_PROTOCOL and SERIAL3_PROTOCOL to GPS (5), SERIAL5_PROTOCOL to MAVLink2, GPS_TYPE=17 (moving-base base) and GPS_TYPE2=18 (rover). ArduPilot assigns GPS1 to the lowest-numbered port set to GPS, so the base must stay on SERIAL2 (U8) and the rover on SERIAL3 (U24). Swapping them makes the base GPS2 and breaks the moving baseline.
+- Serial protocols are not default. Set SERIAL2_PROTOCOL and SERIAL3_PROTOCOL to GPS (5), SERIAL5_PROTOCOL to MAVLink2, GPS1_TYPE=17 (moving-base base) and GPS2_TYPE=18 (rover). Before Rover 4.6 these are GPS_TYPE and GPS_TYPE2. ArduPilot assigns GPS1 to the lowest-numbered port set to GPS, so the base must stay on SERIAL2 (U8) and the rover on SERIAL3 (U24). Swapping them makes the base GPS2 and breaks the moving baseline.
 - USART6 (U8) may be NODMA in the hwdef, as on Matek H743. Check it. If so, the base F9P link has no DMA; fine at modest baud rates.
 - Both F9Ps now draw from +5V_SYS, plus antenna bias current. Check the rail.
 - Set FLOW_TYPE for the PixArt driver.
@@ -194,5 +228,6 @@ RTCM reaches the flight controller only if something publishes `rtcm`. `ntrip_cl
   `manage.py` warns about the offsets using the older `GPS_MB1_OFS_*` names.
 
 <!-- /coderabbit-ai-generated:v1 -->
-- Fence and failsafes. Nothing in this repo uploads a fence polygon or sets `FENCE_*`, `FS_GCS_ENABLE`, `FS_EKF_*` or `GUID_TIMEOUT`. The fence breach and failsafe behaviour above is a plan until set and exercised on the vehicle (O22).
+- Fence and failsafes. `params/sowbot_rover.parm` and `tools/upload_fence.py` now set and upload them, but neither has run against a flight controller or SITL. The fence breach and failsafe behaviour above is a plan until exercised on the vehicle (O22). `GUID_TIMEOUT` is not set, and the "GUID_TIMEOUT ~1 s" in the diagram above is not confirmed for Rover: the Copter default is 3 s, which is what the bridge's watchdog assumes.
+- Arm, disarm and GUIDED services. Check on the bench that the flight controller refuses `fc/arm` outside GUIDED and with a pre-arm failure, and what it does with `fc/disarm` while moving.
 - Wheel encoders are in the architecture diagram but have no connector in the wiring section. Add one or drop them.
