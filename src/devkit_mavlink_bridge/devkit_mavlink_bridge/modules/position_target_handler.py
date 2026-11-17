@@ -14,6 +14,11 @@ doc is the source of truth -- update there first, then here):
                       and_speed() -- anything else lands on heading-hold
                       or heading-only control instead of differential
                       drive.
+  yaw_rate         = -angular_z               -- MAVLink body NED is FRD
+                      (z down), so positive yaw rate is clockwise seen from
+                      above. ROS angular.z is positive counter-clockwise.
+                      Inbound rates are negated in ekf_state_handler for the
+                      same reason.
 """
 
 MAV_FRAME_BODY_NED = 8
@@ -31,6 +36,9 @@ def twist_to_position_target(linear_x: float, angular_z: float,
     afy, afz, yaw) are zeroed -- they're ignored by the flight controller
     per TYPE_MASK_VEL_YAW_RATE, but pymavlink's encoder still expects them.
 
+    angular_z is in ROS convention (positive = counter-clockwise, left) and is negated
+    to MAVLink's clockwise-positive yaw_rate.
+
     target_system and target_component address the flight controller; 0 means broadcast.
     Pass the IDs learned from its HEARTBEAT once they are known.
     """
@@ -43,5 +51,5 @@ def twist_to_position_target(linear_x: float, angular_z: float,
         'x': 0.0, 'y': 0.0, 'z': 0.0,
         'vx': linear_x, 'vy': 0.0, 'vz': 0.0,
         'afx': 0.0, 'afy': 0.0, 'afz': 0.0,
-        'yaw': 0.0, 'yaw_rate': angular_z,
+        'yaw': 0.0, 'yaw_rate': -angular_z,
     }

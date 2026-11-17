@@ -33,7 +33,7 @@ Purpose: confirm the control chain without the vehicle moving.
 
 - Stop sources checked: physical E-stop, bumpers, radar trip, soft E-stop, `cmd_vel` loss, bridge loss, dashboard disconnect.
 - Confirm the SW180 contacts open and the motor controllers behave on each stop, including battery disconnect (O36).
-- Confirm ArduPilot GUIDED responds, `GPS1_TYPE=14` is set and the EKF origin behaves on boot (O22 d).
+- Confirm ArduPilot GUIDED responds, `GPS_TYPE=17` and `GPS_TYPE2=18` are set (see `src/devkit_mavlink_bridge/mavlink.md`) and the EKF origin behaves on boot (O22 d).
 
 Exit criteria (proposed): every stop source stops the drive on the bench, ten times in a row; command-loss latency measured and below the value the stopping-distance budget needs.
 

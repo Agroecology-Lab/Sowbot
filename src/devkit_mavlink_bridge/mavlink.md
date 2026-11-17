@@ -104,6 +104,7 @@ With no endpoint set the bridge does not start and FusionCore runs. FusionCore p
 - EKF3 is the localiser. Nav2 reads `/fc/odom` (`nav2_params.yaml`).
 - With the bridge running, FusionCore is not launched. `_fusioncore_node()` in `devkit.launch.py` and `fusioncore.yaml` are only used when no endpoint is set. The sim stack (`sowbot_sim.launch.py`) still runs it.
 - With the bridge running, nothing publishes `/fusion/odom`, so the UI loses fused odometry on that path. A relay the other way needs the bridge's unknown covariance handled first.
+- The UI subscribes to `/gnss/fix`, `/fusion/odom`, `/odom` and `/odometry/global` and not to any `fc/*` topic. The bridge publishes none of them, so the UI has no position on this path and saving a topology row fails with no GPS fix. Relay `fc/gps1/fix` or `fc/ekf_fix` onto `/gnss/fix` (and settle its covariance) before using map authoring with the bridge.
 - `manage.py` skips the `fusioncore.yaml` lever-arm check on this path. Set the antenna offsets on the flight controller.
 - The bridge and the ESP32/Lizard `devkit_driver` both subscribe to `cmd_vel`. When the bridge runs, `devkit.launch.py` passes `handle_cmd_vel:=false` to the driver, so only the bridge acts on it.
 
@@ -149,9 +150,11 @@ Outbound, to the LEVIA-H7.
 | `rtcm` (`rtcm_topic`) | `rtcm_msgs/Message` | GPS_RTCM_DATA | One RTCM3 frame per message, as `ntrip_client` publishes it. Split into up to four 180-byte fragments; a frame over 720 bytes is dropped with a warning. Dropped while the FC heartbeat is overdue |
 | none | none | HEARTBEAT | Sent once a second as a ground station, so the GCS failsafe sees a live link |
 
-The bridge does not arm the rover or change its mode.
+The bridge does not arm the rover or change its mode. Rover acts on these velocity targets only when armed in GUIDED, so arm and select GUIDED from a ground station or the RC transmitter. Nothing in this repo does either, and the bridge keeps forwarding `cmd_vel` while the rover is disarmed or in another mode. Watch the `flight controller armed/disarmed` log line.
 
-RTCM reaches the flight controller only if something publishes `rtcm`. `ntrip_client` does, but `devkit.launch.py` starts it only when `NTRIP_ENABLED=true` and its `ublox` GPS path is selected, which describes receivers on the SBC, not on the LEVIA-H7. Check that launch condition before relying on NTRIP.
+STATUSTEXT from the flight controller (PreArm failures, fence and failsafe text) is relayed to the ROS log at a matching severity. It is not yet published as a topic or fed to `/safety/level` (O19, O22 e).
+
+RTCM reaches the flight controller only if something publishes `rtcm`. `ntrip_client` does, and `devkit.launch.py` starts it when `NTRIP_ENABLED=true` and either `MAVLINK_ENDPOINT` is set (real hardware only) or the `ublox` GPS path is selected on the SBC. `config/ntrip.yaml` has no NMEA GGA source from the flight controller, so a VRS mountpoint will not work. Use a fixed-position mountpoint, or add a GGA feed first.
 
 ## To check
 
@@ -162,4 +165,6 @@ RTCM reaches the flight controller only if something publishes `rtcm`. `ntrip_cl
 - Both F9Ps now draw from +5V_SYS, plus antenna bias current. Check the rail.
 - Set FLOW_TYPE for the PixArt driver.
 - The sensor board must take 5V power and work with 3.3V SPI logic. U19 supplies 5V and the MCU pins are 3.3V.
+- Yaw source. Confirm the EKF3 yaw source is the moving-baseline GPS heading (`GPS_AUTO_CONFIG`, `EK3_SRC1_YAW`, `GPS_MB1_TYPE` and `GPS_MB1_OFS_X/Y/Z` for the antenna offsets) and measure the offsets. `manage.py` warns about `GPS_MB1_OFS_*`.
+- Fence and failsafes. Nothing in this repo uploads a fence polygon or sets `FENCE_*`, `FS_GCS_ENABLE`, `FS_EKF_*` or `GUID_TIMEOUT`. The fence breach and failsafe behaviour above is a plan until set and exercised on the vehicle (O22).
 - Wheel encoders are in the architecture diagram but have no connector in the wiring section. Add one or drop them.

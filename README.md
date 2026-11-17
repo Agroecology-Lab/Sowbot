@@ -37,7 +37,7 @@ This repository provides the drivers and orchestration for the Sowbot platform, 
 |    SUPERVISORY: not the rated stop function             |
 |---------------------------------------------------------|
 | - Motion execution       - EKF3, sole estimator        |
-| - Geofence (GUIDED)         (FusionCore: shadow)       |
+| - Geofence (GUIDED)         (FusionCore: not run)      |
 | - Failsafes: GCS/GPS     - Arming state machine         |
 |   loss, EKF variance     - Pre-arm checks               |
 | - Dual F9P RTK (UART)                                   |

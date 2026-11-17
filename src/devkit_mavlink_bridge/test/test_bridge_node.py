@@ -205,7 +205,7 @@ class BridgeNodeTest(unittest.TestCase):
         node._poll_link()
 
     def sent(self):
-        """Return (vx, yaw_rate) of each SET_POSITION_TARGET message sent."""
+        """Return (vx, yaw_rate) as sent on the wire, where yaw_rate is clockwise-positive."""
         send = self.connection.mav.set_position_target_local_ned_send
         return [(c.kwargs['vx'], c.kwargs['yaw_rate']) for c in send.call_args_list]
 
@@ -222,7 +222,7 @@ class BridgeNodeTest(unittest.TestCase):
 
         self.pending.append(_heartbeat())
         node._republish()
-        self.assertEqual(self.sent()[-1], (0.5, 0.2))
+        self.assertEqual(self.sent()[-1], (0.5, -0.2))
 
         self.now += 3.5
         self.command(node, 0.5, 0.2)
@@ -235,7 +235,7 @@ class BridgeNodeTest(unittest.TestCase):
         node = self.make(require_fc_heartbeat=False)
         self.command(node, 0.5, 0.2)
         node._republish()
-        self.assertEqual(self.sent(), [(0.5, 0.2)])
+        self.assertEqual(self.sent(), [(0.5, -0.2)])
 
     def test_other_ground_stations_and_our_own_echo_do_not_count(self):
         """Verify only a real autopilot's heartbeat marks the link ok."""
@@ -256,7 +256,7 @@ class BridgeNodeTest(unittest.TestCase):
 
         self.pending.append(_heartbeat(source_system=7))
         node._republish()
-        self.assertEqual(self.sent()[-1], (0.5, 0.2))
+        self.assertEqual(self.sent()[-1], (0.5, -0.2))
 
     def test_other_systems_do_not_keep_the_selected_controller_alive(self):
         """Verify other heartbeats cannot extend or restore the selected controller's link."""
@@ -269,7 +269,7 @@ class BridgeNodeTest(unittest.TestCase):
                 self.pending.append(_heartbeat(source_system=42))
                 self.command(node, 0.5, 0.2)
                 node._republish()
-                expected = (0.5, 0.2) if elapsed == 2.0 else (0.0, 0.0)
+                expected = (0.5, -0.2) if elapsed == 2.0 else (0.0, 0.0)
                 self.assertEqual(self.sent()[-1], expected)
 
     def test_unset_target_accepts_only_eligible_discovery_heartbeats(self):
@@ -285,14 +285,14 @@ class BridgeNodeTest(unittest.TestCase):
                 self.assertEqual(self.sent()[-1], (0.0, 0.0))
                 self.pending.append(_heartbeat(source_system=42))
                 node._republish()
-                self.assertEqual(self.sent()[-1], (0.5, 0.2))
+                self.assertEqual(self.sent()[-1], (0.5, -0.2))
 
     def test_velocity_is_clamped_to_the_limits(self):
         """Verify an excessive command is limited before it reaches the flight controller."""
         node = self.make(require_fc_heartbeat=False, max_linear_x_mps=1.0, max_angular_z_radps=0.5)
         self.command(node, 9.0, -9.0)
         node._republish()
-        self.assertEqual(self.sent(), [(1.0, -0.5)])
+        self.assertEqual(self.sent(), [(1.0, 0.5)])
 
     def test_stale_command_is_zeroed(self):
         """Verify the command watchdog still forces zero."""
@@ -406,7 +406,7 @@ class InboundTest(BridgeNodeTest):
         self.pending += [_attitude(), _ekf_status(), _heartbeat()]
         self.command(node, 0.5, 0.2)
         node._republish()
-        self.assertEqual(self.sent(), [(0.5, 0.2)])
+        self.assertEqual(self.sent(), [(0.5, -0.2)])
 
     def test_odometry_is_published_in_ros_frames(self):
         """Verify position, orientation and body-frame twist are converted from NED and FRD."""
@@ -677,10 +677,22 @@ class InboundTest(BridgeNodeTest):
         node._poll_link()
         self.assertEqual(len(self.pending), 100)
 
+    def test_status_text_is_logged_by_severity(self):
+        """Verify flight controller STATUSTEXT reaches the log at a matching level."""
+        node = self.make()
+        self.feed(node, _heartbeat(),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_CRITICAL, text='PreArm: Fence breach\x00\x00'),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_WARNING, text='EKF variance'),
+                  _message('STATUSTEXT', severity=MAV.MAV_SEVERITY_INFO, text=b'Mode GUIDED'))
+        records = [r for r in node.get_logger().records if 'flight controller:' in r[1]]
+        self.assertEqual(records, [('error', 'flight controller: PreArm: Fence breach'),
+                                   ('warn', 'flight controller: EKF variance'),
+                                   ('info', 'flight controller: Mode GUIDED')])
+
     def test_unknown_message_types_are_ignored(self):
         """Verify traffic the bridge does not use, including corrupt frames, is skipped."""
         node = self.make()
-        self.feed(node, _heartbeat(), _message('BAD_DATA'), _message('STATUSTEXT'))
+        self.feed(node, _heartbeat(), _message('BAD_DATA'), _message('VIBRATION'))
         self.assertEqual(self.published(node, 'fc/odom'), [])
 
     def test_inbound_parameters_must_be_positive_and_finite(self):
@@ -872,7 +884,7 @@ class InboundTest(BridgeNodeTest):
         """Verify the bounded poll leaves useful queued messages for the next callback."""
         node = self.make()
         self.good_state(node)
-        self.pending += [_message('STATUSTEXT') for _ in range(200)] + [_local_position()]
+        self.pending += [_message('VIBRATION') for _ in range(200)] + [_local_position()]
         node._poll_link()
         self.assertEqual(len(self.pending), 1)
         self.assertEqual(self.published(node, 'fc/odom'), [])

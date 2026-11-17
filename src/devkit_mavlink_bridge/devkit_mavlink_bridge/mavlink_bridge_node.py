@@ -18,8 +18,8 @@ Nothing is published from stale or invalid data, so a consumer sees a gap rather
 confident old value. With publish_tf set, odom -> base_link is broadcast from the same
 pose as fc/odom, under the same gating. It is off by default: only one node may own that edge.
 
-Open item (tracked in safety_roadmap.md, not duplicated here): which LEVIA-H7 UART carries
-MAVLink (O31). MAVLINK_ENDPOINT and MAVLINK_BAUD depend on it.
+mavlink.md assigns the MAVLink link to U20 / UART4 / SERIAL5 on the LEVIA-H7. That is a design
+assignment, not yet confirmed on hardware (O31). MAVLINK_ENDPOINT and MAVLINK_BAUD depend on it.
 """
 
 import math
@@ -218,6 +218,7 @@ class MavlinkBridgeNode(Node):
             'GPS2_RAW': self._on_gps,
             'EKF_STATUS_REPORT': self._on_ekf_status,
             'COMMAND_ACK': self._on_command_ack,
+            'STATUSTEXT': self._on_status_text,
         }
         self.create_timer(republish_period_s, self._republish)
         self.create_timer(heartbeat_period_s, self._send_heartbeat)
@@ -394,6 +395,23 @@ class MavlinkBridgeNode(Node):
         """Repeat the interval requests while the link is ok, in case a reboot cleared them."""
         if self._monitor.state() == OK:
             self._request_message_intervals()
+
+    def _on_status_text(self, message) -> None:
+        """Relay the flight controller's STATUSTEXT (PreArm failures, fence and failsafe text) to the log.
+
+        MAV_SEVERITY 0-3 (emergency to error) is logged as an error, 4 (warning) as a warning
+        and the rest as information.
+        """
+        text = message.text
+        if isinstance(text, bytes):
+            text = text.decode('ascii', errors='replace')
+        line = f'flight controller: {str(text).rstrip(chr(0)).strip()}'
+        if message.severity <= mavutil.mavlink.MAV_SEVERITY_ERROR:
+            self.get_logger().error(line)
+        elif message.severity == mavutil.mavlink.MAV_SEVERITY_WARNING:
+            self.get_logger().warn(line)
+        else:
+            self.get_logger().info(line)
 
     def _on_command_ack(self, message) -> None:
         """Warn when the flight controller refuses a message-interval request."""

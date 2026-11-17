@@ -492,8 +492,9 @@ def generate_launch_description():
             ],
         ),
 
-        # ── NTRIP corrections (u-blox path) ──────────────────────────────────
-        # Delivers RTCM to ublox_dgnss when NTRIP_ENABLED=true in .env.
+        # ── NTRIP corrections ─────────────────────────────────────────────────
+        # Delivers RTCM to ublox_dgnss (u-blox path) or to the MAVLink bridge (ArduPilot
+        # path, MAVLINK_ENDPOINT set, real hardware only) when NTRIP_ENABLED=true in .env.
         # Fill in config/ntrip.yaml (host/port/mountpoint/credentials) then
         # set NTRIP_ENABLED=true and re-run fixusb.py to activate.
         # Requires: sudo apt install ros-jazzy-ntrip-client
@@ -503,7 +504,8 @@ def generate_launch_description():
             name='ntrip_client',
             parameters=[ntrip_config],
             output='screen',
-        )] if (ntrip_enabled and rover_port != 'virtual' and gps_type == 'ublox') else []),
+            condition=real_condition if mavlink_enabled else None,
+        )] if (ntrip_enabled and (mavlink_enabled or (rover_port != 'virtual' and gps_type == 'ublox'))) else []),
 
         # ── Topic relays & GNSS shims ─────────────────────────────────────────
         # rtk_navsatfix_shim replaces the dumb topic_tools relay.
