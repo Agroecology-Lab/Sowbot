@@ -34,7 +34,7 @@ from pymavlink import mavutil
 from rclpy.node import Node
 from rtcm_msgs.msg import Message as RtcmMessage
 from sensor_msgs.msg import NavSatFix
-from std_srvs.srv import Trigger
+from std_srvs.srv import Trigger  # pylint: disable=import-error
 from tf2_ros import TransformBroadcaster
 
 from devkit_mavlink_bridge.modules import gps_status_handler as gps
