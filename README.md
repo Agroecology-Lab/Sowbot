@@ -92,12 +92,11 @@ Related [Safety Roadmap](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga
 | F1–F5 | Containerised deployment, stable device addressing (`fixusb.py`), NiceGUI dashboard, dual F9P driver, diagnostics TUI | Done, bench and sim only | 4 |
 | M1 | Agri Open Core platform integration | Done | 3 |
 | M2 | Topological navigation + Nav2, multi-row missions | Sim only. Blocked: hardware field validation | 4 |
-| M2a | FusionCore Nav2 bridge | Blocked: live hardware test | 3 |
 | M3 | Open-field row-crop planning (fields2cover, [web planner](https://agroecology-lab.github.io/Sowbot/)) | Sim only. Blocked: field survey, obstacle costmap layer | 4 |
 | M4 | RTK-GNSS localisation | Blocked: lever-arm measurement, hardware test | 3 |
 | M5 | Dual-SBC ROS 2 stack | Implemented, no hardware test | 3 |
 | M6 | Gazebo simulation | Done. Does not model track slip | 4 |
-| M7 | Sentor safety monitoring | Blocked: hardware smoke test, battery cutoff | 3 |
+| M7 | Sentor safety monitoring | Implemented, wired into `devkit.launch.py` for real hardware. Not yet run on hardware; battery cutoff unconfirmed | 3 |
 | M8 | Visual crop-row navigation | Tested on lettuce, no metrics published | 3 |
 | M9 | ArduPilot on LEVIA-H7 controller path | Bring-up. Never run against a flight controller | 2 |
 | M10 | MeshCore robot-to-robot avoidance | Sim only, not integrated, not a safety function | 2 |
@@ -107,12 +106,6 @@ Related [Safety Roadmap](https://github.com/Agroecology-Lab/Sowbot/blob/caatinga
 | P2 | Phase 2: OEM modular subsystems | Research | 2 |
 | P3 | Phase 3: commercial sale to farmers | Planned. ISO 18497 / 13849 certification not scoped | 1 |
 | D2 | Caatinga biome dataset | Active | 4 |
-
-Later, research only (TRL 1–2): P4 CANopen bus, P5 RT kernel, P6 read-only image, E1 delta weeding, E2 laser weeding, D1 UK open-field dataset.
-
-M4: lever-arm offsets in `fusioncore.yaml` are zeroed placeholders. `manage.py` exits 1 at startup unless `ALLOW_UNMEASURED_LEVER_ARM=1`. Do not quote accuracy until they are measured.
-M9: details and limits in [`mavlink.md`](src/devkit_mavlink_bridge/mavlink.md). LEVIA-H7 has no confirmed ArduPilot hwdef (safety_roadmap.md O31).
-P1: no compliance is claimed. Standards are an informal design reference, and use is at the user's own risk.
 
 <sub>TRL (1–9, ESA/NASA scale): 1–2 concept, 3 proof of concept, 4 validated in lab or simulation, 5 validated in a relevant environment, 6 demonstrated in a relevant environment. Self-assessed. Nothing is scored above 4 until field results are published (see below).</sub>
 
