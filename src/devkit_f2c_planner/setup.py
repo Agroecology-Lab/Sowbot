@@ -4,7 +4,7 @@ package_name = 'devkit_f2c_planner'
 
 setup(
     name=package_name,
-    version='0.0.1',
+    version='0.1.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
@@ -14,8 +14,10 @@ setup(
     # Declares pytest so colcon uses it: unittest exits 5 when a package has no tests.
     tests_require=['pytest'],
     zip_safe=True,
-    maintainer='Zauberzeug GmbH',
-    maintainer_email='ros@zauberzeug.com',
+    maintainer='Agroecology Lab Ltd',
+    maintainer_email='ros@agroecologylab.org',
+    author='Zauberzeug GmbH',
+    author_email='ros@zauberzeug.com',
     description='Field2Cover planning core (projection + swath generation), no UI dependency',
     license='MIT License',
     # No console_scripts — this is a library package, imported by devkit_ui

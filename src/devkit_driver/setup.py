@@ -6,7 +6,7 @@ from setuptools import find_packages, setup
 package_name = 'devkit_driver'
 setup(
     name=package_name,
-    version='0.0.0',
+    version='0.1.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
@@ -20,7 +20,7 @@ setup(
     # Declares pytest so colcon uses it: unittest exits 5 when a package has no tests.
     tests_require=['pytest'],
     zip_safe=True,
-    maintainer='sam',
+    maintainer='Agroecology Lab Ltd',
     description='Agroecology Lab Devkit Package',
     license='Apache-2.0',
     entry_points={
