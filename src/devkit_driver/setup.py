@@ -20,7 +20,7 @@ setup(
     # Declares pytest so colcon uses it: unittest exits 5 when a package has no tests.
     tests_require=['pytest'],
     zip_safe=True,
-    maintainer='sam',
+    maintainer='Agroecology Lab Ltd',
     description='Agroecology Lab Devkit Package',
     license='Apache-2.0',
     entry_points={

@@ -16,6 +16,8 @@ setup(
     zip_safe=True,
     maintainer='Agroecology Lab Ltd',
     maintainer_email='ros@agroecologylab.org',
+    author='Zauberzeug GmbH',
+    author_email='ros@zauberzeug.com',
     description='Field2Cover planning core (projection + swath generation), no UI dependency',
     license='MIT License',
     # No console_scripts — this is a library package, imported by devkit_ui

@@ -16,7 +16,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='sam',
+    maintainer='Agroecology Lab Ltd',
     description='Agroecology Lab Devkit Package',
     license='Apache-2.0',
     entry_points={'console_scripts': []},
