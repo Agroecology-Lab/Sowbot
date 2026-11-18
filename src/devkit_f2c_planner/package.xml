@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>devkit_f2c_planner</name>
-  <version>0.0.1</version>
+  <version>0.1.0</version>
   <description>
     Field2Cover planning core: lat/lon&lt;-&gt;local-XY projection and swath
     generation, with shapely-based obstacle post-clipping. Extracted out of
@@ -10,8 +10,9 @@
     caller that needs coverage paths (manual missions in devkit_ui, the
     terrain-aware pipeline). No ROS node of its own — pure library.
   </description>
-  <maintainer email="ros@zauberzeug.com">Zauberzeug GmbH</maintainer>
+  <maintainer email="ros@agroecologylab.org">Agroecology Lab Ltd</maintainer>
   <license>MIT License</license>
+  <author email="ros@zauberzeug.com">Zauberzeug GmbH</author>
 
   <buildtool_depend>ament_python</buildtool_depend>
 

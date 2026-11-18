@@ -7,7 +7,7 @@ package_name = 'devkit_ui'
 
 setup(
     name=package_name,
-    version='0.0.0',
+    version='0.1.0',
     packages=find_packages(exclude=['test']),
     package_data={'devkit_ui': ['css/*.css']},
     data_files=[
