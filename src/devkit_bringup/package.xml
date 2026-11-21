@@ -2,10 +2,11 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>devkit_bringup</name>
-  <version>0.0.1</version>
+  <version>0.1.0</version>
   <description>Bringup launch files and configuration for the Feldfreund DevKit ROS2 package</description>
-  <maintainer email="ros@zauberzeug.de">Zauberzeug GmbH</maintainer>
+  <maintainer email="ros@agroecologylab.org">Agroecology Lab Ltd</maintainer>
   <license>MIT</license>
+  <author email="ros@zauberzeug.de">Zauberzeug GmbH</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
