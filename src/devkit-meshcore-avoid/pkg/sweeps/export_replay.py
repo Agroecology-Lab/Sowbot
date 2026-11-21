@@ -26,6 +26,7 @@ sys.path.insert(0, HERE)
 
 import maize_sweep as ms                 # noqa: E402
 from sowbot_avoid import sim             # noqa: E402
+from sowbot_avoid.frame import Frame     # noqa: E402
 from sowbot_avoid.topo import load_topo  # noqa: E402
 
 LOG = {}
@@ -40,7 +41,8 @@ class LogBus(sim.LoopBus):
     def _deliver(self, sender, payload, me):
         before = self.lost
         super()._deliver(sender, payload, me)
-        LOG["tx"].append([_now(), payload[0], int(self.lost > before)])
+        f = Frame.decode(payload)
+        LOG["tx"].append([_now(), payload[0], int(self.lost > before), list(f.nodes) if f else []])
 
 
 class LogDriver(sim.SimDriver):

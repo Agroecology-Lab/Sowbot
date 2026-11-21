@@ -34,7 +34,7 @@ canvas{width:100%;height:auto;border:1px solid var(--ln);border-radius:4px;displ
 <h2>Replay <span id="what" class="mut"></span></h2>
 <canvas id="cv" width="960" height="520" aria-label="Replay of the selected run"></canvas>
 <div class="bar"><button id="pp">Play</button><select id="sp" aria-label="Speed"><option value="1">1×</option><option value="4" selected>4×</option><option value="10">10×</option><option value="30">30×</option></select><input id="tm" type="range" min="0" max="1000" value="0" aria-label="Time"><span id="st" class="mut"></span></div>
-<p class="mut">Each ring has radius half the clearance, so two touching rings are one clearance apart. Filled: driving. Hollow: waiting or at a side-step stop. Grey: finished. Expanding ring: frame sent. Dashed red: frame lost.</p>
+<p class="mut">Each ring has radius half the clearance, so two touching rings are one clearance apart. Filled: driving. Hollow: waiting or at a side-step stop. Grey: finished. Expanding ring: frame sent. Dashed red: frame lost. Reserved nodes, from the last frame heard: solid disc = node the robot is on, rings 1 and 2 = the next two it announced. A lost frame is not heard, so its markers stay on the previous frame.</p>
 <script>
 const D=/*DATA*/null;
 const $=s=>document.querySelector(s),cv=$('#cv'),cx=cv.getContext('2d');
@@ -100,10 +100,11 @@ function frame(){
   cx.clearRect(0,0,cv.width,cv.height);cx.lineWidth=1;cx.strokeStyle=ln;cx.fillStyle=ln;
   for(const [a,b] of D.edges){const p=px(D.xy[a]),q=px(D.xy[b]);cx.beginPath();cx.moveTo(p[0],p[1]);cx.lineTo(q[0],q[1]);cx.stroke()}
   for(const i of ids){const p=px(D.xy[i]);cx.fillRect(p[0]-2,p[1]-2,4,4)}
-  let n=0,lost=0;
-  for(const [tt,r,l] of run.tx){
+  let n=0,lost=0;const heard={};
+  for(const [tt,r,l,nd] of run.tx){
     if(tt>t)break;
     n++;lost+=l;const age=t-tt;
+    if(!l&&nd&&nd.length)heard[r]=nd;
     if(age<1){
       const c=px(pos(r,tt).p);
       cx.globalAlpha=1-age;cx.strokeStyle=l?'#ef5350':fg;cx.setLineDash(l?[4,3]:[]);
@@ -111,6 +112,18 @@ function frame(){
     }
   }
   cx.globalAlpha=1;cx.setLineDash([]);
+  for(const r of Object.keys(heard)){
+    const nd=heard[r],col=run.fin[r]<=t?'#888':COL[(r-1)%COL.length],a=r*2.1,dx=3*Math.cos(a),dy=3*Math.sin(a);
+    const P=nd.map(i=>{const q=px(D.xy[i]);return [q[0]+dx,q[1]+dy]});
+    cx.strokeStyle=col;cx.globalAlpha=.35;cx.lineWidth=4;cx.beginPath();P.forEach((q,k)=>k?cx.lineTo(q[0],q[1]):cx.moveTo(q[0],q[1]));cx.stroke();cx.globalAlpha=1;
+    P.forEach((q,k)=>{
+      cx.beginPath();
+      if(!k){cx.arc(q[0],q[1],8,0,7);cx.fillStyle=col;cx.globalAlpha=.4;cx.fill();cx.globalAlpha=1;cx.lineWidth=3;cx.stroke()}
+      else{cx.arc(q[0],q[1],6.5,0,7);cx.fillStyle=cs.backgroundColor;cx.fill();cx.lineWidth=2.5;cx.stroke();
+        cx.fillStyle=col;cx.font='bold 10px system-ui';cx.textAlign='center';cx.fillText(k,q[0],q[1]+3.5)}
+    });
+  }
+  cx.lineWidth=1;
   for(const r of Object.keys(run.routes)){
     const {p,mv}=pos(r,t),c=px(p),f=run.fin[r]<=t,col=f?'#888':COL[(r-1)%COL.length];
     cx.beginPath();cx.arc(c[0],c[1],.5*sc,0,7);cx.lineWidth=2;cx.strokeStyle=col;
