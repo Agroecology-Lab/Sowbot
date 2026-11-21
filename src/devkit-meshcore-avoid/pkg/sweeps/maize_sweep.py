@@ -99,8 +99,26 @@ def spaced(g, picks, cand, clearance):
     return all(math.dist(g.xy[cand], g.xy[p]) >= clearance for p in picks)
 
 
-def scenario(topo, name, n, rng, local_radius):
-    """Return n routes (lists of node ids) with distinct, mutually clear start nodes."""
+def lengthen(g, route, legs, rng, pool):
+    """Extend route to `legs` legs in all. Each extra leg is the shortest path from where the route
+    ends to another random node of pool, so a run lasts about `legs` times as long."""
+    route = list(route)
+    for _ in range(legs - 1):
+        for _ in range(50):
+            b = rng.choice(pool)
+            sp = b != route[-1] and shortest(g, route[-1], b)
+            if sp:
+                route += sp[1:]
+                break
+    return route
+
+
+def scenario(topo, name, n, rng, local_radius, legs=1):
+    """Return n routes (lists of node ids) with distinct, mutually clear start nodes.
+
+    legs > 1 makes each route longer: the route is followed by legs - 1 more shortest paths to
+    random nodes (within local_radius of the start for "local"), so runs last about legs times as long.
+    """
     g, clr = topo.graph, topo.graph.clearance
     nodes = [n for n in sorted(g.xy) if n not in g.park]
     routes, starts = [], []
@@ -135,6 +153,14 @@ def scenario(topo, name, n, rng, local_radius):
                 break
         else:
             raise Infeasible(f"cannot place {n} robots {clr} m apart for {name}")
+    if legs > 1:
+        out = []
+        for r in routes:
+            pool = nodes
+            if name == "local":
+                pool = [m for m in nodes if math.dist(g.xy[r[0]], g.xy[m]) <= local_radius]
+            out.append(lengthen(g, r, legs, rng, pool))
+        routes = out
     rng.shuffle(routes)         # who gets the low id is random
     return routes
 
@@ -170,7 +196,7 @@ def run_one(topo, sc, n, loss, seed, a):
     return partial results; other simulation and event-loop errors propagate.
     """
     rng = random.Random(f"{sc}/{n}/{seed}")             # same routes for every loss
-    routes = scenario(topo, sc, n, rng, a.local_radius)
+    routes = scenario(topo, sc, n, rng, a.local_radius, getattr(a, "legs", 1))
     g = topo.graph
     routes = assign_docks(topo, routes)
     delays = {i: rng.uniform(0, a.stagger) for i in range(1, n + 1)} if a.stagger else None
@@ -267,6 +293,7 @@ def main():
     """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", default=default_map(), help="topological map YAML, or a JSON fixture")
+    ap.add_argument("--legs", type=int, default=1, help="legs per route: 6 makes runs about six times as long")
     ap.add_argument("--docks", action="store_true", help="keep the map's docks (default: removed)")
     ap.add_argument("--scenario", nargs="+", default=["follow", "opposed", "random", "local"],
                     choices=["follow", "opposed", "random", "local"])

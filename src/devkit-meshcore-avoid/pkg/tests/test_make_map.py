@@ -48,3 +48,16 @@ def test_drop_docks_removes_them_and_their_edges(tmp_path):
     assert len(kept.docks) == 2 and dropped.docks == []
     assert len(dropped.ids) == len(kept.ids) - 2
     assert not any(n.lower().startswith("dock") for n in dropped.ids)
+
+
+def test_legs_make_routes_longer_and_stay_on_edges(tmp_path):
+    import random
+    import maize_sweep as ms
+    from sowbot_avoid.topo import load_topo
+    p = tmp_path / "m.json"
+    make_map.main(["-o", str(p), "--rows", "4", "--length", "12"])
+    t = load_topo(str(p))
+    one = ms.scenario(t, "random", 2, random.Random("a"), 8.0, 1)
+    six = ms.scenario(t, "random", 2, random.Random("a"), 8.0, 6)
+    assert sum(map(len, six)) > 3 * sum(map(len, one))
+    assert all(b in t.graph.adj[a] for r in six for a, b in zip(r, r[1:]))

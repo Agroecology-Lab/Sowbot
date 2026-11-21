@@ -118,12 +118,17 @@ def main(argv=None):
     ap.add_argument("--loss", nargs="+", type=float, default=[0.0, 0.1, 0.2])
     ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--clearance", type=float, default=1.0)
+    ap.add_argument("--legs", type=int, default=1, help="legs per route: 6 makes runs about six times as long")
     ap.add_argument("--docks", action="store_true", help="keep the map's docks (default: removed)")
-    ap.add_argument("--timeout", type=float, default=900, help="simulated seconds before a run counts as not finished")
+    ap.add_argument("--timeout", type=float, default=None, help="simulated seconds before a run counts as not finished (default 900 per leg)")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="worker processes")
     ap.add_argument("-o", "--out", default="meshcore_avoid_sweep.html")
     a = ap.parse_args(argv)
     a.local_radius, a.stagger, a.scale, a.virtual = 8.0, 0.0, 1.0, True
+    if a.legs < 1:
+        ap.error("--legs must be at least 1")
+    if a.timeout is None:
+        a.timeout = 900.0 * a.legs
 
     jobs = [(n, loss, seed, a) for n in a.robots for loss in a.loss for seed in range(a.seeds)]
     if a.jobs > 1:
@@ -151,7 +156,7 @@ def main(argv=None):
     if not cells:
         sys.exit("no feasible runs")
     data = dict(
-        meta=dict(map=os.path.basename(a.map), scenario=a.scenario, clr=a.clearance, seeds=a.seeds, commit=commit()),
+        meta=dict(map=os.path.basename(a.map), scenario=a.scenario, legs=a.legs, clr=a.clearance, seeds=a.seeds, commit=commit()),
         n=done_n, loss=a.loss, cells=cells, logs=logs,
         xy={str(i): list(p) for i, p in g.xy.items()},
         edges=sorted([x, y] for x in g.adj for y in g.adj[x] if x < y))
