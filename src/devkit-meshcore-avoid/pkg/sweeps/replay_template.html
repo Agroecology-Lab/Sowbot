@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MeshCore avoid: sweep and replay</title>
+<style>
+:root{--bg:#fff;--fg:#1b1b1b;--mut:#666;--ln:#cfcfcf;--ok:#2e7d32;--warn:#e08a00;--bad:#c62828}
+@media(prefers-color-scheme:dark){:root{--bg:#14171a;--fg:#e8e8e8;--mut:#9aa3ab;--ln:#3b4248;--ok:#66bb6a;--warn:#ffb74d;--bad:#ef5350}}
+*{box-sizing:border-box}
+body{margin:0 auto;padding:1rem;max-width:56rem;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
+h1{font-size:1.4rem;margin:.2rem 0}h2{font-size:1.05rem;margin:1.4rem 0 .4rem}
+p,.mut{color:var(--mut);margin:.3rem 0}
+table{border-collapse:collapse}th,td{border:1px solid var(--ln);padding:.35rem .6rem;text-align:center}
+td.c{cursor:pointer;min-width:5.5rem}td.sel{outline:2px solid var(--fg);outline-offset:-2px}
+button,select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--ln);border-radius:4px;padding:.25rem .6rem;cursor:pointer}
+.seeds button{margin:0 .25rem .25rem 0;min-width:2.4rem}
+.seeds .ok{border-color:var(--ok)}.seeds .un{border-color:var(--warn)}.seeds .vi{border-color:var(--bad);color:var(--bad)}
+.seeds .on{background:var(--fg);color:var(--bg)}
+canvas{width:100%;height:auto;border:1px solid var(--ln);border-radius:4px;display:block}
+.bar{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.5rem 0}
+.bar input{flex:1;min-width:8rem}
+</style>
+</head>
+<body>
+<h1>MeshCore avoid: sweep and replay</h1>
+<p id="meta"></p>
+<p>Simulation only, never run on hardware, not a safety function. One collision domain, and a lost frame is lost for every receiver at once. No range, no tracking error.</p>
+<h2>Sweep: <select id="metric"><option value="vi">runs with a clearance violation</option><option value="un">runs that did not finish</option></select></h2>
+<div id="grid"></div>
+<h2>Seeds in the selected cell</h2>
+<div class="seeds" id="seeds"></div>
+<p class="mut">Red: two moving robots came closer than the clearance. Amber: did not finish. Green: finished and kept clear.</p>
+<h2>Replay <span id="what" class="mut"></span></h2>
+<canvas id="cv" width="960" height="520" aria-label="Replay of the selected run"></canvas>
+<div class="bar"><button id="pp">Play</button><select id="sp" aria-label="Speed"><option value="1">1×</option><option value="4" selected>4×</option><option value="10">10×</option><option value="30">30×</option></select><input id="tm" type="range" min="0" max="1000" value="0" aria-label="Time"><span id="st" class="mut"></span></div>
+<p class="mut">Each ring has radius half the clearance, so two touching rings are one clearance apart. Filled: driving. Hollow: waiting or at a side-step stop. Grey: finished. Expanding ring: frame sent. Dashed red: frame lost.</p>
+<script>
+const D=/*DATA*/null;
+const $=s=>document.querySelector(s),cv=$('#cv'),cx=cv.getContext('2d');
+const COL=['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa','#00897b','#6d4c41','#546e7a'];
+let key,seed,run,T=1,t=0,play=false,last=0,ms=Infinity,msT=0,sel;
+$('#meta').textContent=`Map ${D.meta.map}, scenario ${D.meta.scenario}, clearance ${D.meta.clr} m, ${D.meta.seeds} seeds per cell, virtual clock, code ${D.meta.commit}.`;
+const ids=Object.keys(D.xy),X=ids.map(i=>D.xy[i][0]),Y=ids.map(i=>D.xy[i][1]);
+const x0=Math.min(...X),y0=Math.min(...Y),M=40;
+const sc=Math.min((cv.width-2*M)/Math.max(Math.max(...X)-x0,1),(cv.height-2*M)/Math.max(Math.max(...Y)-y0,1));
+const px=p=>[M+(p[0]-x0)*sc,cv.height-M-(p[1]-y0)*sc];
+const bad=(r,m)=>m==='vi'?r[2]:!r[1];
+function grid(){
+  const m=$('#metric').value;
+  let h='<table><tr><th>loss \\ robots</th>'+D.n.map(n=>`<th>${n}</th>`).join('')+'</tr>';
+  for(const l of D.loss){
+    h+=`<tr><th>${l}</th>`;
+    for(const n of D.n){
+      const k=n+'|'+l,r=D.cells[k],b=r.filter(x=>bad(x,m)).length;
+      h+=`<td class="c${k===sel?' sel':''}" data-k="${k}" style="background:color-mix(in srgb,var(--bad) ${Math.round(100*b/r.length)}%,transparent)">${b}/${r.length}</td>`;
+    }
+    h+='</tr>';
+  }
+  $('#grid').innerHTML=h+'</table>';
+}
+function seeds(){
+  $('#seeds').innerHTML=D.cells[sel].map(r=>`<button class="${r[2]?'vi':r[1]?'ok':'un'}${r[0]===seed&&sel===key?' on':''}" data-s="${r[0]}" title="closest ${r[3]??'n/a'} m, ${r[4]} s, ${r[5]} frames">${r[0]}</button>`).join('');
+}
+function load(k,s){
+  key=sel=k;seed=s;run=D.logs[`${k}|${s}`];run.seg={};
+  for(const d of run.drive)(run.seg[d[0]]??=[]).push(d);
+  for(const v of Object.values(run.seg))v.sort((a,b)=>a[1]-b[1]);
+  T=Math.max(1,...run.drive.map(d=>d[2]),...Object.values(run.fin),...run.tx.map(x=>x[0]));
+  t=0;ms=Infinity;msT=0;
+  const r=D.cells[k].find(x=>x[0]===s),[n,l]=k.split('|');
+  $('#what').textContent=`${n} robots, loss ${l}, seed ${s}: ${r[1]?'all finished':'not finished'}, closest moving pair ${r[3]??'n/a'} m`;
+  grid();seeds();frame();
+}
+function pos(r,t){
+  const xy=D.xy;let p=xy[run.routes[r][0]];
+  for(const [,t0,t1,a,b] of run.seg[r]||[]){
+    if(t<t0)break;
+    const A=xy[a],B=xy[b],f=Math.min(1,(t-t0)/Math.max(t1-t0,1e-3));
+    p=[A[0]+f*(B[0]-A[0]),A[1]+f*(B[1]-A[1])];
+    if(t<t1)return {p,mv:1};
+  }
+  return {p,mv:0};
+}
+function adv(){
+  if(t<msT){ms=Infinity;msT=0}
+  while(msT+.25<=t){
+    msT+=.25;
+    const L=Object.keys(run.routes).filter(r=>!(run.fin[r]<=msT));
+    for(let i=0;i<L.length;i++)for(let j=i+1;j<L.length;j++){
+      const a=pos(L[i],msT).p,b=pos(L[j],msT).p;ms=Math.min(ms,Math.hypot(a[0]-b[0],a[1]-b[1]));
+    }
+  }
+}
+function frame(){
+  adv();
+  const cs=getComputedStyle(document.body),fg=cs.color,ln=cs.getPropertyValue('--ln');
+  cx.clearRect(0,0,cv.width,cv.height);cx.lineWidth=1;cx.strokeStyle=ln;cx.fillStyle=ln;
+  for(const [a,b] of D.edges){const p=px(D.xy[a]),q=px(D.xy[b]);cx.beginPath();cx.moveTo(p[0],p[1]);cx.lineTo(q[0],q[1]);cx.stroke()}
+  for(const i of ids){const p=px(D.xy[i]);cx.fillRect(p[0]-2,p[1]-2,4,4)}
+  let n=0,lost=0;
+  for(const [tt,r,l] of run.tx){
+    if(tt>t)break;
+    n++;lost+=l;const age=t-tt;
+    if(age<1){
+      const c=px(pos(r,tt).p);
+      cx.globalAlpha=1-age;cx.strokeStyle=l?'#ef5350':fg;cx.setLineDash(l?[4,3]:[]);
+      cx.beginPath();cx.arc(c[0],c[1],(.5+2*age)*sc,0,7);cx.stroke();
+    }
+  }
+  cx.globalAlpha=1;cx.setLineDash([]);
+  for(const r of Object.keys(run.routes)){
+    const {p,mv}=pos(r,t),c=px(p),f=run.fin[r]<=t,col=f?'#888':COL[(r-1)%COL.length];
+    cx.beginPath();cx.arc(c[0],c[1],.5*sc,0,7);cx.lineWidth=2;cx.strokeStyle=col;
+    if(mv||f){cx.fillStyle=col;cx.globalAlpha=f?.35:.8;cx.fill();cx.globalAlpha=1}
+    cx.stroke();cx.fillStyle=fg;cx.font='12px system-ui';cx.textAlign='center';cx.fillText(r,c[0],c[1]+4);
+  }
+  const ss=run.ss.filter(x=>x[0]<=t).length;
+  $('#st').textContent=`${t.toFixed(1)} s · ${n} frames · ${lost} lost · ${ss} side-steps · closest ${isFinite(ms)?ms.toFixed(2)+' m':'–'}`;
+  $('#tm').value=1000*t/T;
+}
+function tick(ts){
+  if(play){
+    t=Math.min(T,t+(ts-last)/1000*+$('#sp').value);
+    if(t>=T){play=false;$('#pp').textContent='Play'}
+    frame();
+  }
+  last=ts;requestAnimationFrame(tick);
+}
+$('#pp').onclick=()=>{if(t>=T)t=0;play=!play;$('#pp').textContent=play?'Pause':'Play'};
+$('#tm').oninput=e=>{t=T*e.target.value/1000;frame()};
+$('#metric').onchange=grid;
+$('#grid').onclick=e=>{const c=e.target.closest('td.c');if(c){sel=c.dataset.k;grid();seeds()}};
+$('#seeds').onclick=e=>{const b=e.target.closest('button');if(b)load(sel,+b.dataset.s)};
+const keys=Object.keys(D.cells),first=keys.find(k=>D.cells[k].some(r=>r[2]))||keys[0];
+load(first,(D.cells[first].find(r=>r[2])||D.cells[first][0])[0]);
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
