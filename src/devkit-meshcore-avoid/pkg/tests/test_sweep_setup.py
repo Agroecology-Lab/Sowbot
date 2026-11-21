@@ -69,3 +69,16 @@ def test_docks_are_park_nodes_outside_the_rows_and_used_once(tmp_path):
     ends = [r[-1] for r in out]
     assert sum(e in t.docks for e in ends) == 2 and len({e for e in ends if e in t.docks}) == 2
     assert all(b in t.graph.adj[a] for r in out for a, b in zip(r, r[1:]))
+
+
+def test_virtual_sweep_run_is_repeatable_and_fast():
+    """One run on the virtual clock: no wall-clock wait, identical on a second go."""
+    import time
+    from types import SimpleNamespace
+    t = load_topo(FIXTURE)
+    a = SimpleNamespace(local_radius=8.0, stagger=0.0, scale=1.0, timeout=600, virtual=True)
+    t0 = time.perf_counter()
+    r1 = ms.run_one(t, "random", 2, 0.1, 3, a)
+    r2 = ms.run_one(t, "random", 2, 0.1, 3, a)
+    assert time.perf_counter() - t0 < 10
+    assert {k: v for k, v in r1.items() if k != "wall"} == {k: v for k, v in r2.items() if k != "wall"}

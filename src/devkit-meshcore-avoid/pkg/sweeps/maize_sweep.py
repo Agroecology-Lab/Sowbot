@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Sweep the sowbot_avoid agents over the real topological map (maps/maize_map by default).
 
-Not part of the pytest run: the agents use wall-clock timing, so results depend on machine
-load. Run it on an idle machine, one job at a time.
+Not part of the pytest run. By default the agents run on the wall clock (scaled by --scale), so
+results depend on machine load: use an idle machine and one job at a time. With --virtual the run
+uses a virtual clock (sowbot_avoid.vclock): it takes a fraction of a second, is repeatable for a
+given seed, and does not depend on load.
 
   python sweeps/maize_sweep.py --seeds 10
+  python sweeps/maize_sweep.py --virtual --seeds 100
   python sweeps/maize_sweep.py --scenario opposed --robots 2 4 --loss 0 0.2 --seeds 20
   python sweeps/maize_sweep.py --map tests/data/maize_map_fixture.json --seeds 3 --jsonl out.jsonl
 
@@ -33,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 from sowbot_avoid.graph import Graph          # noqa: E402
+from sowbot_avoid import vclock               # noqa: E402
 from sowbot_avoid.sim import simulate         # noqa: E402
 from sowbot_avoid.topo import load_topo       # noqa: E402
 
@@ -171,8 +175,9 @@ def run_one(topo, sc, n, loss, seed, a):
     routes = assign_docks(topo, routes)
     delays = {i: rng.uniform(0, a.stagger) for i in range(1, n + 1)} if a.stagger else None
     t0 = time.monotonic()
-    r = asyncio.run(simulate({i: rt for i, rt in enumerate(routes, 1)}, loss, seed, a.scale, a.timeout,
-                             graph=g, delays=delays))
+    run = vclock.run if getattr(a, "virtual", False) else asyncio.run
+    r = run(simulate({i: rt for i, rt in enumerate(routes, 1)}, loss, seed, a.scale, a.timeout,
+                     graph=g, delays=delays))
     r.update(scenario=sc, n=n, loss=loss, seed=seed,
              wall=time.monotonic() - t0, hops=sum(len(x) - 1 for x in routes))
     return r
@@ -268,13 +273,18 @@ def main():
     ap.add_argument("--loss", nargs="+", type=float, default=[0.0, 0.1, 0.2])
     ap.add_argument("--seeds", type=int, default=10)
     ap.add_argument("--seed0", type=int, default=0)
-    ap.add_argument("--scale", type=float, default=0.1, help="timer scale; 0.1 runs ten times faster than real time")
+    ap.add_argument("--virtual", action="store_true",
+                    help="run on a virtual clock: fast, repeatable, independent of machine load")
+    ap.add_argument("--scale", type=float, default=None,
+                    help="timer scale; default 0.1 (ten times faster than real time), or 1.0 with --virtual")
     ap.add_argument("--timeout", type=float, default=600, help="unscaled seconds before a run counts as not finished")
     ap.add_argument("--clearance", type=float, default=1.0)
     ap.add_argument("--local-radius", type=float, default=8.0)
     ap.add_argument("--stagger", type=float, default=0.0, help="agents start up to this many unscaled seconds late")
     ap.add_argument("--jsonl", help="write one JSON line per run")
     a = ap.parse_args()
+    if a.scale is None:
+        a.scale = 1.0 if a.virtual else 0.1
     if a.clearance <= EPS:
         ap.error(f"--clearance must be greater than {EPS:g} m")
 
