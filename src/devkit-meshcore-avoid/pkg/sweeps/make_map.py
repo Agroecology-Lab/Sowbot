@@ -3,21 +3,23 @@
 
 Parallel rows with a node every --step metres (entry, waypoints, exit, named as the F2C planner does),
 driven in alternating directions. A rail of short edges joins neighbouring row ends on both headlands,
-as the planner's own maps do, and docks named dock, dock1, ... hang off the west headland, spread over
-the rows. Every node has a stored id, so robots share one table.
+as the planner's own maps do. There are no docks unless asked for: --docks N hangs N nodes named dock,
+dock1, ... off the west headland, spread over the rows, and routes then end at them. Every node has a
+stored id, so robots share one table.
 
-  python sweeps/make_map.py -o field.json                      # 16 rows of 60 m, 1.2 m apart, a node every 3 m
-  python sweeps/make_map.py --rows 30 --length 120 --docks 12 -o big.json
+  python sweeps/make_map.py -o field.json                      # 16 rows of 60 m, 1.2 m apart, a node every 3 m, no docks
+  python sweeps/make_map.py --rows 30 --length 120 -o big.json
+  python sweeps/make_map.py --docks 8 -o field_docks.json      # with 8 docks off the west headland
 """
 import argparse
 import json
 
 
-def build(rows=16, length=60.0, spacing=1.2, step=3.0, docks=8):
+def build(rows=16, length=60.0, spacing=1.2, step=3.0, docks=0):
     """Return the map as a dict in the fixture format. ValueError for a field that cannot be built."""
     k = round(length / step)
-    if k < 2 or rows < 1 or not 1 <= docks <= rows:
-        raise ValueError("need length of at least two steps, at least one row, and 1 to rows docks")
+    if k < 2 or rows < 1 or not 0 <= docks <= rows:
+        raise ValueError("need length of at least two steps, at least one row, and 0 to rows docks")
     nodes, edges, end = {}, [], {}
 
     def add(name, x, y, role, row):
@@ -50,7 +52,7 @@ def main(argv=None):
     ap.add_argument("--length", type=float, default=60.0, help="row length in metres, rounded to whole steps")
     ap.add_argument("--spacing", type=float, default=1.2, help="distance between rows in metres")
     ap.add_argument("--step", type=float, default=3.0, help="distance between nodes along a row in metres")
-    ap.add_argument("--docks", type=int, default=8)
+    ap.add_argument("--docks", type=int, default=0, help="docks off the west headland (default none)")
     ap.add_argument("-o", "--out", required=True)
     a = ap.parse_args(argv)
     with open(a.out, "w") as fh:
