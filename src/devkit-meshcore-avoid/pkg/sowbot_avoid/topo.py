@@ -136,7 +136,7 @@ def load_topo(path, clearance=1.0):
         n = entry["node"]
         p, props = n["pose"]["position"], n.get("properties") or {}
         nodes[n["name"]] = dict(xy=(float(p["x"]), float(p["y"])), role=props.get("row_role", "waypoint"),
-                                row=int(props.get("row_id", 0)), avoid_id=props.get("avoid_id"))
+                                row=int(props.get("row_id") or 0), avoid_id=props.get("avoid_id"))
         edges += [(n["name"], e["node"]) for e in n.get("edges") or []]
     return _build(nodes, edges, clearance)
 

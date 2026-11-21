@@ -74,3 +74,19 @@ def test_side_step_stops_are_row_waypoints_only():
     assert stops and all("_W" in n for n in stops)
     assert not any(n.endswith(("_IN", "_OUT")) for n in stops)
     assert t.graph.row_key(t.ids["F2C_R2_W1"]) == t.graph.row_key(t.ids["F2C_R2_OUT"]) != t.graph.row_key(t.ids["F2C_R1_IN"])
+
+
+def test_yaml_map_with_blank_row_id_loads(tmp_path):
+    """Headland and dock nodes in a real map carry row_id '' (or null): no row, not a crash."""
+    pytest.importorskip("yaml")
+
+    def node(name, x, row_id, edges=()):
+        return {"node": {"name": name, "pose": {"position": {"x": x, "y": 0.0}},
+                         "properties": {"row_id": row_id, "row_role": "waypoint"},
+                         "edges": [{"node": e} for e in edges]}}
+
+    p = tmp_path / "map.yaml"
+    p.write_text(json.dumps({"nodes": [node("a", 0.0, 1, ["b"]), node("b", 3.0, "", ["c"]),
+                                       node("c", 6.0, None)]}))     # JSON is valid YAML
+    t = load_topo(str(p))
+    assert [t.row[t.ids[n]] for n in "abc"] == [1, 0, 0]
