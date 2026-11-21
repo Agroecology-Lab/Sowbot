@@ -267,6 +267,7 @@ def main():
     """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", default=default_map(), help="topological map YAML, or a JSON fixture")
+    ap.add_argument("--docks", action="store_true", help="keep the map's docks (default: removed)")
     ap.add_argument("--scenario", nargs="+", default=["follow", "opposed", "random", "local"],
                     choices=["follow", "opposed", "random", "local"])
     ap.add_argument("--robots", nargs="+", type=int, default=[2, 4, 6])
@@ -288,7 +289,7 @@ def main():
     if a.clearance <= EPS:
         ap.error(f"--clearance must be greater than {EPS:g} m")
 
-    topo = load_topo(a.map, a.clearance)
+    topo = load_topo(a.map, a.clearance, drop_docks=not a.docks)
     xs, ys = [p[0] for p in topo.graph.xy.values()], [p[1] for p in topo.graph.xy.values()]
     print(f"map {a.map}\n  {len(topo.ids)} nodes, {len(topo.graph.xy)} with coordinates, {len(topo.rows)} rows, "
           f"{max(xs) - min(xs):.1f} x {max(ys) - min(ys):.1f} m, {topo.n_directed} directed edges "

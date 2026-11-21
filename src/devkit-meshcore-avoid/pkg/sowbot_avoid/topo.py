@@ -115,14 +115,27 @@ def _build(nodes, edges, clearance):
                    [(ids[a], ids[b]) for a, b in zero], docks, ids_stored, digest_of(ids))
 
 
-def load_topo(path, clearance=1.0):
-    """Load the YAML topological map, or a JSON fixture written by `to_fixture`."""
+def _without(nodes, edges, gone):
+    """Drop the named nodes and every edge that touches them."""
+    return ({n: v for n, v in nodes.items() if n not in gone},
+            [(a, b) for a, b in edges if a not in gone and b not in gone])
+
+
+def load_topo(path, clearance=1.0, drop_docks=False):
+    """Load the YAML topological map, or a JSON fixture written by `to_fixture`.
+
+    drop_docks removes every dock (a node named dock, dock1, ..., or marked role: dock in a YAML
+    map's meta) and its edges, so the graph is the field alone.
+    """
     if str(path).endswith(".json"):
         with open(path) as fh:
             d = json.load(fh)
         nodes = {n: dict(xy=tuple(v["xy"]), role=v["role"], row=v["row"], avoid_id=v.get("id"))
                  for n, v in d["nodes"].items()}
-        t = _build(nodes, [tuple(e) for e in d["edges"]], clearance)
+        edges = [tuple(e) for e in d["edges"]]
+        if drop_docks:
+            nodes, edges = _without(nodes, edges, {n for n in nodes if is_dock(n)})
+        t = _build(nodes, edges, clearance)
         t.n_directed, t.n_two_way = d.get("n_directed", t.n_directed), d.get("n_two_way", t.n_two_way)
         return t
     try:
@@ -131,13 +144,17 @@ def load_topo(path, clearance=1.0):
         raise TopoError("pyyaml is needed to read a YAML map: pip install pyyaml") from e
     with open(path) as fh:
         d = yaml.safe_load(fh)
-    nodes, edges = {}, []
+    nodes, edges, marked = {}, [], set()
     for entry in d["nodes"]:
         n = entry["node"]
+        if (entry.get("meta") or {}).get("role") == "dock":
+            marked.add(n["name"])
         p, props = n["pose"]["position"], n.get("properties") or {}
         nodes[n["name"]] = dict(xy=(float(p["x"]), float(p["y"])), role=props.get("row_role", "waypoint"),
                                 row=int(props.get("row_id") or 0), avoid_id=props.get("avoid_id"))
         edges += [(n["name"], e["node"]) for e in n.get("edges") or []]
+    if drop_docks:
+        nodes, edges = _without(nodes, edges, marked | {n for n in nodes if is_dock(n)})
     return _build(nodes, edges, clearance)
 
 

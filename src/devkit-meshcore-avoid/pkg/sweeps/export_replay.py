@@ -91,9 +91,9 @@ def commit():
         return "unknown"
 
 
-def _init(path, clearance):
+def _init(path, clearance, docks=False):
     global TOPO
-    TOPO = load_topo(path, clearance)
+    TOPO = load_topo(path, clearance, drop_docks=not docks)
 
 
 def _job(job):
@@ -118,6 +118,7 @@ def main(argv=None):
     ap.add_argument("--loss", nargs="+", type=float, default=[0.0, 0.1, 0.2])
     ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--clearance", type=float, default=1.0)
+    ap.add_argument("--docks", action="store_true", help="keep the map's docks (default: removed)")
     ap.add_argument("--timeout", type=float, default=900, help="simulated seconds before a run counts as not finished")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="worker processes")
     ap.add_argument("-o", "--out", default="meshcore_avoid_sweep.html")
@@ -126,9 +127,9 @@ def main(argv=None):
 
     jobs = [(n, loss, seed, a) for n in a.robots for loss in a.loss for seed in range(a.seeds)]
     if a.jobs > 1:
-        results = multiprocessing.Pool(a.jobs, _init, (a.map, a.clearance)).imap_unordered(_job, jobs)
+        results = multiprocessing.Pool(a.jobs, _init, (a.map, a.clearance, a.docks)).imap_unordered(_job, jobs)
     else:
-        _init(a.map, a.clearance)
+        _init(a.map, a.clearance, a.docks)
         results = map(_job, jobs)
     cells, logs, skipped = {}, {}, set()
     for i, (n, loss, seed, r, log) in enumerate(results, 1):
@@ -146,7 +147,7 @@ def main(argv=None):
     cells = {k: sorted(v) for k, v in cells.items() if int(k.split("|")[0]) not in skipped}
     logs = {k: v for k, v in logs.items() if int(k.split("|")[0]) not in skipped}
     done_n = [n for n in a.robots if n not in skipped]
-    g = load_topo(a.map, a.clearance).graph
+    g = load_topo(a.map, a.clearance, drop_docks=not a.docks).graph
     if not cells:
         sys.exit("no feasible runs")
     data = dict(

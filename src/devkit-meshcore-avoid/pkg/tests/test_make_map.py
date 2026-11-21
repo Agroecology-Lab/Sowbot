@@ -38,3 +38,13 @@ def test_whole_map_is_connected(tmp_path):
 def test_more_docks_than_rows_is_refused():
     with pytest.raises(ValueError):
         make_map.build(rows=2, docks=3)
+
+
+def test_drop_docks_removes_them_and_their_edges(tmp_path):
+    p = tmp_path / "m.json"
+    make_map.main(["-o", str(p), "--rows", "4", "--length", "12", "--docks", "2"])
+    from sowbot_avoid.topo import load_topo
+    kept, dropped = load_topo(str(p)), load_topo(str(p), drop_docks=True)
+    assert len(kept.docks) == 2 and dropped.docks == []
+    assert len(dropped.ids) == len(kept.ids) - 2
+    assert not any(n.lower().startswith("dock") for n in dropped.ids)
