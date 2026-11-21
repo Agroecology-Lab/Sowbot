@@ -14,6 +14,7 @@ import argparse
 import contextlib
 import json
 import math
+import multiprocessing
 import os
 import subprocess
 import sys
@@ -28,6 +29,7 @@ from sowbot_avoid import sim             # noqa: E402
 from sowbot_avoid.topo import load_topo  # noqa: E402
 
 LOG = {}
+TOPO = None
 
 
 def _now():
@@ -87,6 +89,25 @@ def commit():
         return "unknown"
 
 
+def _init(path, clearance):
+    global TOPO
+    TOPO = load_topo(path, clearance)
+
+
+def _job(job):
+    """One run, in a worker. Returns (n, loss, seed, result or None if infeasible, event log)."""
+    n, loss, seed, a = job
+    with recording():
+        LOG.clear()
+        LOG.update(routes={}, tx=[], drive=[], fin={}, ss=[])
+        try:
+            r = ms.run_one(TOPO, a.scenario, n, loss, seed, a)
+        except ms.Infeasible as e:
+            print(f"skip {n} robots: {e}", file=sys.stderr)
+            return n, loss, seed, None, None
+        return n, loss, seed, r, json.loads(json.dumps(LOG))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", default=ms.default_map())
@@ -95,35 +116,35 @@ def main(argv=None):
     ap.add_argument("--loss", nargs="+", type=float, default=[0.0, 0.1, 0.2])
     ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--clearance", type=float, default=1.0)
+    ap.add_argument("--timeout", type=float, default=900, help="simulated seconds before a run counts as not finished")
+    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="worker processes")
     ap.add_argument("-o", "--out", default="meshcore_avoid_sweep.html")
     a = ap.parse_args(argv)
-    a.local_radius, a.stagger, a.scale, a.timeout, a.virtual = 8.0, 0.0, 1.0, 600, True
+    a.local_radius, a.stagger, a.scale, a.virtual = 8.0, 0.0, 1.0, True
 
-    topo = load_topo(a.map, a.clearance)
-    g = topo.graph
-    cells, logs, done_n = {}, {}, []
-    with recording():
-        for n in a.robots:
-            for loss in a.loss:
-                for seed in range(a.seeds):
-                    LOG.clear()
-                    LOG.update(routes={}, tx=[], drive=[], fin={}, ss=[])
-                    try:
-                        r = ms.run_one(topo, a.scenario, n, loss, seed, a)
-                    except ms.Infeasible as e:
-                        print(f"skip {n} robots: {e}", file=sys.stderr)
-                        break
-                    k = f"{n}|{loss:g}"
-                    live = r["sep_live"]
-                    cells.setdefault(k, []).append([
-                        seed, bool(r["done"]), live < a.clearance - ms.EPS, None if live == math.inf else round(live, 2),
-                        round(r["secs"]), r["frames"], r["lost"], r["sidesteps"]])
-                    logs[f"{k}|{seed}"] = json.loads(json.dumps(LOG))
-                else:
-                    continue
-                break
-            else:
-                done_n.append(n)
+    jobs = [(n, loss, seed, a) for n in a.robots for loss in a.loss for seed in range(a.seeds)]
+    if a.jobs > 1:
+        results = multiprocessing.Pool(a.jobs, _init, (a.map, a.clearance)).imap_unordered(_job, jobs)
+    else:
+        _init(a.map, a.clearance)
+        results = map(_job, jobs)
+    cells, logs, skipped = {}, {}, set()
+    for i, (n, loss, seed, r, log) in enumerate(results, 1):
+        print(f"\r{i}/{len(jobs)}", end="", file=sys.stderr, flush=True)
+        if r is None:
+            skipped.add(n)
+            continue
+        k = f"{n}|{loss:g}"
+        live = r["sep_live"]
+        cells.setdefault(k, []).append([
+            seed, bool(r["done"]), live < a.clearance - ms.EPS, None if live == math.inf else round(live, 2),
+            round(r["secs"]), r["frames"], r["lost"], r["sidesteps"]])
+        logs[f"{k}|{seed}"] = log
+    print(file=sys.stderr)
+    cells = {k: sorted(v) for k, v in cells.items() if int(k.split("|")[0]) not in skipped}
+    logs = {k: v for k, v in logs.items() if int(k.split("|")[0]) not in skipped}
+    done_n = [n for n in a.robots if n not in skipped]
+    g = load_topo(a.map, a.clearance).graph
     if not cells:
         sys.exit("no feasible runs")
     data = dict(

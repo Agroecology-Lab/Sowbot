@@ -12,7 +12,7 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "data", "maize_map_fixture.jso
 def test_export_writes_a_page_with_cells_and_event_logs(tmp_path):
     out = tmp_path / "p.html"
     originals = sim.LoopBus, sim.SimDriver, sim.Agent
-    ex.main(["--map", FIXTURE, "--robots", "2", "--loss", "0", "--seeds", "2", "-o", str(out)])
+    ex.main(["--map", FIXTURE, "--robots", "2", "--loss", "0", "--seeds", "2", "--jobs", "1", "-o", str(out)])
     assert (sim.LoopBus, sim.SimDriver, sim.Agent) == originals      # recording classes are swapped back out
     html = out.read_text()
     assert "/*DATA*/" not in html
@@ -20,3 +20,11 @@ def test_export_writes_a_page_with_cells_and_event_logs(tmp_path):
     assert d["n"] == [2] and len(d["cells"]["2|0"]) == 2 and set(d["logs"]) == {"2|0|0", "2|0|1"}
     log = d["logs"]["2|0|0"]
     assert set(log["routes"]) == {"1", "2"} and log["drive"] and log["tx"]
+
+
+def test_worker_processes_give_the_same_page_data(tmp_path):
+    def data(jobs):
+        out = tmp_path / f"p{jobs}.html"
+        ex.main(["--map", FIXTURE, "--robots", "2", "--loss", "0.1", "--seeds", "3", "--jobs", str(jobs), "-o", str(out)])
+        return json.loads(out.read_text().split("const D=", 1)[1].split(";\n", 1)[0])
+    assert data(1) == data(2)

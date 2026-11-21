@@ -43,7 +43,9 @@ let key,seed,run,T=1,t=0,play=false,last=0,ms=Infinity,msT=0,sel;
 $('#meta').textContent=`Map ${D.meta.map}, scenario ${D.meta.scenario}, clearance ${D.meta.clr} m, ${D.meta.seeds} seeds per cell, virtual clock, code ${D.meta.commit}.`;
 const ids=Object.keys(D.xy),X=ids.map(i=>D.xy[i][0]),Y=ids.map(i=>D.xy[i][1]);
 const x0=Math.min(...X),y0=Math.min(...Y),M=40;
-const sc=Math.min((cv.width-2*M)/Math.max(Math.max(...X)-x0,1),(cv.height-2*M)/Math.max(Math.max(...Y)-y0,1));
+const bw=Math.max(Math.max(...X)-x0,1),bh=Math.max(Math.max(...Y)-y0,1);
+cv.height=Math.round(Math.min(720,Math.max(300,(cv.width-2*M)*bh/bw+2*M)));
+const sc=Math.min((cv.width-2*M)/bw,(cv.height-2*M)/bh);
 const px=p=>[M+(p[0]-x0)*sc,cv.height-M-(p[1]-y0)*sc];
 const bad=(r,m)=>m==='vi'?r[2]:!r[1];
 function grid(){
