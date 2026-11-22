@@ -3,6 +3,8 @@
 Robot-to-robot collision avoidance over [MeshCore](https://github.com/meshcore-dev/meshcore_py), implementing [Sowbot #202](https://github.com/Agroecology-Lab/Sowbot/issues/202).
 One agent per robot, each with its own companion radio. No central controller.
 
+[WIP SIM](https://agroecology-lab.github.io/Sowbot_Data/MeshCore%20avoid_%20sweep%20and%20replay.html)
+
 **Status: simulated only, never run on hardware.** Not a safety function: onboard obstacle detection stays in charge.
 
 # How the robots avoid each other
