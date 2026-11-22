@@ -46,10 +46,23 @@ class LogBus(sim.LoopBus):
 
 
 class LogDriver(sim.SimDriver):
+    def _frac(self, a, b):
+        """How far along edge a -> b the robot is, 0 to 1."""
+        (ax, ay), (bx, by) = self.g.xy[a], self.g.xy[b]
+        full = math.hypot(bx - ax, by - ay)
+        return 1.0 if full == 0 else min(1.0, math.hypot(self.at[0] - ax, self.at[1] - ay) / full)
+
     async def drive(self, a, b):
         t0 = _now()
-        await super().drive(a, b)
-        LOG["drive"].append([self.rid, t0, _now(), a, b])
+        try:
+            await super().drive(a, b)
+        finally:       # also when the agent cancels it part-way: the segment ends at the fraction reached
+            LOG["drive"].append([self.rid, t0, _now(), a, b, 0, round(self._frac(a, b), 4)])
+
+    async def retreat(self, a, b):
+        t0, f = _now(), self._frac(a, b)
+        await super().retreat(a, b)
+        LOG["drive"].append([self.rid, t0, _now(), a, b, round(f, 4), 0])
 
 
 class LogAgent(sim.Agent):
@@ -66,6 +79,8 @@ class LogAgent(sim.Agent):
         def wrapped(*args):
             if args and args[0] == "finished":
                 LOG["fin"][self.rid] = _now()
+            elif args and args[0] == "stopped mid-edge":
+                LOG["stop"].append([_now(), self.rid])
             elif args and str(args[0]).startswith("side-step"):
                 LOG["ss"].append([_now(), self.rid])
             fn(*args)
@@ -101,7 +116,7 @@ def _job(job):
     n, loss, seed, a = job
     with recording():
         LOG.clear()
-        LOG.update(routes={}, tx=[], drive=[], fin={}, ss=[])
+        LOG.update(routes={}, tx=[], drive=[], fin={}, ss=[], stop=[])
         try:
             r = ms.run_one(TOPO, a.scenario, n, loss, seed, a)
         except ms.Infeasible as e:
@@ -118,6 +133,7 @@ def main(argv=None):
     ap.add_argument("--loss", nargs="+", type=float, default=[0.0, 0.1, 0.2])
     ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--clearance", type=float, default=1.0)
+    ap.add_argument("--react", action="store_true", help="robots stop part-way along an edge when a frame shows a conflict")
     ap.add_argument("--legs", type=int, default=1, help="legs per route: 6 makes runs about six times as long")
     ap.add_argument("--docks", action="store_true", help="keep the map's docks (default: removed)")
     ap.add_argument("--timeout", type=float, default=None, help="simulated seconds before a run counts as not finished (default 900 per leg)")
@@ -156,7 +172,7 @@ def main(argv=None):
     if not cells:
         sys.exit("no feasible runs")
     data = dict(
-        meta=dict(map=os.path.basename(a.map), scenario=a.scenario, legs=a.legs, clr=a.clearance, seeds=a.seeds, commit=commit()),
+        meta=dict(map=os.path.basename(a.map), scenario=a.scenario, legs=a.legs, react=a.react, clr=a.clearance, seeds=a.seeds, commit=commit()),
         n=done_n, loss=a.loss, cells=cells, logs=logs,
         xy={str(i): list(p) for i, p in g.xy.items()},
         edges=sorted([x, y] for x in g.adj for y in g.adj[x] if x < y))

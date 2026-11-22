@@ -203,7 +203,7 @@ def run_one(topo, sc, n, loss, seed, a):
     t0 = time.monotonic()
     run = vclock.run if getattr(a, "virtual", False) else asyncio.run
     r = run(simulate({i: rt for i, rt in enumerate(routes, 1)}, loss, seed, a.scale, a.timeout,
-                     graph=g, delays=delays))
+                     graph=g, delays=delays, react=getattr(a, "react", False)))
     r.update(scenario=sc, n=n, loss=loss, seed=seed,
              wall=time.monotonic() - t0, hops=sum(len(x) - 1 for x in routes))
     return r
@@ -293,6 +293,7 @@ def main():
     """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", default=default_map(), help="topological map YAML, or a JSON fixture")
+    ap.add_argument("--react", action="store_true", help="robots stop part-way along an edge when a frame shows a conflict")
     ap.add_argument("--legs", type=int, default=1, help="legs per route: 6 makes runs about six times as long")
     ap.add_argument("--docks", action="store_true", help="keep the map's docks (default: removed)")
     ap.add_argument("--scenario", nargs="+", default=["follow", "opposed", "random", "local"],

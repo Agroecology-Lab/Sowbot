@@ -11,3 +11,11 @@ class Driver:
         """
         raise NotImplementedError
 
+
+    async def retreat(self, a, b):
+        """Return to a after `drive(a, b)` was cancelled part-way along the edge.
+
+        Only needed when the agent runs with react=True. The base implementation raises
+        NotImplementedError.
+        """
+        raise NotImplementedError

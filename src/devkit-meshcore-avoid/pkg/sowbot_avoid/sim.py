@@ -34,26 +34,35 @@ class World:
 class SimDriver(Driver):
     def __init__(self, world, rid, graph, speed=0.5, scale=1.0):
         self.w, self.rid, self.g, self.speed, self.k = world, rid, graph, speed, scale
+        self.at = None
 
     def place(self, node):
         """Place the robot at a graph node; a missing coordinate raises KeyError."""
-        self.w.set(self.rid, self.g.xy[node])
+        self.at = self.g.xy[node]
+        self.w.set(self.rid, self.at)
 
-    async def drive(self, a, b):
-        """Simulate travel between node coordinates, updating the world position.
-
-        Missing coordinates raise KeyError; zero speed raises ZeroDivisionError.
-        """
-        p, q = self.g.xy[a], self.g.xy[b]
+    async def _move(self, p, q):
         dur = max(math.hypot(q[0] - p[0], q[1] - p[1]) / self.speed * self.k, 1e-3)
         t0 = time.monotonic()
         while True:
             f = min(1.0, (time.monotonic() - t0) / dur)
-            self.w.set(self.rid, (p[0] + f * (q[0] - p[0]), p[1] + f * (q[1] - p[1])))
+            self.at = (p[0] + f * (q[0] - p[0]), p[1] + f * (q[1] - p[1]))
+            self.w.set(self.rid, self.at)
             if f >= 1.0:
                 return
             await asyncio.sleep(0.01)
 
+    async def drive(self, a, b):
+        """Simulate travel between node coordinates, updating the world position.
+
+        Cancelling it stops the robot where it is. Missing coordinates raise KeyError; zero speed
+        raises ZeroDivisionError.
+        """
+        await self._move(self.g.xy[a], self.g.xy[b])
+
+    async def retreat(self, a, b):
+        """Drive back from wherever a cancelled drive(a, b) stopped to node a."""
+        await self._move(self.at, self.g.xy[a])
 
 
 def grid(n=3, step=2.5):
@@ -71,7 +80,7 @@ def grid(n=3, step=2.5):
     return Graph(edges, xy, park=(d1, d2, d3))
 
 
-async def simulate(routes, loss, seed, scale=0.1, timeout=300, graph=None, delays=None):
+async def simulate(routes, loss, seed, scale=0.1, timeout=300, graph=None, delays=None, react=False):
     """Run routes keyed by robot ID on the simulated grid, or on graph when given.
 
     Every robot stands at its first node from the start. delays maps a robot ID to
@@ -85,14 +94,14 @@ async def simulate(routes, loss, seed, scale=0.1, timeout=300, graph=None, delay
     separation), sep_live (between running robots), sep_parked (involving a
     finished robot), and pair (IDs at the minimum sep, or None). Separations use
     graph coordinate units and are infinite if no pair was observed. It also
-    includes frames, lost, sidesteps, and secs (elapsed unscaled seconds).
+    includes frames, lost, sidesteps, stops (mid-edge stops, with react=True), and secs (elapsed unscaled seconds).
     """
     rng, g, world = random.Random(seed), graph or grid(), World()
     bus, agents, delays = LoopBus(rng, loss, scale), [], delays or {}
     for rid, route in routes.items():
         d = SimDriver(world, rid, g, scale=scale)
         d.place(route[0])
-        agents.append(Agent(rid, route, g, bus.radio(), d, scale, random.Random(seed * 100 + rid)))
+        agents.append(Agent(rid, route, g, bus.radio(), d, scale, random.Random(seed * 100 + rid), **({"react": True} if react else {})))
         # the agent logs "finished" once its route is done; from then on it counts as parked
         agents[-1].log = (lambda r: lambda *a: world.finished.add(r) if a and a[0] == "finished" else None)(rid)
 
@@ -107,5 +116,5 @@ async def simulate(routes, loss, seed, scale=0.1, timeout=300, graph=None, delay
         pass
     return dict(done=all(a.done for a in agents), sep=world.min_sep, sep_live=world.min_live,
                 sep_parked=world.min_parked, pair=world.pair, frames=bus.frames, lost=bus.lost,
-                sidesteps=sum(a.sidesteps for a in agents), secs=(time.monotonic() - t0) / scale)
+                sidesteps=sum(a.sidesteps for a in agents), stops=sum(getattr(a, "stops", 0) for a in agents), secs=(time.monotonic() - t0) / scale)
 

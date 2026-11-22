@@ -19,7 +19,7 @@ SIDESTEP_MAX = 10   # stop side-stepping after this many
 
 
 class Agent:
-    def __init__(self, rid, route, graph, radio, driver, scale=1.0, rng=None, log=None):
+    def __init__(self, rid, route, graph, radio, driver, scale=1.0, rng=None, log=None, react=False):
         """Configure an agent with a nonempty route of node IDs.
 
         ValueError for a robot ID outside 1-255, an empty route, a node outside
@@ -47,6 +47,9 @@ class Agent:
         self.blocked_since, self.sidesteps = None, 0
         self.hold_idx = self.hold_end = None    # route index of a side-step stop where we wait for the route to clear
         self.done = False
+        self.react, self.stops = react, 0       # react: stop part-way along an edge on a conflicting frame
+        self.moving = None                      # the edge being driven, while react is on
+        self.fresh = []                         # frames that arrived while driving
 
     # ---- receive -------------------------------------------------------------------------------
     def on_rx(self, payload):
@@ -59,6 +62,8 @@ class Agent:
             return
         self.book[f.rid] = f
         self.seen[f.rid] = time.monotonic()
+        if self.moving is not None:
+            self.fresh.append(f)
         self.wake.set()
 
     # ---- rules ---------------------------------------------------------------------------------
@@ -138,11 +143,57 @@ class Agent:
                     continue
                 await self._wait(0.1)
             self.blocked_since = None
-            await self.driver.drive(*edge)
+            if not await self._drive(edge):
+                continue                                            # stopped and back at the start node: announce again
             self.cur, self.idx = edge[1], self.idx + 1
             await asyncio.sleep(TAIL * self.k)
         self.log('finished')
         self.done = True
+
+    # ---- driving -------------------------------------------------------------------------------
+    def _met(self, edge, f):
+        """True if frame f, received while driving edge, conflicts with it.
+
+        The sender's hold counts. Its claims count unless they include the node we left: a robot
+        behind us announces the edge into that node and waits for our claim to clear.
+        """
+        if self.g.conflict(edge, f.hold()):
+            return True
+        return any(edge[0] not in c and self.g.conflict(edge, c) for c in f.claims())
+
+    async def _drive(self, edge):
+        """Drive edge. Return True on arrival.
+
+        With react on, a frame that conflicts with the edge (see _met) cancels the drive: the
+        driver is told to retreat to the node we left, and False is returned. Without react the
+        drive runs to the end, as the driver call only returns on arrival.
+        """
+        if not self.react:
+            await self.driver.drive(*edge)
+            return True
+        self.moving, self.fresh = edge, []
+        task = asyncio.ensure_future(self.driver.drive(*edge))
+        try:
+            while not task.done():
+                self.wake.clear()
+                if self.fresh and any(self._met(edge, f) for f in self.fresh):
+                    break
+                self.fresh = []
+                waiter = asyncio.ensure_future(self.wake.wait())
+                await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+                waiter.cancel()
+            else:
+                task.result()
+                return True
+        finally:
+            self.moving = None
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        self.stops += 1
+        self.log('stopped mid-edge', edge)
+        await self.driver.retreat(*edge)
+        return False
 
     # ---- deadlock ------------------------------------------------------------------------------
     def _stuck(self, blockers):
