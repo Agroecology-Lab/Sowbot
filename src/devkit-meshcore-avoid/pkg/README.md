@@ -5,6 +5,8 @@ One agent per robot, each with its own companion radio. No central controller.
 
 [WIP SIM](https://agroecology-lab.github.io/Sowbot_Data/MeshCore%20avoid_%20sweep%20and%20replay.html)
 
+[WIP SIM with in-movement stop](https://agroecology-lab.github.io/Sowbot_Data/sweep_20legs_midedge_stop.html)
+
 **Status: simulated only, never run on hardware.** Not a safety function: onboard obstacle detection stays in charge.
 
 # How the robots avoid each other
