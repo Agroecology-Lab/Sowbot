@@ -8,7 +8,7 @@ body{font:15px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--fg);mar
 h1{font-size:1.2rem;margin:0 0 .3rem}p{color:var(--mut);margin:.2rem 0 1rem}
 form{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.6rem}
 label{display:flex;flex-direction:column;font-size:.8rem;color:var(--mut)}
-input{font:inherit;padding:.3rem;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
+input,select{font:inherit;padding:.3rem;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
 fieldset{grid-column:1/-1;border:1px solid var(--line);border-radius:6px;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.6rem}
 legend{font-size:.8rem;color:var(--mut)}
 button{font:inherit;padding:.5rem 1.2rem;border:0;border-radius:4px;background:var(--acc);color:var(--bg);cursor:pointer}
@@ -31,7 +31,8 @@ iframe{width:100%;height:85vh;border:1px solid var(--line);border-radius:6px;dis
 <label>ARBITRATE<input name="ARBITRATE" type="number" value="1.5" step="0.1"></label>
 <label>TAIL<input name="TAIL" type="number" value="2" step="0.1"></label>
 <label>STUCK<input name="STUCK" type="number" value="3" step="0.1"></label>
-<label>SIDESTEP_MAX<input name="SIDESTEP_MAX" type="number" value="10" min="0"></label></fieldset>
+<label>SIDESTEP_MAX<input name="SIDESTEP_MAX" type="number" value="10" min="0"></label>
+<label>LOOKAHEAD (nodes announced ahead)<select name="LOOKAHEAD"><option value="2" selected>2 (published)</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label></fieldset>
 <div><button id="go" disabled>Loading Python…</button></div>
 </form>
 <div id="st"></div><iframe id="out"></iframe>

@@ -13,7 +13,7 @@ ARBITRATE = 1.5     # after announcing, wait for rival claims; also the age at w
 TAIL = 2.0          # keep the old node held while the robot's tail clears
 BACKOFF = (0.12, 0.48)
 LBT_MAX = 2.0       # longest listen-before-talk wait
-LOOKAHEAD = 2       # intended nodes announced beyond the current one
+LOOKAHEAD = 2       # intended nodes announced beyond the current one (1 to 5; frame.MAX_NODES allows 5)
 STUCK = 3.0         # blocked this long by higher ids only: side-step
 SIDESTEP_MAX = 10   # stop side-stepping after this many
 

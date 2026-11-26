@@ -15,8 +15,10 @@ def test_example_bytes_and_roundtrip():
     ((10,), ()),
     ((10, 11), ((10, 11),)),
     ((10, 11, 12), ((10, 11), (11, 12))),
+    ((10, 11, 12, 13), ((10, 11), (11, 12), (12, 13))),
+    ((10, 11, 12, 13, 14, 15), ((10, 11), (11, 12), (12, 13), (13, 14), (14, 15))),
 ])
-def test_one_to_three_nodes(nodes, claims):
+def test_one_to_six_nodes(nodes, claims):
     f = Frame(255, 255, nodes)
     assert len(f.encode()) == 2 + 2 * len(nodes)
     assert Frame.decode(f.encode()) == f
@@ -28,7 +30,7 @@ def test_one_to_three_nodes(nodes, claims):
     b'\x00\x00\x01\x00',                            # robot id 0
     b'\x01\x00\x01',                                # odd length
     b'\x01\x00\x01\x00\x02',                        # partial node
-    b'\x01\x00' + b'\x01\x00' * 4,                  # four nodes
+    b'\x01\x00' + b'\x01\x00' * 7,                  # seven nodes
 ])
 def test_invalid_payloads_rejected(payload):
     assert Frame.decode(payload) is None
