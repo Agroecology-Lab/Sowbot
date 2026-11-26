@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sowbot-avoid simulator</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--line:#ccc;--acc:#2a6f3a}
+@media(prefers-color-scheme:dark){:root{--bg:#161616;--fg:#e8e8e8;--mut:#999;--line:#444;--acc:#6cc27c}}
+body{font:15px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:1rem;max-width:1100px;margin-inline:auto}
+h1{font-size:1.2rem;margin:0 0 .3rem}p{color:var(--mut);margin:.2rem 0 1rem}
+form{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.6rem}
+label{display:flex;flex-direction:column;font-size:.8rem;color:var(--mut)}
+input{font:inherit;padding:.3rem;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
+fieldset{grid-column:1/-1;border:1px solid var(--line);border-radius:6px;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.6rem}
+legend{font-size:.8rem;color:var(--mut)}
+button{font:inherit;padding:.5rem 1.2rem;border:0;border-radius:4px;background:var(--acc);color:var(--bg);cursor:pointer}
+button:disabled{opacity:.5}#st{margin:.6rem 0;color:var(--mut)}
+iframe{width:100%;height:85vh;border:1px solid var(--line);border-radius:6px;display:none}
+</style></head><body>
+<h1>sowbot-avoid simulator</h1>
+<p>Runs the unmodified Python package in your browser. Simulation only: not a safety function, never run on hardware.</p>
+<form id="f">
+<label>Robots<input name="n" type="number" value="4" min="2" max="8"></label>
+<label>Frame loss (%)<input name="loss" type="number" value="10" min="0" max="100" step="1"></label>
+<label>Legs per route<input name="legs" type="number" value="1" min="1" max="20"></label>
+<label>Seeds (0 to N-1)<input name="seeds" type="number" value="5" min="1" max="50"></label>
+<label>Clearance (m)<input name="clearance" type="number" value="1" min="0.1" step="0.1"></label>
+<label>Timeout (s per run)<input name="timeout" type="number" value="900" min="60"></label>
+<label>Map rows<input name="rows" type="number" value="16" min="2" max="40"></label>
+<label>Row length (m)<input name="length" type="number" value="60" min="6" step="3"></label>
+<label style="flex-direction:row;gap:.4rem;align-items:center"><input name="react" type="checkbox"> Mid-edge stop</label>
+<fieldset><legend>Protocol constants (s, count)</legend>
+<label>ARBITRATE<input name="ARBITRATE" type="number" value="1.5" step="0.1"></label>
+<label>TAIL<input name="TAIL" type="number" value="2" step="0.1"></label>
+<label>STUCK<input name="STUCK" type="number" value="3" step="0.1"></label>
+<label>SIDESTEP_MAX<input name="SIDESTEP_MAX" type="number" value="10" min="0"></label></fieldset>
+<div><button id="go" disabled>Loading Python…</button></div>
+</form>
+<div id="st"></div><iframe id="out"></iframe>
+<script>
+const w = new Worker("worker.js"), go = document.getElementById("go"), st = document.getElementById("st"), out = document.getElementById("out");
+w.onmessage = e => {
+  const m = e.data;
+  if (m.type === "ready") { go.disabled = false; go.textContent = "Run"; }
+  else if (m.type === "progress") st.textContent = `Seed ${m.i} of ${m.n}`;
+  else if (m.type === "done") { out.srcdoc = m.html; out.style.display = "block"; st.textContent = "Done."; go.disabled = false; }
+  else if (m.type === "error") { st.textContent = "Error: " + m.msg; go.disabled = false; }
+};
+document.getElementById("f").onsubmit = e => {
+  e.preventDefault();
+  const f = new FormData(e.target), p = {react: !!f.get("react")};
+  for (const [k, v] of f) if (k !== "react") p[k] = Number(v);
+  p.loss /= 100; go.disabled = true; st.textContent = "Running…";
+  w.postMessage(p);
+};
+</script></body></html>

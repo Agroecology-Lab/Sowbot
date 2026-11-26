@@ -24,6 +24,7 @@ Welcome to the documentation for the **Feldfreund DevKit ROS (Sowbot)** platform
    :caption: Research & Notes
 
    research/Sim
+   research/avoid-sim
    research/Visual_roadmap
    research/fields2coverVsSlicr
    research/Paper_Proposal:_Terramechanics-Informed_State_Estimation_for_Tracked_Autonomous_Rovers
