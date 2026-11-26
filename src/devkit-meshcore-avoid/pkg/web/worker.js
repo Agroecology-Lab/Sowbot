@@ -20,7 +20,7 @@ onmessage = async e => {
     if (!e.data) return;
     py.globals.set("P", py.toPy(e.data));
     py.globals.set("PROG", (i, n) => postMessage({type: "progress", i, n}));
-    const html = py.runPython("import web_run\nweb_run.run(P.to_py(), PROG)");
+    const html = py.runPython("import web_run\nweb_run.run(P, PROG)");
     postMessage({type: "done", html});
   } catch (err) { postMessage({type: "error", msg: String(err)}); }
 };
