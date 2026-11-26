@@ -29,7 +29,7 @@ from sowbot_avoid.topo import load_topo  # noqa: E402
 
 
 def run(p, progress=lambda i, n: None):
-    for k in ("ARBITRATE", "TAIL", "STUCK", "SIDESTEP_MAX"):
+    for k in ("ARBITRATE", "TAIL", "STUCK", "SIDESTEP_MAX", "LOOKAHEAD"):
         setattr(agent, k, p[k])
     with open("/tmp/map.json", "w") as fh:
         json.dump(build(p["rows"], p["length"]), fh)
@@ -49,7 +49,7 @@ def run(p, progress=lambda i, n: None):
         progress(seed + 1, a.seeds)
     g = load_topo("/tmp/map.json", a.clearance, drop_docks=True).graph
     data = dict(meta=dict(map="generated", scenario="random", legs=a.legs, react=a.react, clr=a.clearance,
-                          seeds=a.seeds, commit="web"),
+                          seeds=a.seeds, lookahead=p["LOOKAHEAD"], commit="web"),
                 n=[p["n"]], loss=[p["loss"]], cells={k: cells}, logs=logs,
                 xy={str(i): list(q) for i, q in g.xy.items()},
                 edges=sorted([x, y] for x in g.adj for y in g.adj[x] if x < y))

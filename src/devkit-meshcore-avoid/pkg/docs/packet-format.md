@@ -30,15 +30,18 @@ There is one kind of frame. It says where the sender stands and where it will dr
 |---|---|---|
 | 0 | 1 | robot id, 1-255 (0 is rejected) |
 | 1 | 1 | seq. +1 on every frame, wraps at 256 |
-| 2 | 2 each, 1-3 | node path, u16 LE |
+| 2 | 2 each, 1-6 | node path, u16 LE |
 
 - Node 0 of the path is the node the sender stands on: its hold.
-- Nodes 1 and 2, if present, are its next two route nodes: its claims, the edges P0→P1 and P1→P2.
+- Nodes 1 and up, if present, are its next route nodes: its claims, the edges P0→P1, P1→P2 and so on. The agent sends two by default (`agent.LOOKAHEAD`); up to five are accepted.
 - Node ids are 0-65535. Every robot must use the same node id table (`avoid_id` in the map, or ids assigned by sorted name; see `topo.py`).
-- The decoder rejects robot id 0 and any payload that is not 1 to 3 whole nodes.
+- The decoder rejects robot id 0 and any payload that is not 1 to 6 whole nodes.
 
 | Frame | Bytes | On air |
 |---|---|---|
+| 5 claims, 6 nodes | 2 + 12 = 14 | 37 B (two blocks) |
+| 4 claims, 5 nodes | 2 + 10 = 12 | 21 B |
+| 3 claims, 4 nodes | 2 + 8 = 10 | 21 B |
 | 2 claims, 3 nodes | 2 + 6 = 8 | 21 B |
 | 1 claim, 2 nodes | 2 + 4 = 6 | 21 B |
 | no claims, 1 node | 2 + 2 = 4 | 21 B |

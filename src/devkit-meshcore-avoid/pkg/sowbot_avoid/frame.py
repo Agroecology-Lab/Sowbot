@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 DATA_TYPE = 0xFFFF
-MAX_NODES = 3       # the node we stand on, then two intended nodes
+MAX_NODES = 6       # the node we stand on, then up to five intended nodes (the agent sends 2 by default)
 
 
 @dataclass(frozen=True)

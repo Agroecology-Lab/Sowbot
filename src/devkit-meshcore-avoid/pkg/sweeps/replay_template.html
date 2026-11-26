@@ -40,7 +40,7 @@ const D=/*DATA*/null;
 const $=s=>document.querySelector(s),cv=$('#cv'),cx=cv.getContext('2d');
 const COL=['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa','#00897b','#6d4c41','#546e7a'];
 let key,seed,run,T=1,t=0,play=false,last=0,ms=Infinity,msT=0,sel;
-$('#meta').textContent=`Map ${D.meta.map}, scenario ${D.meta.scenario}, ${D.meta.legs||1} leg${(D.meta.legs||1)>1?"s":""} per route, ${D.meta.react?"mid-edge stop on":"no mid-edge stop"}, clearance ${D.meta.clr} m, ${D.meta.seeds} seeds per cell, virtual clock, code ${D.meta.commit}.`;
+$('#meta').textContent=`Map ${D.meta.map}, scenario ${D.meta.scenario}, ${D.meta.legs||1} leg${(D.meta.legs||1)>1?"s":""} per route, ${D.meta.react?"mid-edge stop on":"no mid-edge stop"}, clearance ${D.meta.clr} m, ${D.meta.lookahead||2} nodes announced ahead, ${D.meta.seeds} seeds per cell, virtual clock, code ${D.meta.commit}.`;
 const ids=Object.keys(D.xy),X=ids.map(i=>D.xy[i][0]),Y=ids.map(i=>D.xy[i][1]);
 const x0=Math.min(...X),y0=Math.min(...Y),M=40;
 const bw=Math.max(Math.max(...X)-x0,1),bh=Math.max(Math.max(...Y)-y0,1);
