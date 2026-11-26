@@ -5,6 +5,8 @@ One agent per robot, each with its own companion radio. No central controller.
 
 [WIP SIM](https://agroecology-lab.github.io/Sowbot_Data/avoid-sim/)
 
+[WIP paper: Decentralised Node-Claim Collision Avoidance for Row-Crop Robots over a LoRa Mesh: Simulation Results under Frame Loss](https://github.com/Agroecology-Lab/Sowbot_Station/blob/main/papers/Decentralised%20node-claim%20collision%20avoidance%20for%20agricultural%20robots%20over%20a%20LoRa%20mesh.md) currently in private repo, ask for access.
+
 
 **Status: simulated only, never run on hardware.** Not a safety function: onboard obstacle detection stays in charge.
 
