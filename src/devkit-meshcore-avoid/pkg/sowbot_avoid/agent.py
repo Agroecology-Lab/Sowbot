@@ -14,6 +14,7 @@ TAIL = 2.0          # keep the old node held while the robot's tail clears
 BACKOFF = (0.12, 0.48)
 LBT_MAX = 2.0       # longest listen-before-talk wait
 LOOKAHEAD = 2       # intended nodes announced beyond the current one (1 to 5; frame.MAX_NODES allows 5)
+BOOT_JITTER = 1.0   # robots start after a random delay up to this many seconds (1.0 is the published behaviour)
 STUCK = 3.0         # blocked this long by higher ids only: side-step
 SIDESTEP_MAX = 10   # stop side-stepping after this many
 
@@ -121,7 +122,7 @@ class Agent:
         At the side-step stop it waits until the route onward is announced clear.
         """
         self.radio.set_handler(self.on_rx)
-        await asyncio.sleep(self.rng.uniform(0, 1.0) * self.k)      # boot jitter
+        await asyncio.sleep(self.rng.uniform(0, BOOT_JITTER) * self.k)      # boot jitter
         while True:
             await self._announce()                                  # the whole protocol: one frame per node
             if self.idx >= len(self.route) - 1:
